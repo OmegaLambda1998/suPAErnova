@@ -703,12 +703,16 @@ class TFPAEModel(ks.Model):
             return None
         training = False if training is None else training
 
-        latents = tf.convert_to_tensor(x)
-        input_amp = tf.convert_to_tensor(y)
-        output_amp = tf.convert_to_tensor(y_pred)
-        input_d_amp = tf.convert_to_tensor(sample_weight)
+        latents = tf.convert_to_tensor(x, dtype=tf.float32)
+        input_amp = tf.convert_to_tensor(y, dtype=tf.float32)
+        output_amp = tf.convert_to_tensor(y_pred, dtype=tf.float32)
+        input_d_amp = tf.convert_to_tensor(sample_weight, dtype=tf.float32)
         input_mask = tf.cast(
-            (mask if mask is not None else tf.ones_like(input_amp, dtype=tf.int32)),
+            (
+                tf.convert_to_tensor(mask, dtype=tf.int32)
+                if mask is not None
+                else tf.ones_like(input_amp, dtype=tf.int32)
+            ),
             tf.float32,
         )
         latents_mask = tf.reduce_max(
@@ -1005,6 +1009,9 @@ class TFPAEModel(ks.Model):
                 self.log.debug(f"{var.name}: {var.shape}")
             self.summary(print_fn=self.log.debug)  # Will show number of parameters
             self.built = True
+
+    def get_loss(self, loss: str):
+        return self._loss_terms.get(loss, tf.constant(0, dtype=tf.float32))
 
     def save_checkpoint(self, savepath: "Path") -> None:
         # Normalise mean of physical latents to 0 across all batches

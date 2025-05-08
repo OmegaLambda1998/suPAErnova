@@ -6,33 +6,59 @@ from suPAErnova.configs.steps.pae import PAEStepResult
 pytestmark = pytest.mark.pae
 
 KEYS = list(PAEStepResult.model_fields.keys())
+STAGES = ["1", "4", "5", "6"]
 
 
 @pytest.mark.setup("snpae")
-def test_snpae_pae_setup(snpae_pae: "PAEStepResult") -> None:
+def test_snpae_pae_setup(snpae_pae: "dict[str, PAEStepResult]") -> None:
     pass
 
 
 @pytest.mark.setup("legacy_snpae")
-def test_legacy_pae_setup(legacy_pae: "PAEStepResult") -> None:
+def test_legacy_pae_setup(legacy_pae: "dict[str, PAEStepResult]") -> None:
     pass
 
 
+@pytest.mark.parametrize("stage", STAGES)
+def test_snpae_stages(
+    stage: str,
+    snpae_pae: "dict[str, PAEStepResult]",
+) -> None:
+    assert stage in snpae_pae
+
+
+@pytest.mark.parametrize("stage", STAGES)
+def test_legacy_stages(
+    stage: str,
+    legacy_pae: "dict[str, PAEStepResult]",
+) -> None:
+    assert stage in legacy_pae
+
+
+@pytest.mark.parametrize("stage", STAGES)
 @pytest.mark.parametrize("key", KEYS)
 def test_shapes(
-    key: str, snpae_pae: "PAEStepResult", legacy_pae: "PAEStepResult"
+    stage: str,
+    key: str,
+    snpae_pae: "dict[str, PAEStepResult]",
+    legacy_pae: "dict[str, PAEStepResult]",
 ) -> None:
-    snpae_shape = getattr(snpae_pae, key).shape
-    legacy_shape = getattr(legacy_pae, key).shape
-    assert snpae_shape == legacy_shape
+    snpae_vals = np.array(getattr(snpae_pae[stage], key))
+    legacy_vals = np.array(getattr(legacy_pae[stage], key))
+
+    assert snpae_vals.shape == legacy_vals.shape
 
 
+@pytest.mark.parametrize("stage", STAGES)
 @pytest.mark.parametrize("key", KEYS)
 def test_matching_values(
-    key: str, snpae_pae: "PAEStepResult", legacy_pae: "PAEStepResult"
+    stage: str,
+    key: str,
+    snpae_pae: "dict[str, PAEStepResult]",
+    legacy_pae: "dict[str, PAEStepResult]",
 ) -> None:
-    snpae_vals = getattr(snpae_pae, key)
-    legacy_vals = getattr(legacy_pae, key)
+    snpae_vals = np.array(getattr(snpae_pae[stage], key))
+    legacy_vals = np.array(getattr(legacy_pae[stage], key))
 
     compare = (
         np.allclose

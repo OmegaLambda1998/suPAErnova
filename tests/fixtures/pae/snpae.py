@@ -77,10 +77,10 @@ def snpae_pae_step_factory(
 @pytest.fixture(scope="session")
 def snpae_pae_result_factory(
     snpae_pae_step_factory: "Callable[[dict[str, Any], dict[str, Any]], PAE]",
-) -> "Callable[[dict[str, Any], dict[str, Any]], list[PAEStepResult]]":
+) -> "Callable[[dict[str, Any], dict[str, Any]], dict[str, PAEStepResult]]":
     def _snpae_pae_result(
         data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
-    ) -> "list[PAEStepResult]":
-        return snpae_pae_step_factory(data_params, pae_params).results
+    ) -> "dict[str, PAEStepResult]":
+        return snpae_pae_step_factory(data_params, pae_params).models[0].results
 
     return _snpae_pae_result

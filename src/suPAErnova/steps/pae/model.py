@@ -42,6 +42,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.log: Logger
         self.force: bool
         self.verbose: bool
+        self.model: PAEModel
         super().__init__(config)
 
         # --- Config Variables ---
@@ -89,7 +90,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.stage_final: PAEStage
         self.run_stages: list[PAEStage]
 
-        self.results: list[PAEStepResult]
+        self.results: dict[str, PAEStepResult]
 
     @override
     def _setup(
@@ -298,27 +299,54 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.model.save_checkpoint(final_savepath)
 
         self.log.debug("Calculating PAE results")
-        model_results: list[PAEStepResult] = []
+        data = self.data.data
+        model_results: dict[str, PAEStepResult] = {}
         for stage in self.run_stages:
+            self._model(force=True)
+            savepath = self.paths.out / self.model.name / f"{stage.stage}_{stage.fname}"
+            self.model.stage = stage
+            self.model.load_checkpoint(savepath, reset_weights=False)
+
+            input_phase = data.phase
+            input_amplitude = data.amplitude
+            input_d_amplitude = data.sigma
+            input_mask = data.mask
+
+            latents, output_amplitude = self.model(
+                (input_phase, input_amplitude), training=False, mask=input_mask
+            )
+
+            loss = self.model.compute_loss(
+                latents,
+                input_amplitude,
+                output_amplitude,
+                sample_weight=input_d_amplitude,
+                training=False,
+                mask=input_mask,
+            )
+
+            pred_loss = self.model.get_loss("loss_pred")
+            model_loss = self.model.get_loss("loss_model")
+            resid_loss = self.model.get_loss("loss_resid")
+            delta_loss = self.model.get_loss("loss_delta")
+            cov_loss = self.model.get_loss("loss_cov")
+
             results = {
                 "stage": stage.stage,
-                "ind": None,
-                "sn_name": None,
-                "spectra_id": None,
-                "latents": None,
-                "input_amp": None,
-                "input_d_amp": None,
-                "input_mask": None,
-                "latents_mask": None,
-                "output_amp": None,
-                "pred_loss": None,
-                "model_loss": None,
-                "resid_loss": None,
-                "delta_loss": None,
-                "cov_loss": None,
+                "ind": data.ind,
+                "sn_name": data.sn_name,
+                "spectra_id": data.spectra_id,
+                "latents": latents.numpy(),
+                "output_amp": output_amplitude.numpy(),
+                "loss": loss,
+                "pred_loss": pred_loss,
+                "model_loss": model_loss,
+                "resid_loss": resid_loss,
+                "delta_loss": delta_loss,
+                "cov_loss": cov_loss,
             }
             stage_results = PAEStepResult.model_validate(results)
-            model_results.append(stage_results)
+            model_results[str(stage.stage)] = stage_results
         self.results = model_results
 
     @override

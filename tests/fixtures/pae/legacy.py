@@ -19,7 +19,20 @@ if TYPE_CHECKING:
 def legacy_pae_step(
     pae_params: dict[str, "Any"],
     data: "DataStepResult",
-) -> list[dict[str, "Any"]]:
+) -> dict[str, dict[str, "Any"]]:
+    # Used cached result if it exists.
+    savepath = (
+        pae_params["cache_path"]
+        / pae_params["fname"]
+        / "pae"
+        / "legacy"
+        / "pae_step.npz"
+    )
+    savepath.parent.mkdir(parents=True, exist_ok=True)
+    if savepath.exists():
+        with np.load(savepath, allow_pickle=True) as io:
+            return {k: v.item() for k, v in io.items()}
+
     # Import here to avoid dependency conflicts
     from supaernova_legacy.models.losses import compute_loss_ae
     from supaernova_legacy.scripts.train_ae import train_ae
@@ -129,7 +142,7 @@ def legacy_pae_step(
 
     args = [f"--yaml_config={yaml_config}", "--config=pae"]
     results = train_ae(args)
-    pae_step_results = []
+    pae_step_results = {}
     for stage, (model, _params) in results.items():
         pae_step = {}
         pae_step["stage"] = stage
@@ -161,8 +174,11 @@ def legacy_pae_step(
         pae_step["cov_loss"] = cov_loss
         pae_step["model_loss"] = model_loss
 
-        pae_step_results.append(pae_step)
-    return pae_step_results
+        pae_step_results[str(pae_step["stage"])] = pae_step
+
+    np.savez_compressed(savepath, **pae_step_results)
+    with np.load(savepath, allow_pickle=True) as io:
+        return {k: v.item() for k, v in io.items()}
 
 
 @pytest.fixture(scope="session")
@@ -172,10 +188,10 @@ def legacy_pae_step_factory(
     cache_path: "Path",
     tmp_path_factory: "TempPathFactory",
     legacy_data_step_factory: "Callable[[dict[str, Any]], dict[str, Any]]",
-) -> "Callable[[dict[str, Any], dict[str, Any]], list[dict[str, Any]]]":
+) -> "Callable[[dict[str, Any], dict[str, Any]], dict[str, dict[str, Any]]]":
     def _legacy_pae_step(
         data_params: "dict[str, Any]", pae_params: "dict[str, Any]"
-    ) -> "list[dict[str, Any]]":
+    ) -> "dict[str, dict[str, Any]]":
         pae_params["data_path"] = data_path
         pae_params["root_path"] = root_path
         pae_params["cache_path"] = cache_path
@@ -189,14 +205,15 @@ def legacy_pae_step_factory(
 
 @pytest.fixture(scope="session")
 def legacy_pae_result_factory(
-    legacy_pae_step_factory: "Callable[[dict[str, Any], dict[str, Any]], list[dict[str, Any]]]",
-) -> "Callable[[dict[str, Any], dict[str, Any]], list[PAEStepResult]]":
+    legacy_pae_step_factory: "Callable[[dict[str, Any], dict[str, Any]], dict[str, dict[str, Any]]]",
+) -> "Callable[[dict[str, Any], dict[str, Any]], dict[str, PAEStepResult]]":
     def _legacy_pae_result(
         data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
-    ) -> "list[PAEStepResult]":
-        return [
-            PAEStepResult.model_validate(pae_step)
-            for pae_step in legacy_pae_step_factory(data_params, pae_params)
-        ]
+    ) -> "dict[str, PAEStepResult]":
+        pae_step_results = legacy_pae_step_factory(data_params, pae_params)
+        return {
+            stage: PAEStepResult.model_validate(pae_step)
+            for stage, pae_step in pae_step_results.items()
+        }
 
     return _legacy_pae_result
