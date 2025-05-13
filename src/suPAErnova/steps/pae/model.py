@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
     from suPAErnova.configs.steps.data import DataStepResult
-    from suPAErnova.configs.steps.steps import AbstractStepResult
     from suPAErnova.configs.steps.pae.model import PAEModelConfig
 
     from .tf import TFPAEModel
@@ -301,6 +300,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.log.debug("Calculating PAE results")
         data = self.data.data
         model_results: dict[str, PAEStepResult] = {}
+
         for stage in self.run_stages:
             self._model(force=True)
             savepath = self.paths.out / self.model.name / f"{stage.stage}_{stage.fname}"
@@ -336,7 +336,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                 "ind": data.ind,
                 "sn_name": data.sn_name,
                 "spectra_id": data.spectra_id,
-                "latents": latents.numpy(),
+                "latents": latents.numpy()[:, 0, :],
                 "output_amp": output_amplitude.numpy(),
                 "loss": loss,
                 "pred_loss": pred_loss,

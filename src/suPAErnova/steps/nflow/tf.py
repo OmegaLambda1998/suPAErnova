@@ -25,9 +25,9 @@ if TYPE_CHECKING:
 
     from .model import NFlowModelStep
 
-    # === Custom Types
-    NFlowInputs = FTensor[S["batch_dim n_flow_latents"]]
-    NFlowOutputs = FTensor[S["batch_dim"]]
+    # === Custom Types ===
+    type NFlowInputs = FTensor[S["batch_dim n_flow_latents"]]
+    type NFlowOutputs = FTensor[S["batch_dim"]]
 
 
 @keras.saving.register_keras_serializable("SuPAErnova")
@@ -188,7 +188,7 @@ class TFNFlowModel(ks.Model):
         )
 
     def get_data(
-        self, latents: "FTensor[S['batch_dim nspec_dim n_flow_latents']]"
+        self, latents: "FTensor[S['batch_dim nspec_dim pae_latents']]"
     ) -> "FTensor[S['batch_dim nspec_dim n_flow_latents']]":
         if self.physical_latents:
             data = latents[:, :, : self.pae.n_zs + 1]

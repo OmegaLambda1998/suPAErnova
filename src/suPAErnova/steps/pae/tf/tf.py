@@ -9,6 +9,7 @@ import keras
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras as ks
+from tqdm.keras import TqdmCallback
 import tensorflow_probability as tfp
 
 if TYPE_CHECKING:
@@ -248,7 +249,6 @@ class TFPAEEncoder(ks.layers.Layer):
         self.repeat_latent_layer = TypedLayer(ks.layers.RepeatVector(nspec_dim))
 
     @override
-    @tf.function
     def call(
         self,
         inputs: "EncoderInputs",
@@ -302,25 +302,25 @@ class TFPAEEncoder(ks.layers.Layer):
         if TYPE_CHECKING:
             latents = cast("FTensor[S['batch_dim n_pae_latents']]", latents)
 
-        if training:
-            # Mask latents which aren't being trained
-            # The latents are ordered by training stage
-            # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅
-            # Note that this differs from the order used in the legacy SuPAErnova code:
-            # Δ𝓅 -> Δℳ  -> ΔAᵥ -> zs
-            masked_latents = tf.zeros(self.n_pae_latents - self.stage_num)
-            if TYPE_CHECKING:
-                masked_latents = cast(
-                    "FTensor[S['n_pae_latents-stage_num']]", masked_latents
-                )
-            unmasked_latents = tf.ones(self.stage_num)
-            if TYPE_CHECKING:
-                unmasked_latents = cast("FTensor[S['stage_num']]", unmasked_latents)
-            latent_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
-            if TYPE_CHECKING:
-                latent_mask = cast("FTensor[S['n_pae_latents']]", latent_mask)
-            latents *= latent_mask
+        # Mask latents which aren't being trained
+        # The latents are ordered by training stage
+        # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅
+        # Note that this differs from the order used in the legacy SuPAErnova code:
+        # Δ𝓅 -> Δℳ  -> ΔAᵥ -> zs
+        masked_latents = tf.zeros(self.n_pae_latents - self.stage_num)
+        if TYPE_CHECKING:
+            masked_latents = cast(
+                "FTensor[S['n_pae_latents-stage_num']]", masked_latents
+            )
+        unmasked_latents = tf.ones(self.stage_num)
+        if TYPE_CHECKING:
+            unmasked_latents = cast("FTensor[S['stage_num']]", unmasked_latents)
+        latent_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
+        if TYPE_CHECKING:
+            latent_mask = cast("FTensor[S['n_pae_latents']]", latent_mask)
+        latents *= latent_mask
 
+        if training:
             # Normalise the physical latents within this batch such that they have a mean of 0
             latents_sum = tf.reduce_sum(latents, axis=0, keepdims=True)
             latents_num = tf.reduce_sum(tf.ones_like(latents), axis=0, keepdims=True)
@@ -935,6 +935,22 @@ class TFPAEModel(ks.Model):
         # Terminate training when a NaN loss is encountered
         callbacks.append(ks.callbacks.TerminateOnNaN())
 
+        # --- TQDM Progress Bar ---
+        callbacks.append(
+            cast(
+                "ks.callbacks.Callback",
+                cast(
+                    "object",
+                    TqdmCallback(
+                        epochs=self.stage.epochs,
+                        data_size=self.stage.train_data.amplitude.shape[0],
+                        batch_size=self.batch_size,
+                        verbose=0,
+                    ),
+                ),
+            )
+        )
+
         if stage.loadpath is not None:
             self.load_checkpoint(stage.loadpath)
         else:
@@ -950,6 +966,25 @@ class TFPAEModel(ks.Model):
         )
         prep = self.prep_data(data)
 
+        test_data = (
+            self.stage.test_data.phase,
+            self.stage.test_data.dphase,
+            self.stage.test_data.amplitude,
+            self.stage.test_data.sigma,
+            self.stage.test_data.mask,
+        )
+
+        val_data = (
+            self.stage.val_data.phase,
+            self.stage.val_data.dphase,
+            self.stage.val_data.amplitude,
+            self.stage.val_data.sigma,
+            self.stage.val_data.mask,
+        )
+
+        # TODO: Validation Epoch Callback
+        # TODO: Test Callback
+
         # === Train ===
         self._epoch = 0
         self.fit(
@@ -959,7 +994,7 @@ class TFPAEModel(ks.Model):
             epochs=self.stage.epochs,
             batch_size=self.batch_size,
             callbacks=callbacks,
-            # verbose=0,
+            verbose=0,
         )
 
     def build_model(self) -> None:

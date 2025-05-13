@@ -1,12 +1,21 @@
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 
 from suPAErnova.configs.steps.pae import PAEStepResult
 
+if TYPE_CHECKING:
+    from tensorflow.keras import Model
+    from tensorflow.keras.layers import Layer
+
+    from tests.tests.paper_parity.conftest import PaperParityUtils
+
 pytestmark = pytest.mark.pae
 
 KEYS = list(PAEStepResult.model_fields.keys())
 STAGES = ["1", "4", "5", "6"]
+SEEDS = ["12345", "23456", "34567", "45678", "56789"]
 
 
 @pytest.mark.setup("snpae")
@@ -45,7 +54,6 @@ def test_shapes(
 ) -> None:
     snpae_vals = np.array(getattr(snpae_pae[stage], key))
     legacy_vals = np.array(getattr(legacy_pae[stage], key))
-
     assert snpae_vals.shape == legacy_vals.shape
 
 
@@ -56,14 +64,8 @@ def test_matching_values(
     key: str,
     snpae_pae: "dict[str, PAEStepResult]",
     legacy_pae: "dict[str, PAEStepResult]",
+    utils: "PaperParityUtils",
 ) -> None:
     snpae_vals = np.array(getattr(snpae_pae[stage], key))
     legacy_vals = np.array(getattr(legacy_pae[stage], key))
-
-    compare = (
-        np.allclose
-        if np.issubdtype(snpae_vals.dtype, np.number)
-        and np.issubdtype(legacy_vals.dtype, np.number)
-        else np.array_equal
-    )
-    assert compare(snpae_vals, legacy_vals)
+    utils.assert_arrays(snpae_vals, legacy_vals)

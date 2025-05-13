@@ -4,6 +4,9 @@ from typing import Any, ClassVar
 import importlib
 from collections.abc import Callable
 
+import numpy as np
+from numpy import typing as npt
+
 from suPAErnova.steps.pae import PAEStep
 from suPAErnova.configs.steps.pae import PAEStepConfig
 from suPAErnova.configs.steps.model import AbstractModelStepConfig
@@ -13,7 +16,19 @@ from .model import NFlowModelConfig
 
 
 class NFlowStepResult(AbstractStepResult):
-    name: str
+    ind: "npt.NDArray[np.int32]"
+    sn_name: "npt.NDArray[np.str_]"
+    spectra_id: "npt.NDArray[np.str_]"
+
+    latents: "npt.NDArray[np.float32]"
+    output_amp: "npt.NDArray[np.float32]"
+
+    loss: float
+    pred_loss: float
+    model_loss: float
+    resid_loss: float
+    delta_loss: float
+    cov_loss: float
 
 
 class NFlowStepConfig[Backend: str](AbstractModelStepConfig[Backend, NFlowModelConfig]):

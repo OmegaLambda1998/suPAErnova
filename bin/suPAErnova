@@ -26,6 +26,11 @@ function main {
     # --- Args ---
     for arg in "${@}"; do
         case ${arg} in
+            # End of args
+            --)
+                shift
+                break
+                ;;
             # Backend args
             --backend=*)
                 backend="${arg#*=}"
@@ -97,11 +102,15 @@ function main {
         group_cmd="--group ${group}"
     fi
 
+    local uv_opt="${extra_cmd} ${group_cmd} ${python_cmd}"
+
     # --- Sync ---
-    uv sync ${extra_cmd} ${group_cmd}
+    echo "Running: 'uv sync ${uv_opt}'"
+    uv sync ${uv_opt}
 
     # --- Run ---
-    uv run ${extra_cmd} ${group_cmd} ${cmd} ${@}
+    echo "Running: 'uv run ${uv_opt} ${cmd} ${@}'"
+    uv run ${uv_opt} ${cmd} ${@}
 }
 
 main $@

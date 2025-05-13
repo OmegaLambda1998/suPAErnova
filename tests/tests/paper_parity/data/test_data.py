@@ -1,7 +1,12 @@
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 
 from suPAErnova.configs.steps.data import DataStepResult
+
+if TYPE_CHECKING:
+    from tests.tests.paper_parity.conftest import PaperParityUtils
 
 pytestmark = pytest.mark.data
 
@@ -29,15 +34,12 @@ def test_shapes(
 
 @pytest.mark.parametrize("key", KEYS)
 def test_matching_values(
-    key: str, snpae_data: "DataStepResult", legacy_data: "DataStepResult"
+    key: str,
+    snpae_data: "DataStepResult",
+    legacy_data: "DataStepResult",
+    utils: "PaperParityUtils",
 ) -> None:
     snpae_vals = getattr(snpae_data, key)
     legacy_vals = getattr(legacy_data, key)
 
-    compare = (
-        np.allclose
-        if np.issubdtype(snpae_vals.dtype, np.number)
-        and np.issubdtype(legacy_vals.dtype, np.number)
-        else np.array_equal
-    )
-    assert compare(snpae_vals, legacy_vals)
+    utils.assert_arrays(snpae_vals, legacy_vals)

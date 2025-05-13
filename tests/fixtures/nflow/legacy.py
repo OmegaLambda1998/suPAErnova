@@ -5,7 +5,6 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
-from suPAErnova.configs.steps.pae import PAEStepResult
 from suPAErnova.configs.steps.data import DataStepResult
 
 if TYPE_CHECKING:
@@ -15,19 +14,21 @@ if TYPE_CHECKING:
 
     from _pytest.tmpdir import TempPathFactory
 
+    from suPAErnova.configs.steps.nflow import NFlowStepResult
 
-def legacy_pae_step(
+
+def legacy_nflow_step(
+    nflow_params: dict[str, "Any"],
     pae_params: dict[str, "Any"],
     data: "DataStepResult",
-) -> dict[str, dict[str, "Any"]]:
+) -> dict[str, "Any"]:
     # Used cached result if it exists.
     savepath = (
         pae_params["cache_path"]
         / pae_params["fname"]
-        / "pae"
+        / "nflow"
         / "legacy"
-        / pae_params["seed"]
-        / "pae_step.npz"
+        / "nflow_step.npz"
     )
     savepath.parent.mkdir(parents=True, exist_ok=True)
     if savepath.exists():
@@ -35,14 +36,13 @@ def legacy_pae_step(
             return {k: v.item() for k, v in io.items()}
 
     # Import here to avoid dependency conflicts
-    from supaernova_legacy.models.losses import compute_loss_ae
-    from supaernova_legacy.scripts.train_ae import train_ae
+    from supaernova_legacy.scripts.train_nflow import train_nflow
 
-    # Except where indicated, this is running the `train_ae` script verbatim
+    # Except where indicated, this is running the `train_nflow` script verbatim
 
-    # Variation: train_ae script modified to allow passing args as a list of strings
-    # Variation: train_ae script modified to return a dictionary of results per train stage
-    # Variation: train_ae script modified to skip training stages which have already been run
+    # Variation: train_nflow script modified to allow passing args as a list of strings
+    # Variation: train_nflow script modified to return a dictionary of results per train stage
+    # Variation: train_nflow script modified to skip training stages which have already been run
     # Variation: Legacy code relied on the now deprecated tensorflow_addons package.
     #            Most of the functionality now resides in tensorflow.keras
     #            The Legacy code has been updated to reflect this
@@ -56,11 +56,14 @@ def legacy_pae_step(
         pae_params["cache_path"] / pae_params["fname"] / "data" / "legacy"
     )
     pae_out_path: Path = (
-        pae_params["cache_path"] / pae_params["fname"] / "pae" / "legacy" / seed
+        pae_params["cache_path"] / pae_params["fname"] / "pae" / "legacy"
     )
-    model_dir = pae_out_path / "tensorflow_models"
+    nflow_out_path: Path = (
+        pae_params["cache_path"] / pae_params["fname"] / "nflow" / "legacy"
+    )
+    model_dir = nflow_out_path / "tensorflow_models"
     model_dir.mkdir(parents=True, exist_ok=True)
-    param_dir = pae_out_path / "params"
+    param_dir = nflow_out_path / "params"
     param_dir.mkdir(parents=True, exist_ok=True)
 
     yaml_config = pae_params["tmp_path"] / "train.yaml"
@@ -93,7 +96,7 @@ def legacy_pae_step(
                 pae_params["max_train_phase"],
             ),
             "latent_dims": (pae_params["n_z_latents"],),
-            "seed": int(seed),
+            "seed": pae_params["seed"],
             "layer_type": pae_params["architecture"],
             "physical_latent": pae_params["physical_latents"],
             "val_every": pae_params["val_every"],
@@ -142,9 +145,8 @@ def legacy_pae_step(
         yaml.safe_dump(config, io)
 
     args = [f"--yaml_config={yaml_config}", "--config=pae"]
-    results = train_ae(args)
-
-    pae_step_results = {}
+    results = train_nflow(args)
+    nflow_step_results = {}
     for stage, (model, _params) in results.items():
         pae_step = {}
         pae_step["stage"] = stage
@@ -153,7 +155,7 @@ def legacy_pae_step(
         pae_step["spectra_id"] = data.spectra_id
 
         x = data.amplitude
-        cond = (data.phase - data.phase.min()) / (data.phase.max() - data.phase.min())
+        cond = data.phase
         sigma = data.sigma
         mask = data.mask
 
@@ -171,7 +173,7 @@ def legacy_pae_step(
         pae_step["latents"] = z.numpy()[:, [2, 3, 4, 5, 1, 0]]
         pae_step["output_amp"] = x_pred.numpy()
 
-        _loss, (loss, pred_loss, resid_loss, delta_loss, cov_loss, model_loss) = (
+        loss, (pred_loss, resid_loss, delta_loss, cov_loss, model_loss) = (
             compute_loss_ae(model, x, cond, sigma, mask)
         )
         pae_step["loss"] = loss
@@ -181,46 +183,46 @@ def legacy_pae_step(
         pae_step["cov_loss"] = cov_loss
         pae_step["model_loss"] = model_loss
 
-        pae_step_results[str(pae_step["stage"])] = pae_step
+        nflow_step_results[str(pae_step["stage"])] = pae_step
 
-    np.savez_compressed(savepath, **pae_step_results)
+    np.savez_compressed(savepath, **nflow_step_results)
     with np.load(savepath, allow_pickle=True) as io:
         return {k: v.item() for k, v in io.items()}
 
 
 @pytest.fixture(scope="session")
-def legacy_pae_step_factory(
+def legacy_nflow_step_factory(
     data_path: "Path",
     root_path: "Path",
     cache_path: "Path",
     tmp_path_factory: "TempPathFactory",
     legacy_data_step_factory: "Callable[[dict[str, Any]], dict[str, Any]]",
-) -> "Callable[[dict[str, Any], dict[str, Any]], dict[str, dict[str, Any]]]":
-    def _legacy_pae_step(
-        data_params: "dict[str, Any]", pae_params: "dict[str, Any]"
+) -> "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, Any]]":
+    def _legacy_nflow_step(
+        data_params: "dict[str, Any]",
+        pae_params: "dict[str, Any]",
+        nflow_params: "dict[str, Any]",
     ) -> "dict[str, dict[str, Any]]":
-        pae_params["data_path"] = data_path
+        nflow_params["data_path"] = data_path
         pae_params["root_path"] = root_path
         pae_params["cache_path"] = cache_path
         pae_params["tmp_path"] = tmp_path_factory.mktemp("config")
 
         data = DataStepResult.model_validate(legacy_data_step_factory(data_params))
-        return legacy_pae_step(pae_params, data)
+        return legacy_nflow_step(nflow_params, pae_params, data)
 
-    return _legacy_pae_step
+    return _legacy_nflow_step
 
 
 @pytest.fixture(scope="session")
-def legacy_pae_result_factory(
-    legacy_pae_step_factory: "Callable[[dict[str, Any], dict[str, Any]], dict[str, dict[str, Any]]]",
-) -> "Callable[[dict[str, Any], dict[str, Any]], dict[str, PAEStepResult]]":
-    def _legacy_pae_result(
-        data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
-    ) -> "dict[str, PAEStepResult]":
-        pae_step_results = legacy_pae_step_factory(data_params, pae_params)
-        return {
-            stage: PAEStepResult.model_validate(pae_step)
-            for stage, pae_step in pae_step_results.items()
-        }
+def legacy_nflow_result_factory(
+    legacy_nflow_step_factory: "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, Any]]",
+) -> "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], NFlowStepResult]":
+    def _legacy_nflow_result(
+        data_params: dict[str, "Any"],
+        pae_params: dict[str, "Any"],
+        nflow_params: dict[str, "Any"],
+    ) -> "NFlowStepResult":
+        return legacy_nflow_step_factory(data_params, pae_params, nflow_params)
 
-    return _legacy_pae_result
+    return _legacy_nflow_result

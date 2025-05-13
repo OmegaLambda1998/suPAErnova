@@ -45,6 +45,7 @@ def pytest_addoption(parser: "Parser") -> None:
 
 
 def pytest_runtest_setup(item: "Item") -> None:
+    # Handle `setup` tests
     setup = [mark.args[0] for mark in item.iter_markers(name="setup")]
     if setup:
         if item.config.getoption("--setup") not in setup:

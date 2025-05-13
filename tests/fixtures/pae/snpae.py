@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Literal
 
 import pytest
+import tensorflow as tf
 
 import suPAErnova
 from suPAErnova.configs.steps.pae import PAEStepConfig
@@ -64,7 +65,11 @@ def snpae_pae_step_factory(
         snpae = suPAErnova.prepare_config(
             config,
             base_path=root_path,
-            out_path=cache_path / pae_params["fname"] / "pae" / "snpae",
+            out_path=cache_path
+            / pae_params["fname"]
+            / "pae"
+            / "snpae"
+            / pae_params["seed"],
         )
         snpae.run()
         paestep = snpae.pae_step
@@ -81,6 +86,7 @@ def snpae_pae_result_factory(
     def _snpae_pae_result(
         data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
     ) -> "dict[str, PAEStepResult]":
-        return snpae_pae_step_factory(data_params, pae_params).models[0].results
+        pae_step = snpae_pae_step_factory(data_params, pae_params).models[0]
+        return pae_step.results
 
     return _snpae_pae_result

@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import ClassVar, Annotated
+from typing import Any, ClassVar, Annotated
 from pathlib import Path
 import importlib
 from collections.abc import Callable
