@@ -39,7 +39,10 @@ requires = ["hatchling"]
 [dependency-groups]
 dev = ["pandas-stubs>=2.2.3.250308", "types-tensorflow>=2.18.0.20250506"]
 jupyter = ["jupyter>=1.1.1"]
-tests = ["pytest>=8.3.5"]
+tests = [
+    "pytest>=8.3.5",
+    "pytest-richer>=0.1.1",
+]
 
 # === Tools ===
 [tool.uv]
@@ -66,7 +69,7 @@ supaernova_legacy = { path = "../suPAErnova_legacy/" }
 tensorflow-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4/tensorflow_rocm-2.18.1-cp312-cp312-manylinux_2_28_x86_64.whl" }
 
 [tool.pytest.ini_options]
-addopts = ["--import-mode=importlib", "--color=yes"]
+addopts = ["--import-mode=importlib", "--color=yes", "--rich", "--tb=short"]
 pythonpath = ["."]
 testpaths = ["tests"]
 

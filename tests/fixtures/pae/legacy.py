@@ -56,7 +56,11 @@ def legacy_pae_step(
         pae_params["cache_path"] / pae_params["fname"] / "data" / "legacy"
     )
     pae_out_path: Path = (
-        pae_params["cache_path"] / pae_params["fname"] / "pae" / "legacy" / seed
+        pae_params["cache_path"]
+        / pae_params["fname"]
+        / "pae"
+        / "legacy"
+        / pae_params["seed"]
     )
     model_dir = pae_out_path / "tensorflow_models"
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -93,7 +97,7 @@ def legacy_pae_step(
                 pae_params["max_train_phase"],
             ),
             "latent_dims": (pae_params["n_z_latents"],),
-            "seed": int(seed),
+            "seed": int(pae_params["seed"]),
             "layer_type": pae_params["architecture"],
             "physical_latent": pae_params["physical_latents"],
             "val_every": pae_params["val_every"],
@@ -102,6 +106,7 @@ def legacy_pae_step(
             "optimizer": pae_params["optimiser"].upper(),
             "scheduler": pae_params["scheduler"].upper().replace("DECAY", ""),
             "kernel_regularizer": pae_params["kernel_regulariser"] is not None,
+            "kernel_regularizer_val": pae_params["kernel_regulariser_penalty"],
             "colorlaw_file": str(pae_params["colourlaw"]),
             "colorlaw_preset": pae_params["colourlaw"] is not None,
             "kfold": 0,

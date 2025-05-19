@@ -13,9 +13,11 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.pae
 
-KEYS = list(PAEStepResult.model_fields.keys())
 STAGES = ["1", "4", "5", "6"]
 SEEDS = ["12345", "23456", "34567", "45678", "56789"]
+KEYS = list(PAEStepResult.model_fields.keys())
+LOSSES = [k for k in KEYS if "loss" in k]
+AMPS = [k for k in KEYS if "_amp" in k]
 
 
 @pytest.mark.setup("snpae")
@@ -57,9 +59,35 @@ def test_shapes(
     assert snpae_vals.shape == legacy_vals.shape
 
 
+@pytest.mark.parametrize("key", LOSSES)
 @pytest.mark.parametrize("stage", STAGES)
-@pytest.mark.parametrize("key", KEYS)
-def test_matching_values(
+def test_matching_losses(
+    stage: str,
+    key: str,
+    snpae_pae: "dict[str, PAEStepResult]",
+    legacy_pae: "dict[str, PAEStepResult]",
+    utils: "PaperParityUtils",
+) -> None:
+    snpae_vals = np.array(getattr(snpae_pae[stage], key))
+    legacy_vals = np.array(getattr(legacy_pae[stage], key))
+    utils.assert_arrays(snpae_vals, legacy_vals)
+
+
+@pytest.mark.parametrize("stage", STAGES)
+def test_matching_latents(
+    stage: str,
+    snpae_pae: "dict[str, PAEStepResult]",
+    legacy_pae: "dict[str, PAEStepResult]",
+    utils: "PaperParityUtils",
+) -> None:
+    snpae_vals = np.array(snpae_pae[stage].latents)
+    legacy_vals = np.array(legacy_pae[stage].latents)
+    utils.assert_arrays(snpae_vals, legacy_vals)
+
+
+@pytest.mark.parametrize("key", AMPS)
+@pytest.mark.parametrize("stage", STAGES)
+def test_matching_amps(
     stage: str,
     key: str,
     snpae_pae: "dict[str, PAEStepResult]",

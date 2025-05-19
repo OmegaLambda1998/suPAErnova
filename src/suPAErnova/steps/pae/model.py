@@ -234,7 +234,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             self.paths.out
             / self.model.name
             / f"{final_stage.stage}_{final_stage.fname}"
-            / self.model.model_path
+            / "checkpoint"
         )
 
         if not final_savepath.exists():
@@ -274,14 +274,14 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
 
             model_path = savepath / self.model.model_path
             weights_path = savepath / self.model.weights_path
-            if model_path.exists() and not self.force:
+            if self.force or not model_path.exists():
+                self.model.train_model(stage)
+                self.model.save_checkpoint(savepath)
+            else:
                 # Don't retrain stages if you don't need to
                 self.log.debug(f"Loading stage weights from {weights_path}")
                 self.model.stage = stage
                 self.model.load_checkpoint(savepath, reset_weights=False)
-            else:
-                self.model.train_model(stage)
-            self.model.save_checkpoint(savepath)
 
     @override
     def _result(self) -> None:

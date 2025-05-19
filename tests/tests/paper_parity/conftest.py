@@ -184,7 +184,7 @@ def pae_params(
         "optimiser": "AdamW",
         "scheduler": "ExponentialDecay",
         "colourlaw": data_path / "colourlaws" / "F99_colourlaw.txt",
-        "kernel_regulariser": None,
+        "kernel_regulariser": "L2",
         "kernel_regulariser_penalty": 100,  # Not used if kernel_regulariser is None
         # Noise
         "amplitude_offset_scale": 1.0,

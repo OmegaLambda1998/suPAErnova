@@ -100,28 +100,6 @@ if TYPE_CHECKING:
     ]
 
 
-class TypedLayer[
-    L: "ks.layers.Layer[tf.Tensor, tf.Tensor]",
-    I: "GenericTensor[str]",
-    O: "GenericTensor[str]",
-](ks.layers.Layer):
-    def __init__(self, layer: "ks.layers.Layer[I, O]", **kwargs: "Any") -> None:
-        super().__init__(**kwargs)
-        self.layer: "ks.layers.Layer[I, O]" = layer
-
-    @override
-    def build(self, input_shape: "Any", *args: "Any", **kwargs: "Any") -> None:
-        self.layer.build(input_shape, *args, **kwargs)
-
-    @override
-    def call(self, inputs: "I", *args: "Any", **kwargs: "Any") -> "O":
-        return self.layer(inputs, *args, **kwargs)
-
-    @override
-    def __call__(self, inputs: "I", *args: "Any", **kwargs: "Any") -> "O":
-        return self.layer(inputs, *args, **kwargs)
-
-
 @keras.saving.register_keras_serializable("SuPAErnova")
 class TFPAEEncoder(ks.layers.Layer):
     def __init__(
@@ -156,42 +134,14 @@ class TFPAEEncoder(ks.layers.Layer):
         self.batch_normalisation: bool = options.batch_normalisation
 
         # --- Layers ---
-        self.encode_layers: list[
-            TypedLayer[
-                ks.layers.Dense,
-                "FTensor[S['batch_dim nspec_dim _']]",
-                "FTensor[S['batch_dim nspec_dim encode_dim']]",
-            ]
-        ] = []
-        self.dropout_layers: list[
-            TypedLayer[
-                ks.layers.Dropout | ks.layers.Identity,
-                "FTensor[S['batch_dim nspec_dim encode_dim']]",
-                "FTensor[S['batch_dim nspec_dim encode_dim']]",
-            ]
-        ] = []
+        self.encode_layers: list[ks.layers.Dense]
+        self.dropout_layers: list[ks.layers.Dropout | ks.layers.Identity]
         self.batch_normalisation_layers: list[
-            TypedLayer[
-                ks.layers.BatchNormalization | ks.layers.Identity,
-                "FTensor[S['batch_dim nspec_dim encode_dim']]",
-                "FTensor[S['batch_dim nspec_dim encode_dim']]",
-            ]
-        ] = []
-        self.encode_nspec_layer: TypedLayer[
-            ks.layers.Dense,
-            "FTensor[S['batch_dim nspec_dim encode_dim']]",
-            "FTensor[S['batch_dim nspec_dim nspec_dim']]",
+            ks.layers.BatchNormalization | ks.layers.Identity
         ]
-        self.encode_output_layer: TypedLayer[
-            ks.layers.Dense,
-            "FTensor[S['batch_dim nspec_dim nspec_dim']]",
-            "FTensor[S['batch_dim nspec_dim n_pae_latents']]",
-        ]
-        self.repeat_latent_layer: TypedLayer[
-            ks.layers.RepeatVector,
-            "FTensor[S['batch_dim n_pae_latents']]",
-            "FTensor[S['batch_dim nspec_dim n_pae_latents']]",
-        ]
+        self.encode_nspec_layer: ks.layers.Dense
+        self.encode_output_layer: ks.layers.Dense
+        self.repeat_latent_layer: ks.layers.RepeatVector
 
     @override
     def build(self, input_shape: "EncoderInputsShape") -> None:
@@ -200,53 +150,45 @@ class TFPAEEncoder(ks.layers.Layer):
         )
 
         # Encode from input layer dimensions into intermediate dimensions
-        for encode_dim in self.encode_dims:
-            self.encode_layers.append(
-                TypedLayer(
-                    ks.layers.Dense(
-                        encode_dim,
-                        activation=self.activation,
-                        kernel_regularizer=self.regulariser,
-                    )
-                )
-            )
-            # Dropout layer
-            self.dropout_layers.append(
-                TypedLayer(
-                    ks.layers.Dropout(self.dropout, noise_shape=[None, 1, None])
-                    if self.dropout > 0
-                    else ks.layers.Identity(trainable=False)
-                )
-            )
-            # Batch normalisation layer
-            self.batch_normalisation_layers.append(
-                TypedLayer(
-                    ks.layers.BatchNormalization()
-                    if self.batch_normalisation
-                    else ks.layers.Identity(trainable=False)
-                )
-            )
-
-        # Encode from intermediate dimensions into nspec_dim dimensions
-        self.encode_nspec_layer = TypedLayer(
+        self.encode_layers = [
             ks.layers.Dense(
-                nspec_dim,
+                encode_dim,
                 activation=self.activation,
                 kernel_regularizer=self.regulariser,
             )
+            for encode_dim in self.encode_dims
+        ]
+        # Dropout layer
+        self.dropout_layers = [
+            ks.layers.Dropout(self.dropout, noise_shape=[None, 1, None])
+            if self.dropout > 0
+            else ks.layers.Identity(trainable=False)
+            for _ in self.encode_dims
+        ]
+        # Batch normalisation layer
+        self.batch_normalisation_layers = [
+            ks.layers.BatchNormalization()
+            if self.batch_normalisation
+            else ks.layers.Identity(trainable=False)
+            for _ in self.encode_dims
+        ]
+
+        # Encode from intermediate dimensions into nspec_dim dimensions
+        self.encode_nspec_layer = ks.layers.Dense(
+            nspec_dim,
+            activation=self.activation,
+            kernel_regularizer=self.regulariser,
         )
 
         # Encode from nspec_dim dimensions into output (latent) dimensions
-        self.encode_output_layer = TypedLayer(
-            ks.layers.Dense(
-                self.n_pae_latents,
-                kernel_regularizer=self.regulariser,
-                use_bias=False,
-            )
+        self.encode_output_layer = ks.layers.Dense(
+            self.n_pae_latents,
+            kernel_regularizer=self.regulariser,
+            use_bias=False,
         )
 
         # Repeat latent vector to match nspec_dim
-        self.repeat_latent_layer = TypedLayer(ks.layers.RepeatVector(nspec_dim))
+        self.repeat_latent_layer = ks.layers.RepeatVector(nspec_dim)
 
     @override
     def call(
@@ -271,9 +213,13 @@ class TFPAEEncoder(ks.layers.Layer):
 
         # Encode from input layers to intermediate dimensions
         for i, encode_layer in enumerate(self.encode_layers):
+            tf.debugging.check_numerics(x, "1")
             x = encode_layer(x)
+            tf.debugging.check_numerics(x, "2")
             x = self.dropout_layers[i](x, training=training)
+            tf.debugging.check_numerics(x, "3")
             x = self.batch_normalisation_layers[i](x)
+            tf.debugging.check_numerics(x, "4")
 
         # Encode from intermediate dimensions to nspec_dim dimensions
         x = self.encode_nspec_layer(x)
@@ -293,7 +239,7 @@ class TFPAEEncoder(ks.layers.Layer):
             batch_sum = cast("FTensor[S['batch_dim n_pae_latents']]", batch_sum)
 
         # Then determine the number of unmasked spectra
-        batch_num = tf.maximum(tf.reduce_sum(is_kept, axis=-2), y=1)
+        batch_num = tf.math.maximum(tf.reduce_sum(is_kept, axis=-2), y=1)
         if TYPE_CHECKING:
             batch_num = cast("FTensor[S['batch_dim 1']]", batch_num)
 
@@ -384,35 +330,13 @@ class TFPAEDecoder(ks.layers.Layer):
         self.colourlaw: "npt.NDArray[np.float64] | None" = colourlaw
 
         # --- Layers ---
-        self.decode_nspec_layer: TypedLayer[
-            ks.layers.Dense,
-            "FTensor[S['batch_dim nspec_dim _']]",
-            "FTensor[S['batch_dim nspec_dim nspec_dim']]",
-        ]
-        self.decode_layers: list[
-            TypedLayer[
-                ks.layers.Dense,
-                "FTensor[S['batch_dim nspec_dim _']]",
-                "FTensor[S['batch_dim nspec_dim decode_dim']]",
-            ]
-        ]
+        self.decode_nspec_layer: ks.layers.Dense
+        self.decode_layers: list[ks.layers.Dense]
         self.batch_normalisation_layers: list[
-            TypedLayer[
-                ks.layers.BatchNormalization | ks.layers.Identity,
-                "FTensor[S['batch_dim nspec_dim decode_dim']]",
-                "FTensor[S['batch_dim nspec_dim decode_dim']]",
-            ]
+            ks.layers.BatchNormalization | ks.layers.Identity
         ]
-        self.decode_output_layer: TypedLayer[
-            ks.layers.Dense,
-            "FTensor[S['batch_dim nspec_dim decode_dim']]",
-            "FTensor[S['batch_dim nspec_dim wl_dim']]",
-        ]
-        self.colourlaw_layer: TypedLayer[
-            ks.layers.Dense | ks.layers.Identity,
-            "FTensor[S['batch_dim nspec_dim 1']]",
-            "FTensor[S['batch_dim nspec_dim wl_dim']]",
-        ]
+        self.decode_output_layer: ks.layers.Dense
+        self.colourlaw_layer: ks.layers.Dense | ks.layers.Identity
 
     @override
     def build(self, input_shape: "DecoderInputsShape") -> None:
@@ -421,44 +345,35 @@ class TFPAEDecoder(ks.layers.Layer):
             (_batch_dim, _nspec_dim, _phase_dim),
         ) = input_shape
         # Project from input dimensions into nspec_dim dimensions
-        self.decode_nspec_layer = TypedLayer(
-            ks.layers.Dense(
-                nspec_dim,
-                activation=self.activation,
-                kernel_regularizer=self.regulariser,
-            )
+        self.decode_nspec_layer = ks.layers.Dense(
+            nspec_dim,
+            activation=self.activation,
+            kernel_regularizer=self.regulariser,
         )
 
         # Decode from nspec_dim dimensions into intermediate dimensions
-        self.decode_layers = []
-        self.batch_normalisation_layers = []
-        for decode_dim in self.decode_dims:
-            self.decode_layers.append(
-                TypedLayer(
-                    ks.layers.Dense(
-                        decode_dim,
-                        activation=self.activation,
-                        kernel_regularizer=self.regulariser,
-                    )
-                )
+        self.decode_layers = [
+            ks.layers.Dense(
+                decode_dim,
+                activation=self.activation,
+                kernel_regularizer=self.regulariser,
             )
-
-            # Batch normalisation layer
-            self.batch_normalisation_layers.append(
-                TypedLayer(
-                    ks.layers.BatchNormalization()
-                    if self.batch_normalisation
-                    else ks.layers.Identity(trainable=False)
-                )
-            )
+            for decode_dim in self.decode_dims
+        ]
+        self.batch_normalisation_layers = [
+            ks.layers.BatchNormalization()
+            if self.batch_normalisation
+            else ks.layers.Identity(trainable=False)
+            for decode_dim in self.decode_dims
+        ]
 
         # Decode from intermediate dimensions to output dimensions
-        self.decode_output_layer = TypedLayer(
-            ks.layers.Dense(self.wl_dim, kernel_regularizer=self.regulariser)
+        self.decode_output_layer = ks.layers.Dense(
+            self.wl_dim, kernel_regularizer=self.regulariser
         )
 
         # Colourlaw
-        self.colourlaw_layer = TypedLayer(
+        self.colourlaw_layer = (
             ks.layers.Dense(
                 self.wl_dim,
                 kernel_initializer=None
@@ -866,6 +781,11 @@ class TFPAEModel(ks.Model):
         # Fixed RNG
         tf.random.set_seed(self._epoch)
         self._epoch += 1
+        # tf.print(
+        #     "epoch",
+        #     self._epoch,
+        #     [np.min(abs(w)) for w in self.encoder.weights if np.isclose(w, 0).any()],
+        # )
 
         # --- Setup Data ---
         (phase, amplitude, d_amplitude, mask) = self.prep_data_per_epoch(
@@ -1028,7 +948,7 @@ class TFPAEModel(ks.Model):
             self.compile(
                 optimizer=optimiser,
                 loss=self.options.loss_cls(),
-                run_eagerly=self.stage.debug,
+                run_eagerly=self.stage.debug,  # or True,
             )
             self(
                 (
@@ -1066,21 +986,31 @@ class TFPAEModel(ks.Model):
                 latents_num = cast("FTensor[S['n_pae_latents']]", latents_num)
                 moving_means = cast("FTensor[S['n_pae_latents']]", moving_means)
             self.encoder.moving_means = moving_means
-        self.save_weights(savepath / self.weights_path)
-        self.save(savepath / self.model_path)
+        checkpoint = tf.train.Checkpoint(model=self, optimizer=self.optimizer)
+        checkpoint.save(savepath / "checkpoint/")
+        # self.save_weights(savepath / self.weights_path)
+        # self.save(savepath / self.model_path)
 
     def load_checkpoint(
         self, loadpath: "Path", *, reset_weights: bool | None = None
     ) -> None:
+        # tf.print(
+        #     1, [np.min(abs(w)) for w in self.encoder.weights if np.isclose(w, 0).any()]
+        # )
         self.build_model()
+        init_weights = self.encoder.encode_output_layer.get_weights()[0]
+        # self.load_weights(loadpath / self.weights_path)
+        checkpoint = tf.train.Checkpoint(model=self, optimizer=self.optimizer)
+        checkpoint.restore(tf.train.latest_checkpoint(loadpath / "checkpoint/"))
+        # tf.print(
+        #     2, [np.min(abs(w)) for w in self.encoder.weights if np.isclose(w, 0).any()]
+        # )
         reset_weights = (
             (self.stage.stage < self.n_pae_latents)
             if reset_weights is None
             else reset_weights
         )
         if reset_weights:
-            init_weights = self.encoder.encode_output_layer.get_weights()[0]
-            self.load_weights(loadpath / self.weights_path)
             weights = self.encoder.encode_output_layer.get_weights()[0]
             # Set the weights of the newly introduced latent parameter to effectively 0
             #   Since the initial weights are random values which we then divide by 100
@@ -1088,8 +1018,14 @@ class TFPAEModel(ks.Model):
                 init_weights[:, self.stage.stage - 1] / 100
             )
             self.encoder.encode_output_layer.set_weights([weights])
-        else:
-            self.load_weights(loadpath / self.weights_path)
+            # tf.print(
+            #     3,
+            #     [
+            #         np.min(abs(w))
+            #         for w in self.encoder.weights
+            #         if np.isclose(w, 0).any()
+            #     ],
+            # )
 
     def prep_data(self, data: "RawData") -> "PrepData":
         (_phase, _d_phase, _amplitude, _d_amplitude, mask) = data
