@@ -74,6 +74,7 @@ def snpae_pae_step_factory(
         snpae.run()
         paestep = snpae.pae_step
         assert paestep is not None, "Error running PAEStep"
+        paestep.result()
         return paestep
 
     return _snpae_pae_step

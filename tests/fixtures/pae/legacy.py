@@ -169,12 +169,22 @@ def legacy_pae_step(
         z = model.encode(x, cond, mask)
         x_pred = model.decode(z, cond, mask)
 
+        pae_step["input_amp"] = data.amplitude
+        pae_step["input_d_amp"] = data.sigma
+        pae_step["input_phase"] = data.phase
+        pae_step["input_mask"] = data.mask
+
         # Legacy latent ordering:
         # Δ𝓅 -> Δℳ  -> ΔAᵥ -> zs ([0, 1, 2, 3, 4, 5])
         # Rearange to:
         # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅 ([2, 3, 4, 5, 1, 0])
         pae_step["latents"] = z.numpy()[:, [2, 3, 4, 5, 1, 0]]
+
         pae_step["output_amp"] = x_pred.numpy()
+        pae_step["diff_amp"] = abs(x.numpy() - x_pred.numpy())
+
+        pae_step["encoder_weights"] = [w.numpy() for w in model.encoder.weights]
+        pae_step["decoder_weights"] = [w.numpy() for w in model.decoder.weights]
 
         _loss, (loss, pred_loss, resid_loss, delta_loss, cov_loss, model_loss) = (
             compute_loss_ae(model, x, cond, sigma, mask)

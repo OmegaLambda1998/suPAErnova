@@ -306,6 +306,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             savepath = self.paths.out / self.model.name / f"{stage.stage}_{stage.fname}"
             self.model.stage = stage
             self.model.load_checkpoint(savepath, reset_weights=False)
+            print(self.model.encoder.moving_means)
 
             input_phase = data.phase
             input_amplitude = data.amplitude
@@ -336,8 +337,15 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                 "ind": data.ind,
                 "sn_name": data.sn_name,
                 "spectra_id": data.spectra_id,
+                "input_amp": data.amplitude,
+                "input_d_amp": data.sigma,
+                "input_phase": data.phase,
+                "input_mask": data.mask,
                 "latents": latents.numpy()[:, 0, :],
                 "output_amp": output_amplitude.numpy(),
+                "diff_amp": abs(input_amplitude - output_amplitude.numpy()),
+                "encoder_weights": [w.numpy() for w in self.model.encoder.weights],
+                "decoder_weights": [w.numpy() for w in self.model.decoder.weights],
                 "loss": loss,
                 "pred_loss": pred_loss,
                 "model_loss": model_loss,

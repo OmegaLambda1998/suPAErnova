@@ -213,13 +213,9 @@ class TFPAEEncoder(ks.layers.Layer):
 
         # Encode from input layers to intermediate dimensions
         for i, encode_layer in enumerate(self.encode_layers):
-            tf.debugging.check_numerics(x, "1")
             x = encode_layer(x)
-            tf.debugging.check_numerics(x, "2")
             x = self.dropout_layers[i](x, training=training)
-            tf.debugging.check_numerics(x, "3")
             x = self.batch_normalisation_layers[i](x)
-            tf.debugging.check_numerics(x, "4")
 
         # Encode from intermediate dimensions to nspec_dim dimensions
         x = self.encode_nspec_layer(x)
@@ -268,8 +264,9 @@ class TFPAEEncoder(ks.layers.Layer):
 
         if training:
             # Normalise the physical latents within this batch such that they have a mean of 0
-            latents_sum = tf.reduce_sum(latents, axis=0, keepdims=True)
-            latents_num = tf.reduce_sum(tf.ones_like(latents), axis=0, keepdims=True)
+            is_kept = tf.reduce_max(is_kept[..., 0], axis=-1, keepdims=True)
+            latents_sum = tf.reduce_sum(latents * is_kept, axis=0, keepdims=True)
+            latents_num = tf.reduce_sum(is_kept)
             latents_mean = self.latents_physical_mask * latents_sum / latents_num
             latents -= latents_mean
             if TYPE_CHECKING:
@@ -380,7 +377,7 @@ class TFPAEDecoder(ks.layers.Layer):
                 if self.colourlaw is None
                 else tf.constant_initializer(self.colourlaw),
                 use_bias=False,
-                trainable=True,
+                trainable=self.colourlaw is None,
                 kernel_constraint=None
                 if self.colourlaw is None
                 else ks.constraints.NonNeg(),
@@ -781,11 +778,6 @@ class TFPAEModel(ks.Model):
         # Fixed RNG
         tf.random.set_seed(self._epoch)
         self._epoch += 1
-        # tf.print(
-        #     "epoch",
-        #     self._epoch,
-        #     [np.min(abs(w)) for w in self.encoder.weights if np.isclose(w, 0).any()],
-        # )
 
         # --- Setup Data ---
         (phase, amplitude, d_amplitude, mask) = self.prep_data_per_epoch(
@@ -948,7 +940,7 @@ class TFPAEModel(ks.Model):
             self.compile(
                 optimizer=optimiser,
                 loss=self.options.loss_cls(),
-                run_eagerly=self.stage.debug,  # or True,
+                run_eagerly=self.stage.debug,
             )
             self(
                 (
@@ -969,6 +961,32 @@ class TFPAEModel(ks.Model):
         return self._loss_terms.get(loss, tf.constant(0, dtype=tf.float32))
 
     def save_checkpoint(self, savepath: "Path") -> None:
+        checkpoint = tf.train.Checkpoint(model=self, optimizer=self.optimizer)
+        checkpoint.save(savepath / "checkpoint/")
+        # self.save_weights(savepath / self.weights_path)
+        # self.save(savepath / self.model_path)
+
+    def load_checkpoint(
+        self, loadpath: "Path", *, reset_weights: bool | None = None
+    ) -> None:
+        self.build_model()
+        init_weights = self.encoder.encode_output_layer.get_weights()[0]
+        # self.load_weights(loadpath / self.weights_path)
+        checkpoint = tf.train.Checkpoint(model=self, optimizer=self.optimizer)
+        checkpoint.restore(tf.train.latest_checkpoint(loadpath / "checkpoint/"))
+        reset_weights = (
+            (self.stage.stage < self.n_pae_latents)
+            if reset_weights is None
+            else reset_weights
+        )
+        if reset_weights:
+            weights = self.encoder.encode_output_layer.get_weights()[0]
+            # Set the weights of the newly introduced latent parameter to effectively 0
+            #   Since the initial weights are random values which we then divide by 100
+            weights[:, self.stage.stage - 1] = (
+                init_weights[:, self.stage.stage - 1] / 100
+            )
+            self.encoder.encode_output_layer.set_weights([weights])
         # Normalise mean of physical latents to 0 across all batches
         if self.physical_latents:
             phase = tf.convert_to_tensor(self.stage.train_data.phase)
@@ -986,46 +1004,6 @@ class TFPAEModel(ks.Model):
                 latents_num = cast("FTensor[S['n_pae_latents']]", latents_num)
                 moving_means = cast("FTensor[S['n_pae_latents']]", moving_means)
             self.encoder.moving_means = moving_means
-        checkpoint = tf.train.Checkpoint(model=self, optimizer=self.optimizer)
-        checkpoint.save(savepath / "checkpoint/")
-        # self.save_weights(savepath / self.weights_path)
-        # self.save(savepath / self.model_path)
-
-    def load_checkpoint(
-        self, loadpath: "Path", *, reset_weights: bool | None = None
-    ) -> None:
-        # tf.print(
-        #     1, [np.min(abs(w)) for w in self.encoder.weights if np.isclose(w, 0).any()]
-        # )
-        self.build_model()
-        init_weights = self.encoder.encode_output_layer.get_weights()[0]
-        # self.load_weights(loadpath / self.weights_path)
-        checkpoint = tf.train.Checkpoint(model=self, optimizer=self.optimizer)
-        checkpoint.restore(tf.train.latest_checkpoint(loadpath / "checkpoint/"))
-        # tf.print(
-        #     2, [np.min(abs(w)) for w in self.encoder.weights if np.isclose(w, 0).any()]
-        # )
-        reset_weights = (
-            (self.stage.stage < self.n_pae_latents)
-            if reset_weights is None
-            else reset_weights
-        )
-        if reset_weights:
-            weights = self.encoder.encode_output_layer.get_weights()[0]
-            # Set the weights of the newly introduced latent parameter to effectively 0
-            #   Since the initial weights are random values which we then divide by 100
-            weights[:, self.stage.stage - 1] = (
-                init_weights[:, self.stage.stage - 1] / 100
-            )
-            self.encoder.encode_output_layer.set_weights([weights])
-            # tf.print(
-            #     3,
-            #     [
-            #         np.min(abs(w))
-            #         for w in self.encoder.weights
-            #         if np.isclose(w, 0).any()
-            #     ],
-            # )
 
     def prep_data(self, data: "RawData") -> "PrepData":
         (_phase, _d_phase, _amplitude, _d_amplitude, mask) = data

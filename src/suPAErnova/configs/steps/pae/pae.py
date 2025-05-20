@@ -50,8 +50,18 @@ class PAEStepResult(AbstractStepResult):
     sn_name: "npt.NDArray[np.str_]"
     spectra_id: "npt.NDArray[np.str_]"
 
+    input_amp: "npt.NDArray[np.float32]"
+    input_d_amp: "npt.NDArray[np.float32]"
+    input_phase: "npt.NDArray[np.float32]"
+    input_mask: "npt.NDArray[np.float32]"
+
     latents: "npt.NDArray[np.float32]"
+
     output_amp: "npt.NDArray[np.float32]"
+    diff_amp: "npt.NDArray[np.float32]"
+
+    encoder_weights: "list[npt.NDArray[np.float32]]"
+    decoder_weights: "list[npt.NDArray[np.float32]]"
 
     loss: float
     pred_loss: float

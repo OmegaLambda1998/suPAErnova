@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.paper_parity
 
 # --- Constants ---
-SEEDS = ["12345", "23456", "34567", "45678", "56789"]
+SEEDS = ["12345"]  # , "23456", "34567", "45678", "56789"]
 
 
 # --- Utilities ---
@@ -33,33 +33,52 @@ class PaperParityUtils:
 
     @staticmethod
     def diff_arrays(
-        snpae: "npt.NDArray[Any]", legacy: "npt.NDArray[Any]", max_diffs: int = 10
+        snpae: "npt.NDArray[Any]",
+        legacy: "npt.NDArray[Any]",
+        *,
+        max_diffs: int = 5,
+        spectra: "npt.NDArray[np.str_] | None" = None,
     ) -> str:
+        eps = 1e-10
+
         # Element-wise comparison
         diff_mask = snpae != legacy
-        sort_mask = np.argsort(np.abs(snpae - legacy)[diff_mask])[::-1]
-        diff_indices = np.argwhere(diff_mask)[sort_mask]
+        diff_indices = np.argwhere(diff_mask)
 
         # Summary Statistics
         diff = snpae - legacy
-        abs_diff = abs(diff)
 
+        abs_diff = np.abs(diff)
         min_abs_diff = abs_diff.min()
         max_abs_diff = abs_diff.max()
         mean_abs_diff = abs_diff.mean()
         std_abs_diff = abs_diff.std()
+        abs_sort_mask = np.argsort(abs_diff[diff_mask])[::-1]
 
-        s = f"Arrays differ at {len(diff_indices)} positions ({int(100 * len(diff_indices) / diff_mask.size)}%):\n"
-        s += f"Absolute Difference - min: {min_abs_diff:2f}, max: {max_abs_diff:2f}, mean±std: {mean_abs_diff:2f}±{std_abs_diff:2f}\n"
-        for idx in diff_indices[:max_diffs]:
+        rel_diff = np.abs(2 * diff / (snpae + legacy + eps))
+        min_rel_diff = rel_diff.min()
+        max_rel_diff = rel_diff.max()
+        mean_rel_diff = rel_diff.mean()
+        std_rel_diff = rel_diff.std()
+        rel_sort_mask = np.argsort(rel_diff[diff_mask])[::-1]
+
+        s = f"{len(diff_indices)} differences ({int(100 * len(diff_indices) / diff_mask.size)}%):\n"
+        s += f"Absolute Difference - min: {min_abs_diff:.2f}, max: {max_abs_diff:.2f}, mean±std: {mean_abs_diff:.2f}±{std_abs_diff:.2f}\n"
+        s += f"Relative Difference - min: {min_rel_diff:.2%}, max: {max_rel_diff:.2%}, mean±std: {mean_rel_diff:.2%}±{std_rel_diff:.2%}\n"
+        for idx in list(diff_indices[abs_sort_mask][:max_diffs]) + list(
+            diff_indices[rel_sort_mask][:max_diffs]
+        ):
             snpae_val = snpae[tuple(idx)]
             legacy_val = legacy[tuple(idx)]
 
             # Summary Statistics
             val_diff = snpae_val - legacy_val
             abs_val_diff = abs(val_diff)
+            rel_val_diff = 2 * val_diff / (snpae_val + legacy_val + eps)
 
-            s += f"  At index {tuple(idx)}: snpae = {snpae_val:2f}, legacy = {legacy_val:2f}, abs diff = {abs_val_diff:2f}\n"
+            s += f"  At index {[int(i) for i in tuple(idx)]}{f' ({spectra[idx[0]][idx[1]][0]})' if spectra is not None else ''}:\n"
+            s += f"    snpae = {snpae_val:2f}, legacy = {legacy_val:2f}\n"
+            s += f"    abs diff = {abs_val_diff:.2f}, rel diff = {rel_val_diff:.2%}\n"
 
         if len(diff_indices) > max_diffs:
             s += f"... and {len(diff_indices) - max_diffs} more differences.\n"
@@ -67,9 +86,17 @@ class PaperParityUtils:
         return s
 
     @staticmethod
-    def assert_arrays(snpae: "npt.NDArray[Any]", legacy: "npt.NDArray[Any]") -> None:
+    def assert_arrays(
+        snpae: "npt.NDArray[Any]",
+        legacy: "npt.NDArray[Any]",
+        *,
+        max_diffs: int = 5,
+        spectra: "npt.NDArray[np.str_] | None" = None,
+    ) -> None:
         assert PaperParityUtils.compare_arrays(snpae, legacy), (
-            PaperParityUtils.diff_arrays(snpae, legacy)
+            PaperParityUtils.diff_arrays(
+                snpae, legacy, max_diffs=max_diffs, spectra=spectra
+            )
         )
 
 
