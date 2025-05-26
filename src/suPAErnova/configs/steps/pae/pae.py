@@ -40,8 +40,6 @@ class PAEStage(BaseModel):
     test_data: DataStepResult
     val_data: DataStepResult
 
-    moving_means: list[float]
-
 
 class PAEStepResult(AbstractStepResult):
     stage: int
@@ -59,9 +57,6 @@ class PAEStepResult(AbstractStepResult):
 
     output_amp: "npt.NDArray[np.float32]"
     diff_amp: "npt.NDArray[np.float32]"
-
-    encoder_weights: "list[npt.NDArray[np.float32]]"
-    decoder_weights: "list[npt.NDArray[np.float32]]"
 
     loss: float
     pred_loss: float

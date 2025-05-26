@@ -1,11 +1,12 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Annotated
 import importlib
 from collections.abc import Callable
 
 import numpy as np
 from numpy import typing as npt
+from pydantic import Field
 
 from suPAErnova.steps.pae import PAEStep
 from suPAErnova.configs.steps.pae import PAEStepConfig
@@ -46,6 +47,7 @@ class NFlowStepConfig[Backend: str](AbstractModelStepConfig[Backend, NFlowModelC
 
     # --- Previous Steps ---
     pae: PAEStep[Any] | None = None
+    validation_frac: Annotated[float, Field(ge=0, le=1)] = 0
 
     # --- Optional ---
     seed: int = 12345

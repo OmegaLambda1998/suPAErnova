@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING
 
-import numpy as np
 import pytest
 
 from suPAErnova.configs.steps.data import DataStepResult

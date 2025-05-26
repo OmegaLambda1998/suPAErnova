@@ -143,7 +143,6 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             "train_data": self.train_data,
             "test_data": self.test_data,
             "val_data": self.val_data,
-            "moving_means": [0 for _ in range(self.n_pae_latents)],
             "debug": self.debug,
         }
 
@@ -228,13 +227,14 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
 
     @override
     def _completed(self) -> bool:
-        self._model()
+        self._model(force=True)
         final_stage = self.run_stages[-1]
         final_savepath = (
             self.paths.out
-            / self.model.name
+            # / self.model.name
+            / f"{self.name.split()[-1]}PAEModel"
             / f"{final_stage.stage}_{final_stage.fname}"
-            / "checkpoint"
+            / self.model.model_path
         )
 
         if not final_savepath.exists():
@@ -246,7 +246,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
 
     @override
     def _load(self) -> None:
-        self._model()
+        self._model(force=True)
 
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
@@ -273,19 +273,14 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             stage.savepath = savepath
 
             model_path = savepath / self.model.model_path
-            weights_path = savepath / self.model.weights_path
+            # Don't retrain stages if you don't need to
             if self.force or not model_path.exists():
                 self.model.train_model(stage)
                 self.model.save_checkpoint(savepath)
-            else:
-                # Don't retrain stages if you don't need to
-                self.log.debug(f"Loading stage weights from {weights_path}")
-                self.model.stage = stage
-                self.model.load_checkpoint(savepath, reset_weights=False)
 
     @override
     def _result(self) -> None:
-        self._model()
+        self._model(force=True)
         final_stage = self.run_stages[-1]
         self.model.stage = final_stage
         final_savepath = (
@@ -293,6 +288,9 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             / self.model.name
             / f"{final_stage.stage}_{final_stage.fname}"
         )
+
+        self.log.debug(f"Loading stage weights from {final_savepath}")
+        self.model.load_checkpoint(final_savepath, reset_weights=False)
 
         self.log.debug(f"Saving final PAE model weights to {final_savepath}")
         self.model.save_checkpoint(final_savepath)
@@ -306,7 +304,6 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             savepath = self.paths.out / self.model.name / f"{stage.stage}_{stage.fname}"
             self.model.stage = stage
             self.model.load_checkpoint(savepath, reset_weights=False)
-            print(self.model.encoder.moving_means)
 
             input_phase = data.phase
             input_amplitude = data.amplitude
@@ -344,8 +341,6 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                 "latents": latents.numpy()[:, 0, :],
                 "output_amp": output_amplitude.numpy(),
                 "diff_amp": abs(input_amplitude - output_amplitude.numpy()),
-                "encoder_weights": [w.numpy() for w in self.model.encoder.weights],
-                "decoder_weights": [w.numpy() for w in self.model.decoder.weights],
                 "loss": loss,
                 "pred_loss": pred_loss,
                 "model_loss": model_loss,

@@ -1,5 +1,4 @@
 # Copyright 2025 Patrick Armstrong
-
 import sys
 from typing import TYPE_CHECKING, cast
 from pathlib import Path

@@ -26,6 +26,7 @@ class TFPosteriorModelConfig(PosteriorModelConfig):
         if isinstance(loss, type):
             return loss
 
+        @ks.saving.register_keras_serializable("SuPAErnova")
         class CustomLoss(ks.losses.Loss):
             @override
             def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:

@@ -2,12 +2,12 @@ from typing import Any, Concatenate, cast, override
 from functools import cached_property
 from collections.abc import Callable
 
+import keras
 from pydantic import PositiveFloat, computed_field
 import tensorflow as tf
 from tensorflow import keras as ks
 
 from suPAErnova.steps.pae.tf import (
-    TFPAEModel,
     loss as snpae_losses,
 )
 from suPAErnova.configs.steps import ConfigInputObject, validate_object
@@ -67,6 +67,18 @@ def validate_loss(
             except ValueError as e:
                 err += f"{e}\n"
     raise ValueError(err)
+
+
+def get_loss(
+    loss_fn: Callable[[tf.Tensor, tf.Tensor], tf.Tensor],
+) -> type[ks.losses.Loss]:
+    @keras.saving.register_keras_serializable("SuPAErnova")
+    class CustomLoss(ks.losses.Loss):
+        @override
+        def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+            return loss_fn(y_true, y_pred, model=self.model)
+
+    return CustomLoss
 
 
 class TFPAEModelConfig(PAEModelConfig):
@@ -154,9 +166,4 @@ class TFPAEModelConfig(PAEModelConfig):
         if isinstance(loss, type):
             loss = loss()
 
-        class CustomLoss(ks.losses.Loss):
-            @override
-            def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
-                return loss(y_true, y_pred, model=self.model)
-
-        return CustomLoss
+        return get_loss(loss)

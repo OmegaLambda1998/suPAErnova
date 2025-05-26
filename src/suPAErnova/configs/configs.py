@@ -112,7 +112,7 @@ class SNPAEConfig(BaseModel):
                 input_config.get("name", cls.__name__),
                 log_path=input_config["paths"].log,
                 verbose=input_config["config"].verbose,
-            )
+            ),
         }
 
     @classmethod

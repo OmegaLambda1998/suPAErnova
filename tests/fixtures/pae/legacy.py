@@ -183,9 +183,6 @@ def legacy_pae_step(
         pae_step["output_amp"] = x_pred.numpy()
         pae_step["diff_amp"] = abs(x.numpy() - x_pred.numpy())
 
-        pae_step["encoder_weights"] = [w.numpy() for w in model.encoder.weights]
-        pae_step["decoder_weights"] = [w.numpy() for w in model.decoder.weights]
-
         _loss, (loss, pred_loss, resid_loss, delta_loss, cov_loss, model_loss) = (
             compute_loss_ae(model, x, cond, sigma, mask)
         )

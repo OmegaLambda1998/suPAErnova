@@ -19,35 +19,50 @@ pytestmark = pytest.mark.paper_parity
 SEEDS = ["12345"]  # , "23456", "34567", "45678", "56789"]
 
 
+@pytest.fixture(scope="module", params=SEEDS)
+def seed(request) -> str:
+    return request.param
+
+
 # --- Utilities ---
 class PaperParityUtils:
     @staticmethod
-    def compare_arrays(snpae: "npt.NDArray[Any]", legacy: "npt.NDArray[Any]") -> bool:
-        compare = (
-            np.allclose
-            if np.issubdtype(snpae.dtype, np.number)
-            and np.issubdtype(legacy.dtype, np.number)
-            else np.array_equal
-        )
-        return compare(snpae, legacy)
+    def compare_arrays(
+        snpae: "npt.NDArray[Any]",
+        legacy: "npt.NDArray[Any]",
+        *,
+        snpae_sigma: "float | npt.NDArray[Any] | None" = None,
+        legacy_sigma: "float | npt.NDArray[Any] | None" = None,
+    ) -> "npt.NDArray[np.bool]":
+        if np.issubdtype(snpae.dtype, np.number) and np.issubdtype(
+            legacy.dtype, np.number
+        ):
+            if (snpae_sigma is not None) and (legacy_sigma is not None):
+                atol = np.sqrt(snpae_sigma * snpae_sigma + legacy_sigma * legacy_sigma)
+            else:
+                atol = 1e-8
+            return np.isclose(snpae, legacy, atol=atol)
+        return snpae == legacy
 
     @staticmethod
     def diff_arrays(
         snpae: "npt.NDArray[Any]",
         legacy: "npt.NDArray[Any]",
+        diff_mask: "npt.NDArray[np.bool]",
         *,
         max_diffs: int = 5,
+        sort: bool = True,
         spectra: "npt.NDArray[np.str_] | None" = None,
+        snpae_sigma: "npt.NDArray[Any] | None" = None,
+        legacy_sigma: "npt.NDArray[Any] | None" = None,
     ) -> str:
         eps = 1e-10
 
         # Element-wise comparison
-        diff_mask = snpae != legacy
         diff_indices = np.argwhere(diff_mask)
 
         # Summary Statistics
         diff = snpae - legacy
-
         abs_diff = np.abs(diff)
         min_abs_diff = abs_diff.min()
         max_abs_diff = abs_diff.max()
@@ -55,7 +70,7 @@ class PaperParityUtils:
         std_abs_diff = abs_diff.std()
         abs_sort_mask = np.argsort(abs_diff[diff_mask])[::-1]
 
-        rel_diff = np.abs(2 * diff / (snpae + legacy + eps))
+        rel_diff = 2 * diff / (snpae + legacy + eps)
         min_rel_diff = rel_diff.min()
         max_rel_diff = rel_diff.max()
         mean_rel_diff = rel_diff.mean()
@@ -65,11 +80,23 @@ class PaperParityUtils:
         s = f"{len(diff_indices)} differences ({int(100 * len(diff_indices) / diff_mask.size)}%):\n"
         s += f"Absolute Difference - min: {min_abs_diff:.2f}, max: {max_abs_diff:.2f}, mean±std: {mean_abs_diff:.2f}±{std_abs_diff:.2f}\n"
         s += f"Relative Difference - min: {min_rel_diff:.2%}, max: {max_rel_diff:.2%}, mean±std: {mean_rel_diff:.2%}±{std_rel_diff:.2%}\n"
-        for idx in list(diff_indices[abs_sort_mask][:max_diffs]) + list(
-            diff_indices[rel_sort_mask][:max_diffs]
-        ):
+
+        if sort:
+            indices = (
+                list(diff_indices[abs_sort_mask][:max_diffs])
+                + list(diff_indices[rel_sort_mask][:max_diffs])
+                + list(diff_indices[rel_sort_mask[::-1]][:max_diffs])
+            )
+        else:
+            indices = diff_indices[:max_diffs]
+
+        for idx in indices:
             snpae_val = snpae[tuple(idx)]
             legacy_val = legacy[tuple(idx)]
+            snpae_val_sigma = None if snpae_sigma is None else snpae_sigma[tuple(idx)]
+            legacy_val_sigma = (
+                None if legacy_sigma is None else legacy_sigma[tuple(idx)]
+            )
 
             # Summary Statistics
             val_diff = snpae_val - legacy_val
@@ -77,7 +104,7 @@ class PaperParityUtils:
             rel_val_diff = 2 * val_diff / (snpae_val + legacy_val + eps)
 
             s += f"  At index {[int(i) for i in tuple(idx)]}{f' ({spectra[idx[0]][idx[1]][0]})' if spectra is not None else ''}:\n"
-            s += f"    snpae = {snpae_val:2f}, legacy = {legacy_val:2f}\n"
+            s += f"    snpae = {snpae_val:.2f}{f'±{snpae_val_sigma:.4f}' if snpae_val_sigma is not None else ''}, legacy = {legacy_val:.2f}{f'±{legacy_val_sigma:.4f}' if legacy_val_sigma is not None else ''}\n"
             s += f"    abs diff = {abs_val_diff:.2f}, rel diff = {rel_val_diff:.2%}\n"
 
         if len(diff_indices) > max_diffs:
@@ -91,12 +118,23 @@ class PaperParityUtils:
         legacy: "npt.NDArray[Any]",
         *,
         max_diffs: int = 5,
+        sort: bool = True,
         spectra: "npt.NDArray[np.str_] | None" = None,
+        snpae_sigma: "npt.NDArray[Any] | None" = None,
+        legacy_sigma: "npt.NDArray[Any] | None" = None,
     ) -> None:
-        assert PaperParityUtils.compare_arrays(snpae, legacy), (
-            PaperParityUtils.diff_arrays(
-                snpae, legacy, max_diffs=max_diffs, spectra=spectra
-            )
+        diff_mask = PaperParityUtils.compare_arrays(
+            snpae, legacy, snpae_sigma=snpae_sigma, legacy_sigma=legacy_sigma
+        )
+        assert diff_mask.all(), PaperParityUtils.diff_arrays(
+            snpae,
+            legacy,
+            np.logical_not(diff_mask),
+            max_diffs=max_diffs,
+            sort=sort,
+            spectra=spectra,
+            snpae_sigma=snpae_sigma,
+            legacy_sigma=legacy_sigma,
         )
 
 
@@ -146,7 +184,6 @@ def pae_params(
 ) -> dict[str, "Any"]:
     return {
         "fname": "paper_parity",
-        "seed": 12345,
         "validation_frac": 0,
         "save_best": False,
         "batch_size": 57,  # Only correct for the SNFactory data
@@ -230,28 +267,70 @@ def pae_params(
     }
 
 
-@pytest.fixture(scope="module", params=SEEDS)
-def pae_seed(request) -> str:
-    return request.param
-
-
 @pytest.fixture(scope="module")
 def snpae_pae(
-    pae_seed: str,
+    seed: str,
     data_params: dict[str, "Any"],
     pae_params: dict[str, "Any"],
     snpae_pae_result_factory: "Callable[[dict[str, Any], dict[str, Any]], PAEStepResult]",
 ) -> "PAEStepResult":
-    pae_params["seed"] = pae_seed
+    pae_params["seed"] = seed
     return snpae_pae_result_factory(data_params, pae_params)
 
 
 @pytest.fixture(scope="module")
 def legacy_pae(
-    pae_seed: str,
+    seed: str,
     data_params: dict[str, "Any"],
     pae_params: dict[str, "Any"],
     legacy_pae_result_factory: "Callable[[dict[str, Any], dict[str, Any]], list[PAEStepResult]]",
 ) -> "list[PAEStepResult]":
-    pae_params["seed"] = pae_seed
+    pae_params["seed"] = seed
     return legacy_pae_result_factory(data_params, pae_params)
+
+
+# --- NFlow Step ---
+
+
+@pytest.fixture(scope="module")
+def nflow_params(pae_params: dict[str, "Any"]) -> dict[str, "Any"]:
+    return {
+        "fname": "paper_parity",
+        "n_z_latents": pae_params["n_z_latents"],
+        "encode_dims": pae_params["encode_dims"],
+        "save_best": pae_params["save_best"],
+        "batch_size": pae_params["batch_size"],
+        "learning_rate": 0.001,
+        "physical_latents": True,
+        "n_hidden_units": 8,
+        "n_layers": 12,
+        "epochs": 500,
+        "batch_normalisation": False,
+        "validation_frac": 0.22,
+    }
+
+
+# @pytest.fixture(scope="module")
+# def snpae_nflow(
+#     seed: str,
+#     data_params: dict[str, "Any"],
+#     pae_params: dict[str, "Any"],
+#     nflow_params: dict[str, "Any"],
+#     snpae_nflow_result_factory: "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], PAEStepResult]",
+# ) -> "PAEStepResult":
+#     pae_params["seed"] = seed
+#     nflow_params["seed"] = seed
+#     return snpae_nflow_result_factory(data_params, pae_params, nflow_params)
+#
+#
+@pytest.fixture(scope="module")
+def legacy_nflow(
+    seed: str,
+    data_params: dict[str, "Any"],
+    pae_params: dict[str, "Any"],
+    nflow_params: dict[str, "Any"],
+    legacy_nflow_result_factory: "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], list[PAEStepResult]]",
+) -> "list[PAEStepResult]":
+    pae_params["seed"] = seed
+    nflow_params["seed"] = seed
+    return legacy_nflow_result_factory(data_params, pae_params, nflow_params)

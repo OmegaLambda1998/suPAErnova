@@ -1,6 +1,9 @@
 # Copyright 2025 Patrick Armstrong
+import os
+import random as rn
 from typing import (
     TYPE_CHECKING,
+    Self,
     cast,
     override,
 )
@@ -11,6 +14,12 @@ import tensorflow as tf
 from tensorflow import keras as ks
 from tqdm.keras import TqdmCallback
 import tensorflow_probability as tfp
+
+os.environ["TF_DETERMINISTIC_OPS"] = "1"
+
+# Clip absolute values below this threshold to 0
+# Machine epsilon such that 1.0 + eps != 1.0
+THRESHOLD = tf.experimental.numpy.finfo(tf.float32).eps
 
 if TYPE_CHECKING:
     from typing import (
@@ -119,7 +128,7 @@ class TFPAEEncoder(ks.layers.Layer):
         self.latents_physical_mask: "ITensor[S['n_pae_latents']]"
 
         self.stage_num: int
-        self.moving_means: "FTensor[S['n_pae_latents']]"
+        self.moving_means: "FTensor[S['n_pae_latents']]" = tf.zeros(self.n_pae_latents)
 
         self.encode_dims: list[int] = options.encode_dims
 
@@ -213,15 +222,14 @@ class TFPAEEncoder(ks.layers.Layer):
 
         # Encode from input layers to intermediate dimensions
         for i, encode_layer in enumerate(self.encode_layers):
-            x = encode_layer(x)
+            x = encode_layer(x, training=training)
             x = self.dropout_layers[i](x, training=training)
-            x = self.batch_normalisation_layers[i](x)
-
+            x = self.batch_normalisation_layers[i](x, training=training)
         # Encode from intermediate dimensions to nspec_dim dimensions
-        x = self.encode_nspec_layer(x)
+        x = self.encode_nspec_layer(x, training=training)
 
         # Encode from nspec_dim dimensions to output (latent) dimensions
-        x = self.encode_output_layer(x)
+        x = self.encode_output_layer(x, training=training)
 
         # Determine which spectra to keep
         is_kept = tf.cast(tf.reduce_min(input_mask, axis=-1, keepdims=True), tf.float32)
@@ -284,7 +292,7 @@ class TFPAEEncoder(ks.layers.Layer):
         if TYPE_CHECKING:
             encoded = cast("FTensor[S['batch_dim nspec_dim n_pae_latents']]", encoded)
 
-        return encoded
+        return tf.where(tf.abs(encoded) < THRESHOLD, tf.zeros_like(encoded), encoded)
 
     @override
     def __call__(
@@ -361,7 +369,7 @@ class TFPAEDecoder(ks.layers.Layer):
             ks.layers.BatchNormalization()
             if self.batch_normalisation
             else ks.layers.Identity(trainable=False)
-            for decode_dim in self.decode_dims
+            for _ in self.decode_dims
         ]
 
         # Decode from intermediate dimensions to output dimensions
@@ -432,20 +440,20 @@ class TFPAEDecoder(ks.layers.Layer):
         ])
 
         # Decode from input (latent) dimensions to nspec_dim dimensions
-        x = self.decode_nspec_layer(x)
+        x = self.decode_nspec_layer(x, training=training)
 
         # Decode from nspec_dim dimensions to intermediate dimensions
         for i, decode_layer in enumerate(self.decode_layers):
-            x = decode_layer(x)
-            x = self.batch_normalisation_layers[i](x)
+            x = decode_layer(x, training=training)
+            x = self.batch_normalisation_layers[i](x, training=training)
 
         # Decode from intermediate dimensions to output dimension
-        amplitude = self.decode_output_layer(x)
+        amplitude = self.decode_output_layer(x, training=training)
 
         # Apply ΔAᵥ / Δℳ  shift
         if self.physical_latents:
             # Calculate Colourlaw
-            colourlaw = self.colourlaw_layer(delta_av_latent)
+            colourlaw = self.colourlaw_layer(delta_av_latent, training=training)
 
             amplitude *= tf.pow(10.0, -0.4 * (colourlaw + delta_m_latent))
 
@@ -454,9 +462,10 @@ class TFPAEDecoder(ks.layers.Layer):
             amplitude = tf.nn.relu(amplitude)
 
         # Zero out masked elements
-        return amplitude * tf.cast(
+        decoded = amplitude * tf.cast(
             tf.reduce_max(input_mask, axis=-1, keepdims=True), tf.float32
         )
+        return tf.where(tf.abs(decoded) < THRESHOLD, tf.zeros_like(decoded), decoded)
 
     @override
     def __call__(
@@ -480,10 +489,14 @@ class TFPAEModel(ks.Model):
     ) -> None:
         super().__init__(*args, name=f"{config.name.split()[-1]}PAEModel", **kwargs)
         # --- Config ---
+        global PAEMODELSTEP
+        PAEMODELSTEP = config
         self.options: "TFPAEModelConfig" = cast("TFPAEModelConfig", config.options)
         self.log: "Logger" = config.log
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
+        self.seed: int = config.options.seed
+        self.set_seed()
 
         # --- Latent Dimensions ---
         self.physical_latents: bool = self.options.physical_latents
@@ -503,6 +516,9 @@ class TFPAEModel(ks.Model):
         self.save_best: bool = self.options.save_best
         self.weights_path: str = f"{'best' if self.save_best else 'latest'}.weights.h5"
         self.model_path: str = f"{'best' if self.save_best else 'latest'}.model.keras"
+        self.ckpt_path: str = (
+            f"{'best' if self.save_best else 'latest'}.model.checkpoint/"
+        )
 
         # Data Offsets
         self.phase_offset_scale: "Literal[0, -1] | float" = (
@@ -549,6 +565,30 @@ class TFPAEModel(ks.Model):
         self.delta_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss_delta")
         self.cov_loss_tracker: ks.metrics.Metric = ks.metrics.Mean(name="loss_cov")
 
+    @override
+    def get_config(self) -> dict[str, "Any"]:
+        return {**super().get_config(), "stage": self.stage.name}
+
+    @override
+    @classmethod
+    def from_config(cls, config: dict[str, "Any"]) -> Self:
+        global PAEMODELSTEP
+        self = cls(PAEMODELSTEP)
+        self.stage = next(
+            stage for stage in PAEMODELSTEP.run_stages if stage.name == config["stage"]
+        )
+        return self
+
+    def build_from_config(self, _config: dict[str, "Any"]) -> None:
+        self.build_model()
+
+    def set_seed(self, seed: int = 0) -> None:
+        seed = self.seed + seed
+        os.environ["PYTHONHASHSEED"] = str(seed)
+        tf.random.set_seed(seed)
+        np.random.seed(seed)
+        rn.seed(seed)
+
     @property
     @override
     def metrics(self) -> list[ks.metrics.Metric]:
@@ -578,16 +618,13 @@ class TFPAEModel(ks.Model):
         mask: "TensorCompatible | None" = None,
     ) -> "tuple[EncoderOutputs, DecoderOutputs]":
         training = False if training is None else training
-
         input_phase = inputs[0]
         encoded = self.encoder(inputs, training=training, mask=mask)
         if TYPE_CHECKING:
             encoded = cast("FTensor[S['batch_dim nspec_dim n_pae_latents']]", encoded)
-
         decoded = self.decoder((encoded, input_phase), training=training, mask=mask)
         if TYPE_CHECKING:
             decoded = cast("FTensor[S['batch_dim nspec_dim wl_dim']]", decoded)
-
         return encoded, decoded
 
     @override
@@ -769,20 +806,22 @@ class TFPAEModel(ks.Model):
 
     @override
     def train_step(
-        self,
-        data: "TensorCompatible",
+        self, data: "TensorCompatible", *, dummy: bool = False
     ) -> dict[str, tf.Tensor | dict[str, tf.Tensor]]:
         training = True
 
         # === Per Epoch Setup ===
         # Fixed RNG
-        tf.random.set_seed(self._epoch)
         self._epoch += 1
+        self.set_seed(self._epoch)
 
         # --- Setup Data ---
-        (phase, amplitude, d_amplitude, mask) = self.prep_data_per_epoch(
-            cast("EpochInputs", data)
-        )
+        if dummy:
+            (phase, amplitude, d_amplitude, mask) = cast("ModelInputs", data)
+        else:
+            (phase, amplitude, d_amplitude, mask) = self.prep_data_per_epoch(
+                cast("EpochInputs", data)
+            )
 
         with tf.GradientTape() as tape:
             latents, pred_amplitude = self(
@@ -810,10 +849,12 @@ class TFPAEModel(ks.Model):
         cast("ks.optimizers.Optimizer", self.optimizer).apply_gradients(
             zip(gradients, self.trainable_variables, strict=True)
         )
-
         # Update metrics (includes the metric that tracks the loss)
         for metric in self.metrics:
             metric.update_state(self._loss_terms[metric.name])
+
+        if not dummy:
+            tf.debugging.check_numerics(loss, "Loss")
 
         # Return a dict mapping metric names to current value
         return {m.name: m.result() for m in self.metrics}
@@ -823,25 +864,20 @@ class TFPAEModel(ks.Model):
         stage: "PAEStage",
     ) -> None:
         self.stage = stage
+        n_batches_per_epoch = self.stage.train_data.amplitude.shape[0] / self.batch_size
 
         # === Setup Callbacks ===
         callbacks: list[ks.callbacks.Callback] = []
 
-        if self.stage.savepath is not None:
-            # --- Backup & Restore ---
-            # Backup checkpoints each epoch and restore if training got cancelled midway through
-            if not self.force:
-                backup_dir = self.stage.savepath / "backups"
-                backup_callback = ks.callbacks.BackupAndRestore(str(backup_dir))
-                callbacks.append(backup_callback)
-
-            # --- Model Checkpoint ---
-            checkpoint_callback = ks.callbacks.ModelCheckpoint(
-                str(self.stage.savepath / self.weights_path),
-                save_best_only=self.save_best,
-                save_weights_only=True,
+        # --- Backup & Restore ---
+        # Backup checkpoints each epoch and restore if training got cancelled midway through
+        if not self.force and self.stage.savepath is not None:
+            backup_dir = self.stage.savepath / "backups"
+            backup_callback = ks.callbacks.BackupAndRestore(
+                str(backup_dir),
+                save_freq=max(1, int(0.01 * self.stage.epochs * n_batches_per_epoch)),
             )
-            callbacks.append(checkpoint_callback)
+            callbacks.append(backup_callback)
 
         # --- Terminate on NaN ---
         # Terminate training when a NaN loss is encountered
@@ -865,18 +901,17 @@ class TFPAEModel(ks.Model):
 
         if stage.loadpath is not None:
             self.load_checkpoint(stage.loadpath)
-        else:
-            self.build_model()
+        self.build_model()
 
         # === Prep Data ===
-        data = (
+        train_data = (
             self.stage.train_data.phase,
             self.stage.train_data.dphase,
             self.stage.train_data.amplitude,
             self.stage.train_data.sigma,
             self.stage.train_data.mask,
         )
-        prep = self.prep_data(data)
+        prep = self.prep_data(train_data)
 
         test_data = (
             self.stage.test_data.phase,
@@ -900,7 +935,7 @@ class TFPAEModel(ks.Model):
         # === Train ===
         self._epoch = 0
         self.fit(
-            x=data,
+            x=train_data,
             y=prep,
             initial_epoch=self._epoch,
             epochs=self.stage.epochs,
@@ -909,8 +944,8 @@ class TFPAEModel(ks.Model):
             verbose=0,
         )
 
-    def build_model(self) -> None:
-        if not self.built:
+    def build_model(self, *, update: bool = False) -> None:
+        if not self.built or update:
             # Mask tensors to select specific latents
             if self.physical_latents:
                 self.latents_z_mask = tf.concat(
@@ -918,13 +953,10 @@ class TFPAEModel(ks.Model):
                 )
             else:
                 self.latents_z_mask = tf.ones(self.n_zs)
-            self.latents_physical_mask = tf.abs(
-                self.latents_z_mask - 1
-            )  # Swap 0s and 1s
+            self.latents_physical_mask = 1 - self.latents_z_mask  # Swap 0s and 1s
 
             # === Setup Encoder ===
             self.encoder.stage_num = self.stage.stage
-            self.encoder.moving_means = tf.convert_to_tensor(self.stage.moving_means)
             self.encoder.latents_z_mask = self.latents_z_mask
             self.encoder.latents_physical_mask = self.latents_physical_mask
 
@@ -933,23 +965,30 @@ class TFPAEModel(ks.Model):
                 decay_steps=self.stage.learning_rate_decay_steps,
                 decay_rate=self.stage.learning_rate_decay_rate,
             )
-            optimiser = self._optimiser(
-                learning_rate=schedule,
-                weight_decay=self.stage.learning_rate_weight_decay_rate,
-            )
-            self.compile(
-                optimizer=optimiser,
-                loss=self.options.loss_cls(),
-                run_eagerly=self.stage.debug,
-            )
-            self(
-                (
-                    tf.convert_to_tensor(self.stage.train_data.phase),
-                    tf.convert_to_tensor(self.stage.train_data.amplitude),
-                ),
-                training=False,
-                mask=self.stage.train_data.mask,
-            )
+            if update:
+                self.optimizer.learning_rate = schedule
+                self.optimizer.weight_decay = self.stage.learning_rate_weight_decay_rate
+
+            if not update:
+                optimiser = self._optimiser(
+                    learning_rate=schedule,
+                    weight_decay=self.stage.learning_rate_weight_decay_rate,
+                )
+                loss = self.options.loss_cls()
+                self.compile(
+                    optimizer=optimiser,
+                    loss=loss,
+                    metrics=self.metrics,
+                    run_eagerly=self.stage.debug,  # or True,
+                )
+                self(
+                    (
+                        tf.convert_to_tensor(self.stage.train_data.phase),
+                        tf.convert_to_tensor(self.stage.train_data.amplitude),
+                    ),
+                    training=False,
+                    mask=self.stage.train_data.mask,
+                )
 
             self.log.debug("Trainable variables:")
             for var in self.trainable_variables:
@@ -961,19 +1000,41 @@ class TFPAEModel(ks.Model):
         return self._loss_terms.get(loss, tf.constant(0, dtype=tf.float32))
 
     def save_checkpoint(self, savepath: "Path") -> None:
-        checkpoint = tf.train.Checkpoint(model=self, optimizer=self.optimizer)
-        checkpoint.save(savepath / "checkpoint/")
-        # self.save_weights(savepath / self.weights_path)
-        # self.save(savepath / self.model_path)
+        self.save_weights(savepath / self.weights_path)
+        self.save(savepath / self.model_path)
+        (savepath / self.ckpt_path).mkdir(parents=True, exist_ok=True)
+        tf.train.Checkpoint(
+            self,
+        ).save(f"{savepath / self.ckpt_path}/")
 
     def load_checkpoint(
         self, loadpath: "Path", *, reset_weights: bool | None = None
     ) -> None:
+        stage = self.stage
+
         self.build_model()
         init_weights = self.encoder.encode_output_layer.get_weights()[0]
-        # self.load_weights(loadpath / self.weights_path)
-        checkpoint = tf.train.Checkpoint(model=self, optimizer=self.optimizer)
-        checkpoint.restore(tf.train.latest_checkpoint(loadpath / "checkpoint/"))
+
+        self.train_step(
+            (
+                tf.zeros_like(self.stage.train_data.phase, dtype=tf.float32),
+                tf.zeros_like(self.stage.train_data.amplitude, dtype=tf.float32),
+                tf.zeros_like(self.stage.train_data.sigma, dtype=tf.float32),
+                tf.zeros_like(self.stage.train_data.mask, dtype=tf.int32),
+            ),
+            dummy=True,
+        )
+
+        tf.train.Checkpoint(
+            self,
+        ).restore(
+            tf.train.latest_checkpoint(f"{loadpath / self.ckpt_path}/")
+        ).assert_existing_objects_matched()
+
+        self.stage = stage
+
+        self.build_model(update=True)
+
         reset_weights = (
             (self.stage.stage < self.n_pae_latents)
             if reset_weights is None
@@ -996,12 +1057,21 @@ class TFPAEModel(ks.Model):
             if TYPE_CHECKING:
                 encoded = cast("FTensor[S['n_sn nspec_dim n_pae_latents']]", encoded)
 
-            latents_sum = tf.reduce_sum(encoded, axis=(0, 1))
-            latents_num = tf.reduce_sum(tf.ones_like(encoded), axis=(0, 1))
+            latents_sum = tf.reduce_sum(
+                encoded
+                * tf.cast(tf.reduce_min(mask, axis=-1, keepdims=True), tf.float32),
+                axis=(0, 1),
+            )
+            latents_num = tf.reduce_sum(
+                tf.cast(tf.reduce_min(mask, axis=-1, keepdims=True), tf.float32),
+                axis=(0, 1),
+            )
             moving_means = latents_sum / latents_num
             if TYPE_CHECKING:
                 latents_sum = cast("FTensor[S['n_pae_latents']]", latents_sum)
                 latents_num = cast("FTensor[S['n_pae_latents']]", latents_num)
+
+            if TYPE_CHECKING:
                 moving_means = cast("FTensor[S['n_pae_latents']]", moving_means)
             self.encoder.moving_means = moving_means
 
