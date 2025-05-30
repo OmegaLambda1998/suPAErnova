@@ -1,3 +1,3 @@
-from .posterior import PosteriorStepConfig, PosteriorModelConfig
+from .posterior import PosteriorStepConfig, PosteriorStepResult
 
-__all__ = ("PosteriorModelConfig", "PosteriorStepConfig")
+__all__ = ("PosteriorStepConfig", "PosteriorStepResult")

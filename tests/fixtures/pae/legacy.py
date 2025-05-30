@@ -9,17 +9,28 @@ from suPAErnova.configs.steps.pae import PAEStepResult
 from suPAErnova.configs.steps.data import DataStepResult
 
 if TYPE_CHECKING:
-    from typing import Any
     from pathlib import Path
-    from collections.abc import Callable
 
     from _pytest.tmpdir import TempPathFactory
 
+    from tests.fixtures.data import (
+        DataParams,
+        DataStepFactory,
+    )
+
+    from . import (
+        PAEParams,
+        PAEResults,
+        PAEStepFactory,
+        PAEStepResults,
+        PAEResultFactory,
+    )
+
 
 def legacy_pae_step(
-    pae_params: dict[str, "Any"],
+    pae_params: "PAEParams",
     data: "DataStepResult",
-) -> dict[str, dict[str, "Any"]]:
+) -> "PAEResults":
     # Used cached result if it exists.
     savepath = (
         pae_params["cache_path"]
@@ -210,11 +221,11 @@ def legacy_pae_step_factory(
     root_path: "Path",
     cache_path: "Path",
     tmp_path_factory: "TempPathFactory",
-    legacy_data_step_factory: "Callable[[dict[str, Any]], dict[str, Any]]",
-) -> "Callable[[dict[str, Any], dict[str, Any]], dict[str, dict[str, Any]]]":
+    legacy_data_step_factory: "DataStepFactory",
+) -> "PAEStepFactory":
     def _legacy_pae_step(
-        data_params: "dict[str, Any]", pae_params: "dict[str, Any]"
-    ) -> "dict[str, dict[str, Any]]":
+        data_params: "DataParams", pae_params: "PAEParams"
+    ) -> "PAEResults":
         pae_params["data_path"] = data_path
         pae_params["root_path"] = root_path
         pae_params["cache_path"] = cache_path
@@ -228,11 +239,11 @@ def legacy_pae_step_factory(
 
 @pytest.fixture(scope="session")
 def legacy_pae_result_factory(
-    legacy_pae_step_factory: "Callable[[dict[str, Any], dict[str, Any]], dict[str, dict[str, Any]]]",
-) -> "Callable[[dict[str, Any], dict[str, Any]], dict[str, PAEStepResult]]":
+    legacy_pae_step_factory: "PAEStepFactory",
+) -> "PAEResultFactory":
     def _legacy_pae_result(
-        data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
-    ) -> "dict[str, PAEStepResult]":
+        data_params: "DataParams", pae_params: "PAEParams"
+    ) -> "PAEStepResults":
         pae_step_results = legacy_pae_step_factory(data_params, pae_params)
         return {
             stage: PAEStepResult.model_validate(pae_step)

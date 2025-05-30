@@ -6,13 +6,17 @@ import pytest
 if TYPE_CHECKING:
     from typing import Any
     from pathlib import Path
-    from collections.abc import Callable
 
     from numpy import typing as npt
 
-    from suPAErnova.configs.steps.pae import PAEStepResult
-    from suPAErnova.configs.steps.data import DataStepResult
-    from suPAErnova.configs.steps.nflow import NFlowStepResult
+    from tests.fixtures.pae import PAEParams, PAEStepResults, PAEResultFactory
+    from tests.fixtures.data import DataParams, DataStepResults, DataResultFactory
+    from tests.fixtures.nflow import NFlowParams, NFlowStepResults, NFlowResultFactory
+    from tests.fixtures.posterior import (
+        PosteriorParams,
+        PosteriorStepResults,
+        PosteriorResultFactory,
+    )
 
 pytestmark = pytest.mark.paper_parity
 
@@ -203,7 +207,7 @@ def utils() -> PaperParityUtils:
 
 
 @pytest.fixture(scope="module")
-def data_params() -> dict[str, "Any"]:
+def data_params() -> "DataParams":
     return {
         "min_phase": -10,
         "max_phase": 40,
@@ -217,25 +221,23 @@ def data_params() -> dict[str, "Any"]:
 
 @pytest.fixture(scope="module")
 def snpae_data(
-    data_params: dict[str, "Any"],
-    snpae_data_result_factory: "Callable[[dict[str, Any]], DataStepResult]",
-) -> "DataStepResult":
+    data_params: "DataParams",
+    snpae_data_result_factory: "DataResultFactory",
+) -> "DataStepResults":
     result = snpae_data_result_factory(data_params)
     if result.metadata is None:
         result.metadata = {}
-    result.metadata["seed"] = data_params["seed"]
     return result
 
 
 @pytest.fixture(scope="module")
 def legacy_data(
-    data_params: dict[str, "Any"],
-    legacy_data_result_factory: "Callable[[dict[str, Any]], DataStepResult]",
-) -> "DataStepResult":
+    data_params: "DataParams",
+    legacy_data_result_factory: "DataResultFactory",
+) -> "DataStepResults":
     result = legacy_data_result_factory(data_params)
     if result.metadata is None:
         result.metadata = {}
-    result.metadata["seed"] = data_params["seed"]
     return result
 
 
@@ -245,7 +247,7 @@ def legacy_data(
 @pytest.fixture(scope="module")
 def pae_params(
     data_path: "Path",
-) -> dict[str, "Any"]:
+) -> "PAEParams":
     return {
         "fname": "paper_parity",
         "validation_frac": 0,
@@ -334,32 +336,32 @@ def pae_params(
 @pytest.fixture(scope="module")
 def snpae_pae(
     seed: tuple[int, str],
-    data_params: dict[str, "Any"],
-    pae_params: dict[str, "Any"],
-    snpae_pae_result_factory: "Callable[[dict[str, Any], dict[str, Any]], dict[str, PAEStepResult]]",
-) -> "dict[str,PAEStepResult]":
+    data_params: "DataParams",
+    pae_params: "PAEParams",
+    snpae_pae_result_factory: "PAEResultFactory",
+) -> "PAEStepResults":
     pae_params["kfold"], pae_params["seed"] = seed
     results = snpae_pae_result_factory(data_params, pae_params)
     for result in results.values():
         if result.metadata is None:
             result.metadata = {}
-        result.metadata["seed"] = data_params["seed"]
+        result.metadata["seed"] = pae_params["seed"]
     return results
 
 
 @pytest.fixture(scope="module")
 def legacy_pae(
     seed: tuple[int, str],
-    data_params: dict[str, "Any"],
-    pae_params: dict[str, "Any"],
-    legacy_pae_result_factory: "Callable[[dict[str, Any], dict[str, Any]], dict[str, PAEStepResult]]",
-) -> "dict[str, PAEStepResult]":
+    data_params: "DataParams",
+    pae_params: "PAEParams",
+    legacy_pae_result_factory: "PAEResultFactory",
+) -> "PAEStepResults":
     pae_params["kfold"], pae_params["seed"] = seed
     results = legacy_pae_result_factory(data_params, pae_params)
     for result in results.values():
         if result.metadata is None:
             result.metadata = {}
-        result.metadata["seed"] = data_params["seed"]
+        result.metadata["seed"] = pae_params["seed"]
     return results
 
 
@@ -367,7 +369,7 @@ def legacy_pae(
 
 
 @pytest.fixture(scope="module")
-def nflow_params(pae_params: dict[str, "Any"]) -> dict[str, "Any"]:
+def nflow_params(pae_params: "PAEParams") -> "NFlowParams":
     return {
         "fname": "paper_parity",
         "n_z_latents": pae_params["n_z_latents"],
@@ -389,32 +391,84 @@ def nflow_params(pae_params: dict[str, "Any"]) -> dict[str, "Any"]:
 @pytest.fixture(scope="module")
 def snpae_nflow(
     seed: tuple[int, str],
-    data_params: dict[str, "Any"],
-    pae_params: dict[str, "Any"],
-    nflow_params: dict[str, "Any"],
-    snpae_nflow_result_factory: "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], NFlowStepResult]",
-) -> "NFlowStepResult":
+    data_params: "DataParams",
+    pae_params: "PAEParams",
+    nflow_params: "NFlowParams",
+    snpae_nflow_result_factory: "NFlowResultFactory",
+) -> "NFlowStepResults":
     pae_params["kfold"], pae_params["seed"] = seed
     nflow_params["kfold"], nflow_params["seed"] = seed
     result = snpae_nflow_result_factory(data_params, pae_params, nflow_params)
     if result.metadata is None:
         result.metadata = {}
-    result.metadata["seed"] = data_params["seed"]
+    result.metadata["seed"] = nflow_params["seed"]
     return result
 
 
 @pytest.fixture(scope="module")
 def legacy_nflow(
     seed: tuple[int, str],
-    data_params: dict[str, "Any"],
-    pae_params: dict[str, "Any"],
-    nflow_params: dict[str, "Any"],
-    legacy_nflow_result_factory: "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], NFlowStepResult]",
-) -> "NFlowStepResult":
+    data_params: "DataParams",
+    pae_params: "PAEParams",
+    nflow_params: "NFlowParams",
+    legacy_nflow_result_factory: "NFlowResultFactory",
+) -> "NFlowStepResults":
     pae_params["kfold"], pae_params["seed"] = seed
     nflow_params["kfold"], nflow_params["seed"] = seed
     result = legacy_nflow_result_factory(data_params, pae_params, nflow_params)
     if result.metadata is None:
         result.metadata = {}
-    result.metadata["seed"] = data_params["seed"]
+    result.metadata["seed"] = nflow_params["seed"]
+    return result
+
+
+# --- Posterior Step ---
+
+
+@pytest.fixture(scope="module")
+def posterior_params(
+    pae_params: "PAEParams", nflow_params: "NFlowParams"
+) -> "PosteriorParams":
+    return {"fname": "paper_parity"}
+
+
+@pytest.fixture(scope="module")
+def snpae_posterior(
+    seed: tuple[int, str],
+    data_params: "DataParams",
+    pae_params: "PAEParams",
+    nflow_params: "NFlowParams",
+    posterior_params: "PosteriorParams",
+    snpae_posterior_result_factory: "PosteriorResultFactory",
+) -> "PosteriorStepResults":
+    pae_params["kfold"], pae_params["seed"] = seed
+    nflow_params["kfold"], nflow_params["seed"] = seed
+    posterior_params["kfold"], posterior_params["seed"] = seed
+    result = snpae_posterior_result_factory(
+        data_params, pae_params, nflow_params, posterior_params
+    )
+    if result.metadata is None:
+        result.metadata = {}
+    result.metadata["seed"] = nflow_params["seed"]
+    return result
+
+
+@pytest.fixture(scope="module")
+def legacy_posterior(
+    seed: tuple[int, str],
+    data_params: "DataParams",
+    pae_params: "PAEParams",
+    nflow_params: "NFlowParams",
+    posterior_params: "PosteriorParams",
+    legacy_posterior_result_factory: "PosteriorResultFactory",
+) -> "PosteriorStepResults":
+    pae_params["kfold"], pae_params["seed"] = seed
+    nflow_params["kfold"], nflow_params["seed"] = seed
+    posterior_params["kfold"], posterior_params["seed"] = seed
+    result = legacy_posterior_result_factory(
+        data_params, pae_params, nflow_params, posterior_params
+    )
+    if result.metadata is None:
+        result.metadata = {}
+    result.metadata["seed"] = nflow_params["seed"]
     return result

@@ -6,12 +6,15 @@ import suPAErnova
 from suPAErnova.configs.steps.data import DataStepConfig
 
 if TYPE_CHECKING:
-    from typing import Any
     from pathlib import Path
-    from collections.abc import Callable
 
-    from suPAErnova.steps.data import DataStep
-    from suPAErnova.configs.steps.data import DataStepResult
+    from . import (
+        DataParams,
+        DataResults,
+        DataStepFactory,
+        DataStepResults,
+        DataResultFactory,
+    )
 
 
 @pytest.fixture(scope="session")
@@ -19,9 +22,9 @@ def snpae_data_step_factory(
     data_path: "Path",
     root_path: "Path",
     cache_path: "Path",
-) -> "Callable[[dict[str, Any]], DataStep]":
-    def _snpae_data_step(data_params: "dict[str, Any]") -> "DataStep":
-        config: "dict[str, Any]" = {
+) -> "DataStepFactory":
+    def _snpae_data_step(data_params: "DataParams") -> "DataResults":
+        config = {
             "data": {
                 **{
                     key: val
@@ -49,9 +52,9 @@ def snpae_data_step_factory(
 
 @pytest.fixture(scope="session")
 def snpae_data_result_factory(
-    snpae_data_step_factory: "Callable[[dict[str, Any]], DataStep]",
-) -> "Callable[[dict[str, Any]], DataStepResult]":
-    def _snpae_data_result(data_params: dict[str, "Any"]) -> "DataStepResult":
+    snpae_data_step_factory: "DataStepFactory",
+) -> "DataResultFactory":
+    def _snpae_data_result(data_params: "DataParams") -> "DataStepResults":
         return snpae_data_step_factory(data_params).data
 
     return _snpae_data_result

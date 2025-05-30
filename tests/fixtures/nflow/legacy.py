@@ -3,25 +3,39 @@ from typing import TYPE_CHECKING
 import yaml
 import numpy as np
 import pytest
-import tensorflow as tf
 
 from suPAErnova.configs.steps.pae import PAEStepResult
 from suPAErnova.configs.steps.data import DataStepResult
 from suPAErnova.configs.steps.nflow import NFlowStepResult
 
 if TYPE_CHECKING:
-    from typing import Any
     from pathlib import Path
-    from collections.abc import Callable
 
     from _pytest.tmpdir import TempPathFactory
 
+    from tests.fixtures.pae import (
+        PAEParams,
+        PAEStepFactory,
+    )
+    from tests.fixtures.data import (
+        DataParams,
+        DataStepFactory,
+    )
+
+    from . import (
+        NFlowParams,
+        NFlowResults,
+        NFlowStepFactory,
+        NFlowStepResults,
+        NFlowResultFactory,
+    )
+
 
 def legacy_nflow_step(
-    nflow_params: dict[str, "Any"],
+    nflow_params: "NFlowParams",
     data: "DataStepResult",
     pae: "PAEStepResult",
-) -> dict[str, dict[str, "Any"]]:
+) -> "NFlowResults":
     # Used cached result if it exists.
     savepath = (
         nflow_params["cache_path"]
@@ -39,7 +53,7 @@ def legacy_nflow_step(
     # Import here to avoid dependency conflicts
     from supaernova_legacy.scripts.train_flow import train_flow
 
-    # Except where indicated, this is running the `train_ae` script verbatim
+    # Except where indicated, this is running the `train_flow` script verbatim
 
     # Variation: train_flow script modified to allow passing args as a list of strings
     # Variation: train_flow script modified to return a dictionary of results
@@ -153,14 +167,14 @@ def legacy_nflow_step_factory(
     root_path: "Path",
     cache_path: "Path",
     tmp_path_factory: "TempPathFactory",
-    legacy_data_step_factory: "Callable[[dict[str, Any]], dict[str, Any]]",
-    legacy_pae_step_factory: "Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]",
-) -> "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, dict[str, Any]]]":
+    legacy_data_step_factory: "DataStepFactory",
+    legacy_pae_step_factory: "PAEStepFactory",
+) -> "NFlowStepFactory":
     def _legacy_nflow_step(
-        data_params: "dict[str, Any]",
-        pae_params: "dict[str, Any]",
-        nflow_params: "dict[str, Any]",
-    ) -> "dict[str, dict[str, Any]]":
+        data_params: "DataParams",
+        pae_params: "PAEParams",
+        nflow_params: "NFlowParams",
+    ) -> "NFlowResults":
         nflow_params["data_path"] = data_path
         nflow_params["root_path"] = root_path
         nflow_params["cache_path"] = cache_path
@@ -177,13 +191,13 @@ def legacy_nflow_step_factory(
 
 @pytest.fixture(scope="session")
 def legacy_nflow_result_factory(
-    legacy_nflow_step_factory: "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, dict[str, Any]]]",
-) -> "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], NFlowStepResult]":
+    legacy_nflow_step_factory: "NFlowStepFactory",
+) -> "NFlowResultFactory":
     def _legacy_nflow_result(
-        data_params: dict[str, "Any"],
-        pae_params: dict[str, "Any"],
-        nflow_params: dict[str, "Any"],
-    ) -> "NFlowStepResult":
+        data_params: "DataParams",
+        pae_params: "PAEParams",
+        nflow_params: "NFlowParams",
+    ) -> "NFlowStepResults":
         nflow_step_results = legacy_nflow_step_factory(
             data_params, pae_params, nflow_params
         )

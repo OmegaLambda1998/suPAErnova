@@ -1,7 +1,6 @@
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import pytest
-import tensorflow as tf
 
 import suPAErnova
 from suPAErnova.configs.steps.pae import PAEStepConfig
@@ -9,14 +8,19 @@ from suPAErnova.configs.steps.data import DataStepConfig
 from suPAErnova.configs.steps.pae.model import PAEModelConfig
 
 if TYPE_CHECKING:
-    from typing import Any
     from pathlib import Path
-    from collections.abc import Callable
 
-    from suPAErnova.steps.pae import PAEStep
-    from suPAErnova.configs.steps.pae import PAEStepResult
+    from tests.fixtures.data import (
+        DataParams,
+    )
 
-    PAE = PAEStep[Literal["tf"]]
+    from . import (
+        PAEParams,
+        PAEResults,
+        PAEStepFactory,
+        PAEStepResults,
+        PAEResultFactory,
+    )
 
 
 @pytest.fixture(scope="session")
@@ -24,15 +28,15 @@ def snpae_pae_step_factory(
     data_path: "Path",
     root_path: "Path",
     cache_path: "Path",
-) -> "Callable[[dict[str, Any], dict[str, Any]], PAE]":
+) -> "PAEStepFactory":
     def _snpae_pae_step(
-        data_params: "dict[str, Any]", pae_params: "dict[str, Any]"
-    ) -> "PAE":
+        data_params: "DataParams", pae_params: "PAEParams"
+    ) -> "PAEResults":
         from suPAErnova.configs.steps.pae.tf import (
             TFPAEModelConfig,  # Import here to avoid dependency conflicts
         )
 
-        config: "dict[str, Any]" = {
+        config = {
             "data": {
                 **{
                     key: val
@@ -86,11 +90,11 @@ def snpae_pae_step_factory(
 
 @pytest.fixture(scope="session")
 def snpae_pae_result_factory(
-    snpae_pae_step_factory: "Callable[[dict[str, Any], dict[str, Any]], PAE]",
-) -> "Callable[[dict[str, Any], dict[str, Any]], dict[str, PAEStepResult]]":
+    snpae_pae_step_factory: "PAEStepFactory",
+) -> "PAEResultFactory":
     def _snpae_pae_result(
-        data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
-    ) -> "dict[str, PAEStepResult]":
+        data_params: "DataParams", pae_params: "PAEParams"
+    ) -> "PAEStepResults":
         pae_step = snpae_pae_step_factory(data_params, pae_params).models[0]
         pae_step._result()
         return pae_step.results

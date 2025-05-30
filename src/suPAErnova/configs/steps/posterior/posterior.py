@@ -4,6 +4,9 @@ from typing import Any, ClassVar
 import importlib
 from collections.abc import Callable
 
+import numpy as np
+from numpy import typing as npt
+
 from suPAErnova.steps.nflow import NFlowStep
 from suPAErnova.configs.steps.model import AbstractModelStepConfig
 from suPAErnova.configs.steps.nflow import NFlowStepConfig
@@ -13,7 +16,9 @@ from .model import PosteriorModelConfig
 
 
 class PosteriorStepResult(AbstractStepResult):
-    name: str
+    ind: "npt.NDArray[np.int32]"
+    sn_name: "npt.NDArray[np.str_]"
+    spectra_id: "npt.NDArray[np.str_]"
 
 
 class PosteriorStepConfig[Backend: str](

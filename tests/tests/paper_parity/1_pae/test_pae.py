@@ -6,6 +6,9 @@ import pytest
 from suPAErnova.configs.steps.pae import PAEStepResult
 from tests.tests.paper_parity.conftest import PaperParityUtils
 
+if TYPE_CHECKING:
+    from tests.fixtures.pae import PAEStepResults
+
 pytestmark = pytest.mark.pae
 
 STAGES = ["1", "4", "5", "6"]
@@ -13,23 +16,25 @@ KEYS = list(PAEStepResult.model_fields.keys())
 LOSSES = [k for k in KEYS if "loss" in k]
 AMPS = [k for k in KEYS if "_amp" in k]
 WEIGHTS = [k for k in KEYS if "_weights" in k]
-REMAINING = [k for k in KEYS if k not in LOSSES + AMPS + WEIGHTS + ["latents"]]
+REMAINING = [
+    k for k in KEYS if k not in LOSSES + AMPS + WEIGHTS + ["latents", "metadata"]
+]
 
 
 @pytest.mark.setup("snpae")
-def test_snpae_pae_setup(snpae_pae: "dict[str, PAEStepResult]") -> None:
+def test_snpae_pae_setup(snpae_pae: "PAEStepResults") -> None:
     pass
 
 
 @pytest.mark.setup("legacy_snpae")
-def test_legacy_pae_setup(legacy_pae: "dict[str, PAEStepResult]") -> None:
+def test_legacy_pae_setup(legacy_pae: "PAEStepResults") -> None:
     pass
 
 
 @pytest.mark.parametrize("stage", STAGES)
 def test_snpae_stages(
     stage: str,
-    snpae_pae: "dict[str, PAEStepResult]",
+    snpae_pae: "PAEStepResults",
 ) -> None:
     assert stage in snpae_pae
 
@@ -37,7 +42,7 @@ def test_snpae_stages(
 @pytest.mark.parametrize("stage", STAGES)
 def test_legacy_stages(
     stage: str,
-    legacy_pae: "dict[str, PAEStepResult]",
+    legacy_pae: "PAEStepResults",
 ) -> None:
     assert stage in legacy_pae
 
@@ -47,8 +52,8 @@ def test_legacy_stages(
 def test_shapes(
     stage: str,
     key: str,
-    snpae_pae: "dict[str, PAEStepResult]",
-    legacy_pae: "dict[str, PAEStepResult]",
+    snpae_pae: "PAEStepResults",
+    legacy_pae: "PAEStepResults",
 ) -> None:
     snpae_vals = np.array(getattr(snpae_pae[stage], key))
     legacy_vals = np.array(getattr(legacy_pae[stage], key))
@@ -60,8 +65,8 @@ def test_shapes(
 def test_matching_remaining(
     stage: str,
     key: str,
-    snpae_pae: "dict[str, PAEStepResult]",
-    legacy_pae: "dict[str, PAEStepResult]",
+    snpae_pae: "PAEStepResults",
+    legacy_pae: "PAEStepResults",
     utils: "PaperParityUtils",
 ) -> None:
     snpae_vals = np.array(getattr(snpae_pae[stage], key))
@@ -69,7 +74,12 @@ def test_matching_remaining(
     utils.assert_arrays(
         snpae_vals,
         legacy_vals,
-        metadata={"stage": stage, "key": key},
+        metadata={
+            **snpae_pae[stage].metadata,
+            **legacy_pae[stage].metadata,
+            "stage": stage,
+            "key": key,
+        },
     )
 
 
@@ -78,8 +88,8 @@ def test_matching_remaining(
 def test_matching_losses(
     stage: str,
     key: str,
-    snpae_pae: "dict[str, PAEStepResult]",
-    legacy_pae: "dict[str, PAEStepResult]",
+    snpae_pae: "PAEStepResults",
+    legacy_pae: "PAEStepResults",
     utils: "PaperParityUtils",
 ) -> None:
     snpae_vals = np.array(getattr(snpae_pae[stage], key))
@@ -87,7 +97,12 @@ def test_matching_losses(
     utils.assert_arrays(
         snpae_vals,
         legacy_vals,
-        metadata={"stage": stage, "key": key},
+        metadata={
+            **snpae_pae[stage].metadata,
+            **legacy_pae[stage].metadata,
+            "stage": stage,
+            "key": key,
+        },
         compare=PaperParityUtils.le,
     )
 
@@ -97,8 +112,8 @@ def test_matching_losses(
 def test_matching_amps(
     stage: str,
     key: str,
-    snpae_pae: "dict[str, PAEStepResult]",
-    legacy_pae: "dict[str, PAEStepResult]",
+    snpae_pae: "PAEStepResults",
+    legacy_pae: "PAEStepResults",
     utils: "PaperParityUtils",
 ) -> None:
     snpae_vals = np.array(getattr(snpae_pae[stage], key))
@@ -111,7 +126,12 @@ def test_matching_amps(
         spectra=snpae_pae[stage].spectra_id,
         snpae_sigma=snpae_sigma,
         legacy_sigma=legacy_sigma,
-        metadata={"stage": stage, "key": key},
+        metadata={
+            **snpae_pae[stage].metadata,
+            **legacy_pae[stage].metadata,
+            "stage": stage,
+            "key": key,
+        },
     )
 
 
@@ -120,8 +140,8 @@ def test_matching_amps(
 def test_matching_amp_means(
     stage: str,
     key: str,
-    snpae_pae: "dict[str, PAEStepResult]",
-    legacy_pae: "dict[str, PAEStepResult]",
+    snpae_pae: "PAEStepResults",
+    legacy_pae: "PAEStepResults",
     utils: "PaperParityUtils",
 ) -> None:
     snpae_vals = np.array(getattr(snpae_pae[stage], key))
@@ -131,27 +151,40 @@ def test_matching_amp_means(
         legacy_vals.mean(axis=(0, 1)),
         snpae_sigma=snpae_vals.std(axis=(0, 1)),
         legacy_sigma=legacy_vals.std(axis=(0, 1)),
-        metadata={"stage": stage, "key": key},
+        metadata={
+            **snpae_pae[stage].metadata,
+            **legacy_pae[stage].metadata,
+            "stage": stage,
+            "key": key,
+        },
     )
 
 
 @pytest.mark.parametrize("stage", STAGES)
 def test_matching_latents(
     stage: str,
-    snpae_pae: "dict[str, PAEStepResult]",
-    legacy_pae: "dict[str, PAEStepResult]",
+    snpae_pae: "PAEStepResults",
+    legacy_pae: "PAEStepResults",
     utils: "PaperParityUtils",
 ) -> None:
     snpae_vals = np.array(snpae_pae[stage].latents)
     legacy_vals = np.array(legacy_pae[stage].latents)
-    utils.assert_arrays(abs(snpae_vals), abs(legacy_vals), metadata={"stage": stage})
+    utils.assert_arrays(
+        abs(snpae_vals),
+        abs(legacy_vals),
+        metadata={
+            **snpae_pae[stage].metadata,
+            **legacy_pae[stage].metadata,
+            "stage": stage,
+        },
+    )
 
 
 @pytest.mark.parametrize("stage", STAGES)
 def test_matching_latent_means(
     stage: str,
-    snpae_pae: "dict[str, PAEStepResult]",
-    legacy_pae: "dict[str, PAEStepResult]",
+    snpae_pae: "PAEStepResults",
+    legacy_pae: "PAEStepResults",
     utils: "PaperParityUtils",
 ) -> None:
     snpae_vals = np.array(snpae_pae[stage].latents)
@@ -163,5 +196,9 @@ def test_matching_latent_means(
         sort=False,
         snpae_sigma=snpae_vals.std(axis=0),
         legacy_sigma=legacy_vals.std(axis=0),
-        metadata={"stage": stage},
+        metadata={
+            **snpae_pae[stage].metadata,
+            **legacy_pae[stage].metadata,
+            "stage": stage,
+        },
     )

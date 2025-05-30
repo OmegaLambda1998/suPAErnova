@@ -11,8 +11,13 @@ import sncosmo
 from suPAErnova.configs.steps.data import DataStepResult
 
 if TYPE_CHECKING:
-    from typing import Any
-    from collections.abc import Callable
+    from . import (
+        DataParams,
+        DataResults,
+        DataStepFactory,
+        DataStepResults,
+        DataResultFactory,
+    )
 
 KEY_MAP = {
     "ind": "ID",
@@ -39,7 +44,7 @@ KEY_MAP = {
 }
 
 
-def legacy_data_step(data_params: dict[str, "Any"]) -> dict[str, "Any"]:
+def legacy_data_step(data_params: "DataParams") -> "DataResults":
     # Except where indicated, this is taken verbatim from the `salt_model_make_dataset` notebook
     # Comments have been removed
     # Print statements have been removed
@@ -437,8 +442,8 @@ def legacy_data_step_factory(
     data_path: "Path",
     root_path: "Path",
     cache_path: "Path",
-) -> "Callable[[dict[str, Any]], dict[str, Any]]":
-    def _legacy_data_step(data_params: "dict[str, Any]") -> "dict[str, Any]":
+) -> "DataStepFactory":
+    def _legacy_data_step(data_params: "DataParams") -> "DataResults":
         data_params["data_path"] = data_path
         data_params["root_path"] = root_path
         data_params["cache_path"] = cache_path
@@ -449,9 +454,9 @@ def legacy_data_step_factory(
 
 @pytest.fixture(scope="session")
 def legacy_data_result_factory(
-    legacy_data_step_factory: "Callable[[dict[str, Any]], dict[str, Any]]",
-) -> "Callable[[dict[str, Any]], DataStepResult]":
-    def _legacy_data_result(data_params: dict[str, "Any"]) -> "DataStepResult":
+    legacy_data_step_factory: "DataStepFactory",
+) -> "DataResultFactory":
+    def _legacy_data_result(data_params: "DataParams") -> "DataStepResults":
         return DataStepResult.model_validate(legacy_data_step_factory(data_params))
 
     return _legacy_data_result

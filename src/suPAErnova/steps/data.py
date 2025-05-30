@@ -217,18 +217,20 @@ class DataStep(SNPAEStep):
         self.sne.to_pickle(self.out_sne)
 
         self.log.debug(f"Saving data arrays to {self.out_data}")
-        np.savez_compressed(self.out_data, **self.data.model_dump())
+        np.savez_compressed(self.out_data, **self.data.model_dump(exclude={"metadata"}))
 
         self.log.debug(f"Saving training data arrays to {self.out_train}")
         for i, train_data in enumerate(self.train_data):
             np.savez_compressed(
-                self.out_train / f"kfold_{i:d}.npz", **train_data.model_dump()
+                self.out_train / f"kfold_{i:d}.npz",
+                **train_data.model_dump(exclude={"metadata"}),
             )
 
         self.log.debug(f"Saving testing data arrays to {self.out_test}")
         for i, test_data in enumerate(self.test_data):
             np.savez_compressed(
-                self.out_test / f"kfold_{i:d}.npz", **test_data.model_dump()
+                self.out_test / f"kfold_{i:d}.npz",
+                **test_data.model_dump(exclude={"metadata"}),
             )
 
     @override

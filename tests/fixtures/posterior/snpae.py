@@ -7,7 +7,9 @@ from suPAErnova.configs.steps.pae import PAEStepConfig
 from suPAErnova.configs.steps.data import DataStepConfig
 from suPAErnova.configs.steps.nflow import NFlowStepConfig
 from suPAErnova.configs.steps.pae.model import PAEModelConfig
+from suPAErnova.configs.steps.posterior import PosteriorStepConfig
 from suPAErnova.configs.steps.nflow.model import NFlowModelConfig
+from suPAErnova.configs.steps.posterior.model import PosteriorModelConfig
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -18,33 +20,40 @@ if TYPE_CHECKING:
     from tests.fixtures.data import (
         DataParams,
     )
+    from tests.fixtures.nflow import (
+        NFlowParams,
+    )
 
     from . import (
-        NFlowParams,
-        NFlowResults,
-        NFlowStepFactory,
-        NFlowStepResults,
-        NFlowResultFactory,
+        PosteriorParams,
+        PosteriorResults,
+        PosteriorStepFactory,
+        PosteriorStepResults,
+        PosteriorResultFactory,
     )
 
 
 @pytest.fixture(scope="session")
-def snpae_nflow_step_factory(
+def snpae_posterior_step_factory(
     data_path: "Path",
     root_path: "Path",
     cache_path: "Path",
-) -> "NFlowStepFactory":
-    def _snpae_nflow_step(
+) -> "PosteriorStepFactory":
+    def _snpae_posterior_step(
         data_params: "DataParams",
         pae_params: "PAEParams",
         nflow_params: "NFlowParams",
-    ) -> "NFlowResults":
+        posterior_params: "PosteriorParams",
+    ) -> "PosteriorResults":
         # Import here to avoid dependency conflicts
         from suPAErnova.configs.steps.pae.tf import (
             TFPAEModelConfig,
         )
         from suPAErnova.configs.steps.nflow.tf import (
             TFNFlowModelConfig,
+        )
+        from suPAErnova.configs.steps.posterior.tf import (
+            TFPosteriorModelConfig,
         )
 
         config = {
@@ -94,45 +103,77 @@ def snpae_nflow_step_factory(
                     "backend": "tf",
                 },
             },
+            "posterior": {
+                "seed": posterior_params["seed"],
+                "model": {
+                    **{
+                        key: val
+                        for key, val in posterior_params.items()
+                        if key
+                        in {
+                            *PosteriorStepConfig.model_fields.keys(),
+                            *PosteriorModelConfig.model_fields.keys(),
+                            *TFPosteriorModelConfig.model_fields.keys(),
+                        }
+                    },
+                    "backend": "tf",
+                },
+            },
         }
         snpae = suPAErnova.prepare_config(
             config,
             base_path=root_path,
             out_path=cache_path
-            / nflow_params["fname"]
-            / "nflow"
+            / posterior_params["fname"]
+            / "posterior"
             / "snpae"
-            / nflow_params["seed"],
+            / posterior_params["seed"],
         )
         assert snpae.data is not None, "Error setting up DataStep"
         snpae.data.paths.out = (
-            cache_path / nflow_params["fname"] / "data" / "snpae" / snpae.data.name
+            cache_path / posterior_params["fname"] / "data" / "snpae" / snpae.data.name
         )
+
         assert snpae.pae is not None, "Error setting up PAEStep"
         snpae.pae.paths.out = (
-            cache_path / nflow_params["fname"] / "pae" / "snpae" / pae_params["seed"]
+            cache_path / pae_params["fname"] / "pae" / "snpae" / pae_params["seed"]
         )
         for model in snpae.pae.models:
             model.paths.out = snpae.pae.paths.out / "PAEStepConfig" / "TFPAEModelConfig"
+        assert snpae.nflow is not None, "Error setting up NFlowStep"
+        snpae.nflow.paths.out = (
+            cache_path
+            / nflow_params["fname"]
+            / "nflow"
+            / "snpae"
+            / nflow_params["seed"]
+        )
+        for model in snpae.nflow.models:
+            model.paths.out = (
+                snpae.nflow.paths.out / "NFlowStepConfig" / "TFNFlowModelConfig"
+            )
         snpae.run()
-        nflowstep = snpae.nflow_step
-        assert nflowstep is not None, "Error running NFlowStep"
-        return nflowstep
+        posteriorstep = snpae.posterior_step
+        assert posteriorstep is not None, "Error running PosteriorStep"
+        return posteriorstep
 
-    return _snpae_nflow_step
+    return _snpae_posterior_step
 
 
 @pytest.fixture(scope="session")
-def snpae_nflow_result_factory(
-    snpae_nflow_step_factory: "NFlowStepFactory",
-) -> "NFlowResultFactory":
-    def _snpae_nflow_result(
-        data_params: "DataParams", pae_params: "PAEParams", nflow_params: "NFlowParams"
-    ) -> "NFlowStepResults":
-        nflow_step = snpae_nflow_step_factory(
-            data_params, pae_params, nflow_params
+def snpae_posterior_result_factory(
+    snpae_posterior_step_factory: "PosteriorStepFactory",
+) -> "PosteriorResultFactory":
+    def _snpae_posterior_result(
+        data_params: "DataParams",
+        pae_params: "PAEParams",
+        nflow_params: "NFlowParams",
+        posterior_params: "PosteriorParams",
+    ) -> "PosteriorStepResults":
+        posterior_step = snpae_posterior_step_factory(
+            data_params, pae_params, nflow_params, posterior_params
         ).models[0]
-        nflow_step._result()
-        return nflow_step.results
+        posterior_step._result()
+        return posterior_step.results
 
-    return _snpae_nflow_result
+    return _snpae_posterior_result
