@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 import yaml
 import numpy as np
 import pytest
+import tensorflow as tf
 
 from suPAErnova.configs.steps.pae import PAEStepResult
 from suPAErnova.configs.steps.data import DataStepResult
@@ -33,7 +34,7 @@ def legacy_nflow_step(
     savepath.parent.mkdir(parents=True, exist_ok=True)
     if savepath.exists():
         with np.load(savepath, allow_pickle=True) as io:
-            return {k: v.item() for k, v in io.items()}
+            return dict(io.items())
 
     # Import here to avoid dependency conflicts
     from supaernova_legacy.scripts.train_flow import train_flow
@@ -47,6 +48,9 @@ def legacy_nflow_step(
     #            In particular:
     #             - `tf.tf_fn(x)` is no longer valid, so has been updated to `ks.layers.Lambda(tf.tf_fn)(x)`
     #             - Stricter dtype checks (int32 ~= int64 ~= float32 ~= float64). Using tf.cast where needed.
+    # Variation: Legacy code used an old version of TensorflowProbability which is no longer compatible with tf.keras.
+    #            Instead we need to use tf_keras
+    # Variation: Legacy code was incorrectly loading models in, this has been fixed
 
     data_out_path: Path = (
         nflow_params["cache_path"] / nflow_params["fname"] / "data" / "legacy"
@@ -59,8 +63,8 @@ def legacy_nflow_step(
         / nflow_params["seed"]
     )
 
-    model_dir = pae_out_path / "tensorflow_models"
-    model_dir.mkdir(parents=True, exist_ok=True)
+    pae_model_dir = pae_out_path / "tensorflow_models"
+    pae_model_dir.mkdir(parents=True, exist_ok=True)
     param_dir = pae_out_path / "params"
     param_dir.mkdir(parents=True, exist_ok=True)
 
@@ -71,20 +75,28 @@ def legacy_nflow_step(
         / "legacy"
         / nflow_params["seed"]
     )
+    nflow_model_dir = nflow_out_path / "tensorflow_models"
+    nflow_model_dir.mkdir(parents=True, exist_ok=True)
 
     yaml_config = nflow_params["tmp_path"] / "train.yaml"
 
     config = {
         "nflow": {
             "PROJECT_DIR": str(nflow_params["root_path"]),
-            "MODEL_DIR": str(model_dir),
+            "MODEL_DIR": str(pae_model_dir),
+            "NFLOW_MODEL_DIR": str(nflow_model_dir),
             "PARAM_DIR": str(param_dir),
             "model_summary": False,
             "out_file_tail": "",
-            "train_data_file": str(data_out_path / "train" / "kfold0.npz"),
-            "test_data_file": str(data_out_path / "test" / "kfold0.npz"),
+            "train_data_file": str(
+                data_out_path / "train" / f"kfold{nflow_params['kfold']}.npz"
+            ),
+            "test_data_file": str(
+                data_out_path / "test" / f"kfold{nflow_params['kfold']}.npz"
+            ),
             "verbose": True,
-            "kfold": 0,
+            "kfold": nflow_params["kfold"],
+            "seed": int(nflow_params["seed"]),
             "prev_train_stage": "5",
             "set_data_min_val": 0,
             "checkpoint_flow_every": 10,
@@ -106,13 +118,33 @@ def legacy_nflow_step(
         yaml.safe_dump(config, io)
 
     args = [f"--yaml_config={yaml_config}", "--config=nflow"]
-    results = train_flow(args)
+    model, flow, params = train_flow(args)
 
     nflow_step_results = {}
+    nflow_step_results["ind"] = data.ind
+    nflow_step_results["sn_name"] = data.sn_name
+    nflow_step_results["spectra_id"] = data.spectra_id
+
+    # SNPAE latent ordering:
+    # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅 ([0, 1, 2, 3, 4, 5])
+    # Legacy latent ordering:
+    # Δ𝓅 -> Δℳ  -> ΔAᵥ -> zs ([5, 4, 0, 1, 2, 3])
+    z = pae.latents[:, [5, 4, 0, 1, 2, 3]]
+
+    z = pae.latents[:, -4:]
+    if not params["use_extrinsic_params"]:
+        z = z[:, 1:]
+    nflow_step_results["latents"] = z
+
+    nflow_step_results["log_prob"] = -model(z)
+
+    u = flow.bijector.inverse(z)
+    nflow_step_results["z_to_u"] = u
+    nflow_step_results["u_to_z"] = flow.bijector.forward(u)
 
     np.savez_compressed(savepath, **nflow_step_results)
     with np.load(savepath, allow_pickle=True) as io:
-        return {k: v.item() for k, v in io.items()}
+        return dict(io.items())
 
 
 @pytest.fixture(scope="session")

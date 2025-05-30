@@ -650,12 +650,14 @@ class DataStep(SNPAEStep):
                 DataStepResult.model_validate({
                     key: val[inds_train, :, :] if val.ndim == 3 else val[inds_train, :]
                     for key, val in self.data.model_dump().items()
+                    if val is not None
                 })
             )
             self.test_data.append(
                 DataStepResult.model_validate({
                     key: val[inds_test, :, :] if val.ndim == 3 else val[inds_test, :]
                     for key, val in self.data.model_dump().items()
+                    if val is not None
                 })
             )
         n_train_sn = self.train_data[0].amplitude.shape[0]

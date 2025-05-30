@@ -81,6 +81,7 @@ function main {
                 ;;
             test)
                 group="tests"
+                extra="legacy"
                 cmd="pytest"
                 shift
                 ;;

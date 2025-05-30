@@ -117,3 +117,5 @@ class StepConfig(SNPAEConfig):
 
 class AbstractStepResult(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(arbitrary_types_allowed=True)
+
+    metadata: dict[str, Any] | None = None

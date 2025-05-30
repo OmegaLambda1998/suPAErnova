@@ -22,14 +22,10 @@ class NFlowStepResult(AbstractStepResult):
     spectra_id: "npt.NDArray[np.str_]"
 
     latents: "npt.NDArray[np.float32]"
-    output_amp: "npt.NDArray[np.float32]"
 
-    loss: float
-    pred_loss: float
-    model_loss: float
-    resid_loss: float
-    delta_loss: float
-    cov_loss: float
+    log_prob: "npt.NDArray[np.float32]"
+    z_to_u: "npt.NDArray[np.float32]"
+    u_to_z: "npt.NDArray[np.float32]"
 
 
 class NFlowStepConfig[Backend: str](AbstractModelStepConfig[Backend, NFlowModelConfig]):

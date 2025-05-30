@@ -85,24 +85,31 @@ class PAEStep[Backend: str](AbstractModelStep[Backend, PAEModelStep[Backend]]):
         else:
             val_data = test_data
 
-        # `(list * ((desired_length // actual_length) + 1))[:desired_length]`
-        # Repeat `list` `(desired_length // actual_length) + 1` times, then take the first `desired_length` items
-        self.train_data = (train_data * ((self.n_models // self.n_kfolds) + 1))[
-            : self.n_models
-        ]
-        self.test_data = (test_data * ((self.n_models // self.n_kfolds) + 1))[
-            : self.n_models
-        ]
-        self.val_data = (val_data * ((self.n_models // self.n_kfolds) + 1))[
-            : self.n_models
-        ]
+        if self.options.kfolds is None:
+            self.kfolds = list(range(len(self.n_kfolds)))
+            # `(list * ((desired_length // actual_length) + 1))[:desired_length]`
+            # Repeat `list` `(desired_length // actual_length) + 1` times, then take the first `desired_length` items
+            self.train_data = (train_data * ((self.n_models // self.n_kfolds) + 1))[
+                : self.n_models
+            ]
+            self.test_data = (test_data * ((self.n_models // self.n_kfolds) + 1))[
+                : self.n_models
+            ]
+            self.val_data = (val_data * ((self.n_models // self.n_kfolds) + 1))[
+                : self.n_models
+            ]
+        else:
+            self.kfolds = self.options.kfolds
+            self.train_data = train_data
+            self.test_data = test_data
+            self.val_data = val_data
 
         for i, model in enumerate(self.models):
             model.setup(
                 data=self.data,
-                train_data=self.train_data[i],
-                test_data=self.test_data[i],
-                val_data=self.val_data[i],
+                train_data=self.train_data[self.kfolds[i]],
+                test_data=self.test_data[self.kfolds[i]],
+                val_data=self.val_data[self.kfolds[i]],
             )
 
 

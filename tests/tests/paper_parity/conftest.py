@@ -12,22 +12,23 @@ if TYPE_CHECKING:
 
     from suPAErnova.configs.steps.pae import PAEStepResult
     from suPAErnova.configs.steps.data import DataStepResult
+    from suPAErnova.configs.steps.nflow import NFlowStepResult
 
 pytestmark = pytest.mark.paper_parity
 
 # --- Constants ---
-SEEDS = ["12345"]  # , "23456", "34567", "45678", "56789"]
+SEEDS = list(enumerate(("12345", "23456", "34567", "45678")))
 
 
 @pytest.fixture(scope="module", params=SEEDS)
-def seed(request) -> str:
+def seed(request) -> tuple[int, str]:
     return request.param
 
 
 # --- Utilities ---
 class PaperParityUtils:
     @staticmethod
-    def compare_arrays(
+    def equal(
         snpae: "npt.NDArray[Any]",
         legacy: "npt.NDArray[Any]",
         *,
@@ -38,17 +39,58 @@ class PaperParityUtils:
             legacy.dtype, np.number
         ):
             if (snpae_sigma is not None) and (legacy_sigma is not None):
-                atol = np.sqrt(snpae_sigma * snpae_sigma + legacy_sigma * legacy_sigma)
+                atol = 0.5 * (snpae_sigma + legacy_sigma)
             else:
                 atol = 1e-8
             return np.isclose(snpae, legacy, atol=atol)
         return snpae == legacy
 
     @staticmethod
-    def diff_arrays(
+    def le(
+        snpae: "npt.NDArray[Any]",
+        legacy: "npt.NDArray[Any]",
+        *,
+        _snpae_sigma: "float | npt.NDArray[Any] | None" = None,
+        _legacy_sigma: "float | npt.NDArray[Any] | None" = None,
+    ) -> "npt.NDArray[np.bool]":
+        return snpae <= legacy
+
+    @staticmethod
+    def lt(
+        snpae: "npt.NDArray[Any]",
+        legacy: "npt.NDArray[Any]",
+        *,
+        _snpae_sigma: "float | npt.NDArray[Any] | None" = None,
+        _legacy_sigma: "float | npt.NDArray[Any] | None" = None,
+    ) -> "npt.NDArray[np.bool]":
+        return snpae < legacy
+
+    @staticmethod
+    def ge(
+        snpae: "npt.NDArray[Any]",
+        legacy: "npt.NDArray[Any]",
+        *,
+        _snpae_sigma: "float | npt.NDArray[Any] | None" = None,
+        _legacy_sigma: "float | npt.NDArray[Any] | None" = None,
+    ) -> "npt.NDArray[np.bool]":
+        return snpae >= legacy
+
+    @staticmethod
+    def gt(
+        snpae: "npt.NDArray[Any]",
+        legacy: "npt.NDArray[Any]",
+        *,
+        _snpae_sigma: "float | npt.NDArray[Any] | None" = None,
+        _legacy_sigma: "float | npt.NDArray[Any] | None" = None,
+    ) -> "npt.NDArray[np.bool]":
+        return snpae < legacy
+
+    @staticmethod
+    def context(
         snpae: "npt.NDArray[Any]",
         legacy: "npt.NDArray[Any]",
         diff_mask: "npt.NDArray[np.bool]",
+        metadata: dict[str, "Any"],
         *,
         max_diffs: int = 5,
         sort: bool = True,
@@ -56,6 +98,10 @@ class PaperParityUtils:
         snpae_sigma: "npt.NDArray[Any] | None" = None,
         legacy_sigma: "npt.NDArray[Any] | None" = None,
     ) -> str:
+        s = ""
+        for k, v in metadata.items():
+            s += f"{k}: {v}\n"
+
         eps = 1e-10
 
         # Element-wise comparison
@@ -77,7 +123,7 @@ class PaperParityUtils:
         std_rel_diff = rel_diff.std()
         rel_sort_mask = np.argsort(rel_diff[diff_mask])[::-1]
 
-        s = f"{len(diff_indices)} differences ({int(100 * len(diff_indices) / diff_mask.size)}%):\n"
+        s += f"{len(diff_indices)} differences ({int(100 * len(diff_indices) / diff_mask.size)}%):\n"
         s += f"Absolute Difference - min: {min_abs_diff:.2f}, max: {max_abs_diff:.2f}, mean±std: {mean_abs_diff:.2f}±{std_abs_diff:.2f}\n"
         s += f"Relative Difference - min: {min_rel_diff:.2%}, max: {max_rel_diff:.2%}, mean±std: {mean_rel_diff:.2%}±{std_rel_diff:.2%}\n"
 
@@ -104,7 +150,7 @@ class PaperParityUtils:
             rel_val_diff = 2 * val_diff / (snpae_val + legacy_val + eps)
 
             s += f"  At index {[int(i) for i in tuple(idx)]}{f' ({spectra[idx[0]][idx[1]][0]})' if spectra is not None else ''}:\n"
-            s += f"    snpae = {snpae_val:.2f}{f'±{snpae_val_sigma:.4f}' if snpae_val_sigma is not None else ''}, legacy = {legacy_val:.2f}{f'±{legacy_val_sigma:.4f}' if legacy_val_sigma is not None else ''}\n"
+            s += f"    snpae = {snpae_val:.4f}{f'±{snpae_val_sigma:.4f}' if snpae_val_sigma is not None else ''}, legacy = {legacy_val:.4f}{f'±{legacy_val_sigma:.4f}' if legacy_val_sigma is not None else ''}\n"
             s += f"    abs diff = {abs_val_diff:.2f}, rel diff = {rel_val_diff:.2%}\n"
 
         if len(diff_indices) > max_diffs:
@@ -122,14 +168,24 @@ class PaperParityUtils:
         spectra: "npt.NDArray[np.str_] | None" = None,
         snpae_sigma: "npt.NDArray[Any] | None" = None,
         legacy_sigma: "npt.NDArray[Any] | None" = None,
+        metadata: dict[str, "Any"] | None = None,
+        compare: "Any" = None,
     ) -> None:
-        diff_mask = PaperParityUtils.compare_arrays(
+        if metadata is None:
+            metadata = {}
+
+        if compare is None:
+            compare = PaperParityUtils.equal
+
+        diff_mask = compare(
             snpae, legacy, snpae_sigma=snpae_sigma, legacy_sigma=legacy_sigma
         )
-        assert diff_mask.all(), PaperParityUtils.diff_arrays(
+
+        assert diff_mask.all(), PaperParityUtils.context(
             snpae,
             legacy,
             np.logical_not(diff_mask),
+            metadata,
             max_diffs=max_diffs,
             sort=sort,
             spectra=spectra,
@@ -152,10 +208,10 @@ def data_params() -> dict[str, "Any"]:
         "min_phase": -10,
         "max_phase": 40,
         "train_frac": 0.75,
-        "seed": 12345,
         "fname": "paper_parity",
         "cosmological_model": "WMAP7",
         "salt_model": "salt2",
+        "seed": SEEDS[0][-1],
     }
 
 
@@ -164,7 +220,11 @@ def snpae_data(
     data_params: dict[str, "Any"],
     snpae_data_result_factory: "Callable[[dict[str, Any]], DataStepResult]",
 ) -> "DataStepResult":
-    return snpae_data_result_factory(data_params)
+    result = snpae_data_result_factory(data_params)
+    if result.metadata is None:
+        result.metadata = {}
+    result.metadata["seed"] = data_params["seed"]
+    return result
 
 
 @pytest.fixture(scope="module")
@@ -172,7 +232,11 @@ def legacy_data(
     data_params: dict[str, "Any"],
     legacy_data_result_factory: "Callable[[dict[str, Any]], DataStepResult]",
 ) -> "DataStepResult":
-    return legacy_data_result_factory(data_params)
+    result = legacy_data_result_factory(data_params)
+    if result.metadata is None:
+        result.metadata = {}
+    result.metadata["seed"] = data_params["seed"]
+    return result
 
 
 # --- PAE Step ---
@@ -269,24 +333,34 @@ def pae_params(
 
 @pytest.fixture(scope="module")
 def snpae_pae(
-    seed: str,
+    seed: tuple[int, str],
     data_params: dict[str, "Any"],
     pae_params: dict[str, "Any"],
-    snpae_pae_result_factory: "Callable[[dict[str, Any], dict[str, Any]], PAEStepResult]",
-) -> "PAEStepResult":
-    pae_params["seed"] = seed
-    return snpae_pae_result_factory(data_params, pae_params)
+    snpae_pae_result_factory: "Callable[[dict[str, Any], dict[str, Any]], dict[str, PAEStepResult]]",
+) -> "dict[str,PAEStepResult]":
+    pae_params["kfold"], pae_params["seed"] = seed
+    results = snpae_pae_result_factory(data_params, pae_params)
+    for result in results.values():
+        if result.metadata is None:
+            result.metadata = {}
+        result.metadata["seed"] = data_params["seed"]
+    return results
 
 
 @pytest.fixture(scope="module")
 def legacy_pae(
-    seed: str,
+    seed: tuple[int, str],
     data_params: dict[str, "Any"],
     pae_params: dict[str, "Any"],
-    legacy_pae_result_factory: "Callable[[dict[str, Any], dict[str, Any]], list[PAEStepResult]]",
-) -> "list[PAEStepResult]":
-    pae_params["seed"] = seed
-    return legacy_pae_result_factory(data_params, pae_params)
+    legacy_pae_result_factory: "Callable[[dict[str, Any], dict[str, Any]], dict[str, PAEStepResult]]",
+) -> "dict[str, PAEStepResult]":
+    pae_params["kfold"], pae_params["seed"] = seed
+    results = legacy_pae_result_factory(data_params, pae_params)
+    for result in results.values():
+        if result.metadata is None:
+            result.metadata = {}
+        result.metadata["seed"] = data_params["seed"]
+    return results
 
 
 # --- NFlow Step ---
@@ -307,30 +381,40 @@ def nflow_params(pae_params: dict[str, "Any"]) -> dict[str, "Any"]:
         "epochs": 500,
         "batch_normalisation": False,
         "validation_frac": 0.22,
+        "activation": "relu",
+        "optimiser": "Adam",
     }
 
 
-# @pytest.fixture(scope="module")
-# def snpae_nflow(
-#     seed: str,
-#     data_params: dict[str, "Any"],
-#     pae_params: dict[str, "Any"],
-#     nflow_params: dict[str, "Any"],
-#     snpae_nflow_result_factory: "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], PAEStepResult]",
-# ) -> "PAEStepResult":
-#     pae_params["seed"] = seed
-#     nflow_params["seed"] = seed
-#     return snpae_nflow_result_factory(data_params, pae_params, nflow_params)
-#
-#
 @pytest.fixture(scope="module")
-def legacy_nflow(
-    seed: str,
+def snpae_nflow(
+    seed: tuple[int, str],
     data_params: dict[str, "Any"],
     pae_params: dict[str, "Any"],
     nflow_params: dict[str, "Any"],
-    legacy_nflow_result_factory: "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], list[PAEStepResult]]",
-) -> "list[PAEStepResult]":
-    pae_params["seed"] = seed
-    nflow_params["seed"] = seed
-    return legacy_nflow_result_factory(data_params, pae_params, nflow_params)
+    snpae_nflow_result_factory: "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], NFlowStepResult]",
+) -> "NFlowStepResult":
+    pae_params["kfold"], pae_params["seed"] = seed
+    nflow_params["kfold"], nflow_params["seed"] = seed
+    result = snpae_nflow_result_factory(data_params, pae_params, nflow_params)
+    if result.metadata is None:
+        result.metadata = {}
+    result.metadata["seed"] = data_params["seed"]
+    return result
+
+
+@pytest.fixture(scope="module")
+def legacy_nflow(
+    seed: tuple[int, str],
+    data_params: dict[str, "Any"],
+    pae_params: dict[str, "Any"],
+    nflow_params: dict[str, "Any"],
+    legacy_nflow_result_factory: "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], NFlowStepResult]",
+) -> "NFlowStepResult":
+    pae_params["kfold"], pae_params["seed"] = seed
+    nflow_params["kfold"], nflow_params["seed"] = seed
+    result = legacy_nflow_result_factory(data_params, pae_params, nflow_params)
+    if result.metadata is None:
+        result.metadata = {}
+    result.metadata["seed"] = data_params["seed"]
+    return result

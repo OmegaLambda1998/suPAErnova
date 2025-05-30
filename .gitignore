@@ -1,6 +1,7 @@
 # Example output
 /examples/**/output/
 /tests/**/output/
+/tests/logs/
 
 # Old source code
 /src/old_suPAErnova/

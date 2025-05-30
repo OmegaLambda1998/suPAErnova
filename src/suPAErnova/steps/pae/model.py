@@ -340,7 +340,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                 "input_mask": data.mask,
                 "latents": latents.numpy()[:, 0, :],
                 "output_amp": output_amplitude.numpy(),
-                "diff_amp": abs(input_amplitude - output_amplitude.numpy()),
+                "diff_amp": input_amplitude - output_amplitude.numpy(),
                 "loss": loss,
                 "pred_loss": pred_loss,
                 "model_loss": model_loss,

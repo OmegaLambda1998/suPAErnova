@@ -32,6 +32,8 @@ class NFlowStep[Backend: str](AbstractModelStep[Backend, NFlowModelStep[Backend]
 
     @override
     def _setup(self, *, pae: "PAEStep[Any]") -> None:
+        super()._setup()
+
         # --- Previous Step Variables ---
         self.pae = pae
 

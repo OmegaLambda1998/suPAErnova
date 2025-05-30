@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, ClassVar, override
 import importlib
 
 from suPAErnova.steps.backends import AbstractModel
+from suPAErnova.configs.steps.nflow import NFlowStepResult
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 class NFlowModelStep[Backend: str](AbstractModel[Backend]):
     # --- Class Variables ---
     model_backend: ClassVar[dict[str, "Callable[[], type[NFlowModel]]"]] = {
-        "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFNflowModel,
+        "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFNFlowModel,
         "PyTorch": lambda: importlib.import_module(".tch", __package__).TCHNFlowModel,
     }
     id: ClassVar[str] = "nflow_model"
@@ -44,6 +45,8 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
         self.savepath: Path
 
         self.pae: PAEModel
+
+        self.results: NFlowStepResult
 
     @override
     def _setup(self, *, pae: "PAEModel") -> None:
@@ -74,6 +77,8 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
         self.log.debug(f"Loading final NFlow model weights from {self.savepath}")
         self.model.load_checkpoint(self.savepath)
 
+        self._result()
+
     @override
     def _run(self) -> None:
         self._model()
@@ -92,6 +97,36 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
         self._model()
         self.log.debug(f"Saving final NFlow model weights to {self.savepath}")
         self.model.save_checkpoint(self.savepath)
+
+        data = self.pae.data.data
+
+        input_phase = data.phase
+        input_amplitude = data.amplitude
+        input_mask = data.mask
+
+        latents = self.model.pae.encoder(
+            (input_phase, input_amplitude), training=False, mask=input_mask
+        )
+
+        z = latents[:, :, :4]
+        if not self.model.physical_latents:
+            z = z[:, :, 1:]
+
+        log_prob = self.model(z)
+        u = self.model.flow.bijector.inverse(z)
+        uz = self.model.flow.bijector.forward(u)
+
+        model_results = {
+            "ind": data.ind,
+            "sn_name": data.sn_name,
+            "spectra_id": data.spectra_id,
+            "latents": z.numpy()[:, 0, :],
+            "log_prob": -log_prob.numpy()[:, 0],
+            "z_to_u": u.numpy()[:, 0, :],
+            "u_to_z": uz.numpy()[:, 0, :],
+        }
+
+        self.results = NFlowStepResult.model_validate(model_results)
 
     @override
     def _analyse(self) -> None:

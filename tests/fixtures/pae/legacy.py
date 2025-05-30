@@ -74,8 +74,12 @@ def legacy_pae_step(
             "PROJECT_DIR": str(pae_params["root_path"]),
             "MODEL_DIR": str(model_dir),
             "PARAM_DIR": str(param_dir),
-            "train_data_file": str(data_out_path / "train" / "kfold0.npz"),
-            "test_data_file": str(data_out_path / "test" / "kfold0.npz"),
+            "train_data_file": str(
+                data_out_path / "train" / f"kfold{pae_params['kfold']}.npz"
+            ),
+            "test_data_file": str(
+                data_out_path / "test" / f"kfold{pae_params['kfold']}.npz"
+            ),
             "verbose": True,
             "overfit": not pae_params["save_best"],
             "epochs": pae_params["delta_av_epochs"],
@@ -109,7 +113,7 @@ def legacy_pae_step(
             "kernel_regularizer_val": pae_params["kernel_regulariser_penalty"],
             "colorlaw_file": str(pae_params["colourlaw"]),
             "colorlaw_preset": pae_params["colourlaw"] is not None,
-            "kfold": 0,
+            "kfold": pae_params["kfold"],
             "out_file_tail": "",
             "savemodel": True,
             "model_summary": False,
@@ -181,7 +185,7 @@ def legacy_pae_step(
         pae_step["latents"] = z.numpy()[:, [2, 3, 4, 5, 1, 0]]
 
         pae_step["output_amp"] = x_pred.numpy()
-        pae_step["diff_amp"] = abs(x.numpy() - x_pred.numpy())
+        pae_step["diff_amp"] = x.numpy() - x_pred.numpy()
 
         _loss, (loss, pred_loss, resid_loss, delta_loss, cov_loss, model_loss) = (
             compute_loss_ae(model, x, cond, sigma, mask)

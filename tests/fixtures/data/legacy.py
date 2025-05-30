@@ -394,7 +394,7 @@ def legacy_data_step(data_params: dict[str, "Any"]) -> dict[str, "Any"]:
     test_frac = 1 - data_params["train_frac"]
     nkfold = int(1.0 / test_frac)
     ind_split = int(n_sn * data_params["train_frac"])
-    np.random.seed(data_params["seed"])
+    np.random.seed(int(data_params["seed"]))
     inds = np.arange(n_sn)
     np.random.shuffle(inds)
     for kfold in range(nkfold):

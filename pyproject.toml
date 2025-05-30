@@ -39,7 +39,11 @@ requires = ["hatchling"]
 [dependency-groups]
 dev = ["pandas-stubs>=2.2.3.250308", "types-tensorflow>=2.18.0.20250506"]
 jupyter = ["jupyter>=1.1.1"]
-tests = ["pytest>=8.3.5", "pytest-richer>=0.1.1"]
+tests = [
+    "pytest>=8.3.5",
+ "pytest-json-ctrf>=0.3.5",
+ "pytest-richer>=0.1.1",
+]
 
 # === Tools ===
 [tool.uv]
@@ -69,36 +73,6 @@ tensorflow-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4/t
 addopts = ["--import-mode=importlib", "--color=yes", "--tb=short"]
 pythonpath = ["."]
 testpaths = ["tests"]
-
-[tool.basedpyright]
-# Enable all type checks
-typeCheckingMode = "all"
-
-# Type Evaluation Settings
-analyzeUnannotatedFunctions = false # Useful, but very slow for large projects
-deprecateTypingAliases = true
-strictGenericNarrowing = true
-strictParameterNoneValue = true
-
-# Don't report unknown types
-# Otherwise packages which are untyped blow up your diagnostics
-reportUnknownArgumentType = false
-reportUnknownLambdaType = false
-reportUnknownMemberType = false
-reportUnknownParameterType = false
-reportUnknownVariableType = false
-
-# Don't report unecessary type casts
-reportUnnecessaryCast = false
-
-# Don't report unused call results
-# Stops errors around functions with side-effects
-# Like matplotlib
-reportUnusedCallResult = false
-
-# Don't report when objects are of type Any
-reportAny = false
-reportExplicitAny = false
 
 [tool.ruff]
 # Enumerate all fixed violations.

@@ -47,6 +47,7 @@ def snpae_pae_step_factory(
             "pae": {
                 "validation_frac": pae_params["validation_frac"],
                 "seed": pae_params["seed"],
+                "kfolds": [pae_params["kfold"]],
                 "model": {
                     **{
                         key: val
@@ -91,6 +92,7 @@ def snpae_pae_result_factory(
         data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
     ) -> "dict[str, PAEStepResult]":
         pae_step = snpae_pae_step_factory(data_params, pae_params).models[0]
+        pae_step._result()
         return pae_step.results
 
     return _snpae_pae_result

@@ -6,30 +6,38 @@ import tensorflow as tf
 import suPAErnova
 from suPAErnova.configs.steps.pae import PAEStepConfig
 from suPAErnova.configs.steps.data import DataStepConfig
+from suPAErnova.configs.steps.nflow import NFlowStepConfig
 from suPAErnova.configs.steps.pae.model import PAEModelConfig
+from suPAErnova.configs.steps.nflow.model import NFlowModelConfig
 
 if TYPE_CHECKING:
     from typing import Any
     from pathlib import Path
     from collections.abc import Callable
 
-    from suPAErnova.steps.pae import PAEStep
-    from suPAErnova.configs.steps.pae import PAEStepResult
+    from suPAErnova.steps.nflow import NFlowStep
+    from suPAErnova.configs.steps.nflow import NFlowStepResult
 
-    PAE = PAEStep[Literal["tf"]]
+    NFLOW = NFlowStep[Literal["tf"]]
 
 
 @pytest.fixture(scope="session")
-def snpae_pae_step_factory(
+def snpae_nflow_step_factory(
     data_path: "Path",
     root_path: "Path",
     cache_path: "Path",
-) -> "Callable[[dict[str, Any], dict[str, Any]], PAE]":
-    def _snpae_pae_step(
-        data_params: "dict[str, Any]", pae_params: "dict[str, Any]"
-    ) -> "PAE":
+) -> "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], NFLOW]":
+    def _snpae_nflow_step(
+        data_params: "dict[str, Any]",
+        pae_params: "dict[str, Any]",
+        nflow_params: "dict[str, Any]",
+    ) -> "NFLOW":
+        # Import here to avoid dependency conflicts
         from suPAErnova.configs.steps.pae.tf import (
-            TFPAEModelConfig,  # Import here to avoid dependency conflicts
+            TFPAEModelConfig,
+        )
+        from suPAErnova.configs.steps.nflow.tf import (
+            TFNFlowModelConfig,
         )
 
         config: "dict[str, Any]" = {
@@ -47,6 +55,7 @@ def snpae_pae_step_factory(
             "pae": {
                 "validation_frac": pae_params["validation_frac"],
                 "seed": pae_params["seed"],
+                "kfolds": [pae_params["kfold"]],
                 "model": {
                     **{
                         key: val
@@ -61,36 +70,64 @@ def snpae_pae_step_factory(
                     "backend": "tf",
                 },
             },
+            "nflow": {
+                "validation_frac": pae_params["validation_frac"],
+                "seed": nflow_params["seed"],
+                "model": {
+                    **{
+                        key: val
+                        for key, val in nflow_params.items()
+                        if key
+                        in {
+                            *NFlowStepConfig.model_fields.keys(),
+                            *NFlowModelConfig.model_fields.keys(),
+                            *TFNFlowModelConfig.model_fields.keys(),
+                        }
+                    },
+                    "backend": "tf",
+                },
+            },
         }
         snpae = suPAErnova.prepare_config(
             config,
             base_path=root_path,
             out_path=cache_path
-            / pae_params["fname"]
-            / "pae"
+            / nflow_params["fname"]
+            / "nflow"
             / "snpae"
-            / pae_params["seed"],
+            / nflow_params["seed"],
         )
         assert snpae.data is not None, "Error setting up DataStep"
         snpae.data.paths.out = (
-            cache_path / pae_params["fname"] / "data" / "snpae" / snpae.data.name
+            cache_path / nflow_params["fname"] / "data" / "snpae" / snpae.data.name
         )
+        assert snpae.pae is not None, "Error setting up PAEStep"
+        snpae.pae.paths.out = (
+            cache_path / nflow_params["fname"] / "pae" / "snpae" / pae_params["seed"]
+        )
+        for model in snpae.pae.models:
+            model.paths.out = snpae.pae.paths.out / "PAEStepConfig" / "TFPAEModelConfig"
         snpae.run()
-        paestep = snpae.pae_step
-        assert paestep is not None, "Error running PAEStep"
-        return paestep
+        nflowstep = snpae.nflow_step
+        assert nflowstep is not None, "Error running NFlowStep"
+        return nflowstep
 
-    return _snpae_pae_step
+    return _snpae_nflow_step
 
 
 @pytest.fixture(scope="session")
-def snpae_pae_result_factory(
-    snpae_pae_step_factory: "Callable[[dict[str, Any], dict[str, Any]], PAE]",
-) -> "Callable[[dict[str, Any], dict[str, Any]], dict[str, PAEStepResult]]":
-    def _snpae_pae_result(
-        data_params: dict[str, "Any"], pae_params: dict[str, "Any"]
-    ) -> "dict[str, PAEStepResult]":
-        pae_step = snpae_pae_step_factory(data_params, pae_params).models[0]
-        return pae_step.results
+def snpae_nflow_result_factory(
+    snpae_nflow_step_factory: "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], NFLOW]",
+) -> "Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], dict[str, NFlowStepResult]]":
+    def _snpae_nflow_result(
+        data_params: dict[str, "Any"],
+        pae_params: dict[str, "Any"],
+        nflow_params: dict[str, "Any"],
+    ) -> "dict[str, NFlowStepResult]":
+        nflow_step = snpae_nflow_step_factory(
+            data_params, pae_params, nflow_params
+        ).models[0]
+        nflow_step._result()
+        return nflow_step.results
 
-    return _snpae_pae_result
+    return _snpae_nflow_result
