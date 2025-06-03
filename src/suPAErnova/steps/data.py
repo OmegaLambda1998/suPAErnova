@@ -178,7 +178,7 @@ class DataStep(SNPAEStep):
         # Open the file, read each key into a dictionary, then close the file
         self.log.debug(f"Loading data arrays from {self.out_data}")
         with np.load(self.out_data, allow_pickle=True) as io:
-            data = dict(io)
+            data = dict(io.items())
         self.data = DataStepResult.model_validate(data)
 
         # Load in training and testing data
@@ -187,20 +187,16 @@ class DataStep(SNPAEStep):
         for train_data in self.out_train.iterdir():
             if train_data.is_file():
                 with np.load(train_data, allow_pickle=True) as io:
-                    data = {}
-                    for k, v in io.items():
-                        data[k] = v
-                    self.train_data.append(DataStepResult.model_validate(data))
+                    data = dict(io.items())
+                self.train_data.append(DataStepResult.model_validate(data))
 
         self.log.debug(f"Loading testing data arrays from {self.out_test}")
         self.test_data = []
         for test_data in self.out_test.iterdir():
             if test_data.is_file():
                 with np.load(test_data, allow_pickle=True) as io:
-                    data = {}
-                    for k, v in io.items():
-                        data[k] = v
-                    self.test_data.append(DataStepResult.model_validate(data))
+                    data = dict(io.items())
+                self.test_data.append(DataStepResult.model_validate(data))
 
     @override
     def _run(self) -> None:

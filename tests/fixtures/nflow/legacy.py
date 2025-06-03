@@ -98,7 +98,7 @@ def legacy_nflow_step(
         "nflow": {
             "PROJECT_DIR": str(nflow_params["root_path"]),
             "MODEL_DIR": str(pae_model_dir),
-            "NFLOW_MODEL_DIR": str(nflow_model_dir),
+            "NFLOW_MODEL_DIR": str(nflow_model_dir) + "/",
             "PARAM_DIR": str(param_dir),
             "model_summary": False,
             "out_file_tail": "",

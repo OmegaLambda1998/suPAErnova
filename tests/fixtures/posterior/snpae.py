@@ -70,8 +70,8 @@ def snpae_posterior_step_factory(
             },
             "pae": {
                 "validation_frac": pae_params["validation_frac"],
-                "seed": pae_params["seed"],
-                "kfolds": [pae_params["kfold"]],
+                "seed": posterior_params["seed"],
+                "kfolds": [posterior_params["kfold"]],
                 "model": {
                     **{
                         key: val
@@ -88,7 +88,7 @@ def snpae_posterior_step_factory(
             },
             "nflow": {
                 "validation_frac": nflow_params["validation_frac"],
-                "seed": nflow_params["seed"],
+                "seed": posterior_params["seed"],
                 "model": {
                     **{
                         key: val
@@ -136,22 +136,28 @@ def snpae_posterior_step_factory(
 
         assert snpae.pae is not None, "Error setting up PAEStep"
         snpae.pae.paths.out = (
-            cache_path / pae_params["fname"] / "pae" / "snpae" / pae_params["seed"]
+            cache_path
+            / posterior_params["fname"]
+            / "pae"
+            / "snpae"
+            / posterior_params["seed"]
         )
         for model in snpae.pae.models:
             model.paths.out = snpae.pae.paths.out / "PAEStepConfig" / "TFPAEModelConfig"
+
         assert snpae.nflow is not None, "Error setting up NFlowStep"
         snpae.nflow.paths.out = (
             cache_path
-            / nflow_params["fname"]
+            / posterior_params["fname"]
             / "nflow"
             / "snpae"
-            / nflow_params["seed"]
+            / posterior_params["seed"]
         )
         for model in snpae.nflow.models:
             model.paths.out = (
                 snpae.nflow.paths.out / "NFlowStepConfig" / "TFNFlowModelConfig"
             )
+
         snpae.run()
         posteriorstep = snpae.posterior_step
         assert posteriorstep is not None, "Error running PosteriorStep"

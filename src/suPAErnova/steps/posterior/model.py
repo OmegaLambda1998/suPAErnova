@@ -1,23 +1,24 @@
 # Copyright 2025 Patrick Armstrong
 
 from typing import TYPE_CHECKING, Literal, ClassVar, override
+from pathlib import Path  # noqa: TC003
 import importlib
 
-from pydantic import BaseModel
+from pydantic import (
+    BaseModel,
+    PositiveInt,  # noqa: TC002
+)
 
 from suPAErnova.steps.backends import AbstractModel
+from suPAErnova.configs.steps.data import DataStepResult  # noqa: TC001
 
 if TYPE_CHECKING:
     from logging import Logger
-    from pathlib import Path
     from collections.abc import Callable
-
-    from pydantic import PositiveInt
 
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
     from suPAErnova.steps.nflow.model import NFlowModel
-    from suPAErnova.configs.steps.data import DataStepResult
     from suPAErnova.configs.steps.posterior.model import PosteriorModelConfig
 
     from .tf import TFPosteriorModel

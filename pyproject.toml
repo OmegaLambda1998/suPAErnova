@@ -40,9 +40,10 @@ requires = ["hatchling"]
 dev = ["pandas-stubs>=2.2.3.250308", "types-tensorflow>=2.18.0.20250506"]
 jupyter = ["jupyter>=1.1.1"]
 tests = [
+    "matplotlib>=3.10.3",
     "pytest>=8.3.5",
- "pytest-json-ctrf>=0.3.5",
- "pytest-richer>=0.1.1",
+    "pytest-json-ctrf>=0.3.5",
+    "pytest-richer>=0.1.1",
 ]
 
 # === Tools ===
@@ -66,7 +67,7 @@ conflicts = [
 environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
 
 [tool.uv.sources]
-supaernova_legacy = { path = "../suPAErnova_legacy/" }
+supaernova_legacy = { git = "https://github.com/OmegaLambda1998/suPAErnova_legacy.git"} #, path = "../suPAErnova_legacy/",  }
 tensorflow-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4/tensorflow_rocm-2.18.1-cp312-cp312-manylinux_2_28_x86_64.whl" }
 
 [tool.pytest.ini_options]

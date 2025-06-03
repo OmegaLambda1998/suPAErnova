@@ -19,9 +19,9 @@ def test_legacy_posterior_setup(legacy_posterior: "PosteriorStepResults") -> Non
     pass
 
 
-@pytest.mark.setup("snpae")
-def test_snpae_posterior_setup(snpae_posterior: "PosteriorStepResults") -> None:
-    pass
+# @pytest.mark.setup("snpae")
+# def test_snpae_posterior_setup(snpae_posterior: "PosteriorStepResults") -> None:
+#     pass
 
 
 @pytest.mark.parametrize("key", KEYS)

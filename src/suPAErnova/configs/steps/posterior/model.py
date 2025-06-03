@@ -9,6 +9,7 @@ from suPAErnova.configs.steps.backends import AbstractModelConfig
 class PosteriorModelConfig(AbstractModelConfig):
     # --- Class Variables ---
     required_steps: ClassVar[list[str]] = [NFlowStepConfig.id]
+    id: ClassVar[str] = "posterior_model"
 
     # === Required ===
     debug: bool = False

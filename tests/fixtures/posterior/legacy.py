@@ -64,6 +64,7 @@ def legacy_posterior_step(
     # Variation: run_posterior_analysis script modified to allow passing args as a list of strings
     # Variation: run_posterior_analysis script modified to return a dictionary of results
     # Variation: run_posterior_analysis script modified to skip training which has already been run
+    # Variation: Legacy code mixed numpy and tensorflow arrays, so use tf.convert_to_tensor to resolve
     # Variation: Legacy code used an old version of Tensorflow, and the syntax has since changed
     #            In particular:
     #             - `tf.tf_fn(x)` is no longer valid, so has been updated to `ks.layers.Lambda(tf.tf_fn)(x)`
@@ -98,9 +99,82 @@ def legacy_posterior_step(
     nflow_model_dir = nflow_out_path / "tensorflow_models"
     nflow_model_dir.mkdir(parents=True, exist_ok=True)
 
+    posterior_out_path: Path = (
+        posterior_params["cache_path"]
+        / posterior_params["fname"]
+        / "posterior"
+        / "legacy"
+        / posterior_params["seed"]
+    )
+    posterior_model_dir = posterior_out_path / "tensorflow_models/"
+    posterior_model_dir.mkdir(parents=True, exist_ok=True)
+
     yaml_config = posterior_params["tmp_path"] / "train.yaml"
 
-    config = {"posterior": {}}
+    config = {
+        "posterior": {
+            "PROJECT_DIR": str(posterior_params["root_path"]),
+            "MODEL_DIR": str(pae_model_dir),
+            "NFLOW_MODEL_DIR": str(nflow_model_dir) + "/",
+            "OUTPUT_DIR": str(posterior_model_dir) + "/",
+            "PARAM_DIR": str(param_dir),
+            "train_data_file": str(
+                data_out_path / "train" / f"kfold{posterior_params['kfold']}.npz"
+            ),
+            "test_data_file": str(
+                data_out_path / "test" / f"kfold{posterior_params['kfold']}.npz"
+            ),
+            "prev_train_stage": "5",
+            "latent_dims": (posterior_params["n_z_latents"],),
+            "kfold": posterior_params["kfold"],
+            "seed": int(posterior_params["seed"]),
+            "encode_dims": (*posterior_params["encode_dims"], 32),
+            "out_file_tail": "",
+            "posterior_file_tail": "",
+            "overfit": not posterior_params["save_best"],
+            "verbose": True,
+            "model_summary": False,
+            "print_params": True,
+            "nunit": posterior_params["n_hidden_units"],
+            "nlayers": posterior_params["n_layers"],
+            "use_extrinsic_params": posterior_params["nflow_physical_latents"],
+            "physical_latent": posterior_params["pae_physical_latents"],
+            "batchnorm": posterior_params["batch_normalisation"],
+            "set_data_min_val": 0,
+            "min_train_redshift": posterior_params["min_train_redshift"],
+            "max_train_redshift": posterior_params["max_train_redshift"],
+            "max_light_cut": (
+                posterior_params["min_train_phase"],
+                posterior_params["max_train_phase"],
+            ),
+            "max_light_cut_spectra": (
+                posterior_params["min_train_phase"],
+                posterior_params["max_train_phase"],
+            ),
+            "inverse_spectra_cut": False,
+            "twins_cut": False,
+            "batch_size": posterior_params["batch_size"],
+            "rMAPini": posterior_params["random_initial_positions"],
+            "find_MAP": True,
+            "run_HMC": True,
+            "ihmc": posterior_params["monte_carlo_method"] == "HMC",
+            "train_amplitude": posterior_params["train_delta_m"],
+            "use_amplitude": posterior_params["train_delta_m"],
+            "train_dtime": posterior_params["train_delta_p"],
+            "train_bias": posterior_params["train_bias"],
+            "nchains": posterior_params["n_chains_early"]
+            + posterior_params["n_chains_mid"]
+            + posterior_params["n_chains_final"],
+            "dtime_norm": 1.0,
+            "tolerance": posterior_params["tolerance"],
+            "max_iterations": posterior_params["max_iterations"],
+            "num_burnin_steps": posterior_params["n_burnin"],
+            "num_samples": posterior_params["n_samples"],
+            "num_leapfrog_steps": posterior_params["n_leapfrog"],
+            "step_size": posterior_params["step_size"],
+            "target_accept_rate": posterior_params["target_acceptance_rate"],
+        }
+    }
     with yaml_config.open("w") as io:
         yaml.safe_dump(config, io)
 

@@ -1,4 +1,4 @@
 [filter "jupyternotebook"]
-    clean = uv run --extra tf-cpu --with jupyter jupyter nbconvert --to=notebook --ClearOutputPreprocessor.enabled=True --stdout %f
+    clean = uv run --with jupyter jupyter nbconvert --to=notebook --ClearOutputPreprocessor.enabled=True --stdout %f
     required
     smudge = cat

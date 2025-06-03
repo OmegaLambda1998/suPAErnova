@@ -463,7 +463,6 @@ class TFPosteriorModel(ks.Model):
             self.recon_error, _recon_error_edges, self.recon_error_centers = (
                 self.nflow.pae.recon_error((
                     tf.convert_to_tensor(train_phase, dtype=tf.float32),
-                    tf.convert_to_tensor(train_d_phase, dtype=tf.float32),
                     tf.convert_to_tensor(train_amplitude, dtype=tf.float32),
                     tf.convert_to_tensor(train_d_amplitude, dtype=tf.float32),
                     tf.convert_to_tensor(train_mask, dtype=tf.int32),

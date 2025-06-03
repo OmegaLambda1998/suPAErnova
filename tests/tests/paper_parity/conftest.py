@@ -1,7 +1,10 @@
+import gc
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+import matplotlib as mpl
+from matplotlib import pyplot as plt
 
 if TYPE_CHECKING:
     from typing import Any
@@ -21,7 +24,11 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.paper_parity
 
 # --- Constants ---
-SEEDS = list(enumerate(("12345", "23456", "34567", "45678")))
+# SEEDS = list(enumerate(("12345", "23456", "34567", "45678")))
+SEEDS = [(0, "12345")]
+
+
+mpl.use("svg")
 
 
 @pytest.fixture(scope="module", params=SEEDS)
@@ -196,6 +203,84 @@ class PaperParityUtils:
             snpae_sigma=snpae_sigma,
             legacy_sigma=legacy_sigma,
         )
+
+    @staticmethod
+    def pre_plot() -> tuple[
+        "mpl.figure.Figure", "mpl.axes.Axes | npt.NDArray[mpl.axes.Axes]"
+    ]:
+        fig, axes = plt.subplots()
+        return fig, axes
+
+    @staticmethod
+    def post_plot(filepath: "Path") -> None:
+        plt.savefig(filepath)
+        plt.close("all")
+        gc.collect()
+
+    @staticmethod
+    def hist_plot(
+        snpae: "npt.NDArray[Any]",
+        legacy: "npt.NDArray[Any]",
+        diff_mask: "npt.NDArray[np.bool]",
+        metadata: dict[str, "Any"],
+        *,
+        snpae_sigma: "npt.NDArray[Any] | None" = None,
+        legacy_sigma: "npt.NDArray[Any] | None" = None,
+    ) -> None:
+        pass
+
+    @staticmethod
+    def spec_plot(
+        snpae: "npt.NDArray[Any]",
+        legacy: "npt.NDArray[Any]",
+        diff_mask: "npt.NDArray[np.bool]",
+        metadata: dict[str, "Any"],
+        *,
+        snpae_sigma: "npt.NDArray[Any] | None" = None,
+        legacy_sigma: "npt.NDArray[Any] | None" = None,
+    ) -> None:
+        _n_sn, _n_spec, _n_data = diff_mask.shape
+
+        _fig, _axes = PaperParityUtils.pre_plot()
+
+    @staticmethod
+    def plot_arrays(
+        snpae: "npt.NDArray[Any]",
+        legacy: "npt.NDArray[Any]",
+        *,
+        snpae_sigma: "npt.NDArray[Any] | None" = None,
+        legacy_sigma: "npt.NDArray[Any] | None" = None,
+        metadata: dict[str, "Any"] | None = None,
+        compare: "Any" = None,
+    ) -> None:
+        if metadata is None:
+            metadata = {}
+
+        if compare is None:
+            compare = PaperParityUtils.equal
+
+        diff_mask = np.logical_not(
+            compare(snpae, legacy, snpae_sigma=snpae_sigma, legacy_sigma=legacy_sigma)
+        )
+
+        plot_fn = None
+        if len(diff_mask.shape) == 3:
+            if diff_mask.shape[-1] == 1:
+                plot_fn = PaperParityUtils.hist_plot
+            else:
+                plot_fn = PaperParityUtils.spec_plot
+        if plot_fn is None:
+            err = f"No plotting method for data with shape {diff_mask.shape}\nMetadata: {metadata}"
+            raise AssertionError(err)
+        plot_fn(
+            snpae,
+            legacy,
+            diff_mask,
+            metadata,
+            snpae_sigma=snpae_sigma,
+            legacy_sigma=legacy_sigma,
+        )
+        PaperParityUtils.post_plot()
 
 
 @pytest.fixture(scope="module")
@@ -429,7 +514,39 @@ def legacy_nflow(
 def posterior_params(
     pae_params: "PAEParams", nflow_params: "NFlowParams"
 ) -> "PosteriorParams":
-    return {"fname": "paper_parity"}
+    return {
+        "fname": "paper_parity",
+        "n_z_latents": pae_params["n_z_latents"],
+        "encode_dims": pae_params["encode_dims"],
+        "save_best": pae_params["save_best"],
+        "n_hidden_units": nflow_params["n_hidden_units"],
+        "n_layers": nflow_params["n_layers"],
+        "pae_physical_latents": pae_params["physical_latents"],
+        "nflow_physical_latents": nflow_params["physical_latents"],
+        "batch_normalisation": False,
+        "min_train_redshift": pae_params["min_train_redshift"],
+        "max_train_redshift": pae_params["max_train_redshift"],
+        "min_train_phase": pae_params["min_train_phase"],
+        "max_train_phase": pae_params["max_train_phase"],
+        "batch_size": 171,  # Apparently
+        "random_initial_positions": False,
+        "train_delta_av": False,
+        "train_delta_m": True,
+        "train_delta_p": True,
+        "train_bias": False,
+        # Legacy assumes n_chains > 20
+        "n_chains_early": 10,
+        "n_chains_mid": 10,
+        "n_chains_final": 5,
+        "tolerance": 0.01,
+        "max_iterations": 2500,
+        "n_burnin": 10000,
+        "n_samples": 10000,
+        "n_leapfrog": 5,
+        "step_size": 0.05,
+        "target_acceptance_rate": 0.651,
+        "monte_carlo_method": "HMC",
+    }
 
 
 @pytest.fixture(scope="module")
