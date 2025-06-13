@@ -17,6 +17,7 @@ class NFlowModelConfig(AbstractModelConfig):
     # === Optional ===
     seed: int
     batch_size: PositiveInt
+    patience: PositiveFloat
 
     save_best: bool
 

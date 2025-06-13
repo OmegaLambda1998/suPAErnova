@@ -1,25 +1,32 @@
+import os
 from typing import cast, override
 from functools import cached_property
 from collections.abc import Callable
 
 from pydantic import computed_field
-import tf_keras as ks
+
+os.environ["TF_USE_LEGACY_KERAS"] = "1"
+os.environ["KERAS_BACKEND"] = "tensorflow"
+os.environ["TF_DETERMINISTIC_OPS"] = "1"
 import tensorflow as tf
+from tensorflow import keras as ks
 
 from suPAErnova.configs.steps import ConfigInputObject, validate_object
 from suPAErnova.steps.nflow.tf import (
     loss as snpae_losses,
 )
-from suPAErnova.configs.steps.pae.tf import (
-    ActivationObject,
-    get_loss,
-    validate_activation,
-)
 
 from .model import NFlowModelConfig
 
+ActivationObject = Callable[[tf.Tensor], tf.Tensor]
 OptimiserObject = type[ks.optimizers.Optimizer]
 LossObject = type[ks.losses.Loss] | Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
+
+
+def validate_activation(activation: ConfigInputObject[ActivationObject]):
+    return validate_object(
+        activation, dummy_obj=ks.activations.relu, mod=ks.activations
+    )
 
 
 def validate_optimiser(
@@ -48,6 +55,7 @@ def get_loss(
     class CustomLoss(ks.losses.Loss):
         @override
         def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+            self.reduction = "none"
             return loss_fn(y_true, y_pred, model=self.model)
 
     return CustomLoss

@@ -1,5 +1,3 @@
-# Copyright 2025 Patrick Armstrong
-
 from typing import TYPE_CHECKING, Any, ClassVar, override
 
 from suPAErnova.steps.model import AbstractModelStep

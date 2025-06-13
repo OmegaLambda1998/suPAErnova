@@ -1,19 +1,15 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import TYPE_CHECKING, Literal, ClassVar, override
-from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING, ClassVar, override
 import importlib
 
-from pydantic import (
-    BaseModel,
-    PositiveInt,  # noqa: TC002
-)
-
 from suPAErnova.steps.backends import AbstractModel
-from suPAErnova.configs.steps.data import DataStepResult  # noqa: TC001
+from suPAErnova.configs.steps.posterior import PosteriorStepResult
+from suPAErnova.configs.steps.posterior.posterior import PosteriorMapStage
 
 if TYPE_CHECKING:
     from logging import Logger
+    from pathlib import Path
     from collections.abc import Callable
 
     from suPAErnova.configs.paths import PathConfig
@@ -22,33 +18,8 @@ if TYPE_CHECKING:
     from suPAErnova.configs.steps.posterior.model import PosteriorModelConfig
 
     from .tf import TFPosteriorModel
-    from .tch import TCHPosteriorModel
 
-    PosteriorModel = TFPosteriorModel | TCHPosteriorModel
-
-InitVars = Literal["init", "random", "data", "scale", "trivial"]
-
-
-class Stage(BaseModel):
-    stage: "PositiveInt"
-    name: str
-    fname: str
-    savepath: "Path | None" = None
-    loadpath: "Path | None" = None
-
-    debug: bool
-
-    n_chains: int
-
-    train_data: "DataStepResult"
-    test_data: "DataStepResult"
-    val_data: "DataStepResult"
-
-    init_latents: "InitVars"
-    init_delta_av: "InitVars"
-    init_delta_m: "InitVars"
-    init_delta_p: "InitVars"
-    init_bias: "InitVars"
+    PosteriorModel = TFPosteriorModel
 
 
 class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
@@ -59,40 +30,38 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
         ).TFPosteriorModel,
         "PyTorch": lambda: importlib.import_module(
             ".tch", __package__
-        ).TCHPosteriorModel,
+        ).TCHposteriorModel,
     }
     id: ClassVar[str] = "posterior_model"
 
     def __init__(self, config: "PosteriorModelConfig") -> None:
         # --- Superclass Variables ---
         self.options: PosteriorModelConfig
-        self.config: "GlobalConfig"
-        self.paths: "PathConfig"
-        self.log: "Logger"
+        self.config: GlobalConfig
+        self.paths: PathConfig
+        self.log: Logger
         self.force: bool
         self.verbose: bool
         super().__init__(config)
 
         # --- Config Variabls ---
         self.debug: bool
-        self.savepath: "Path"
+        self.savepath: Path
 
-        # --- Previous Step Variables ---
         self.nflow: NFlowModel
-        self.train_data: DataStepResult
-        self.test_data: DataStepResult
-        self.val_data: DataStepResult
+
+        self.results: PosteriorStepResult
 
         # --- Setup Variables ---
         self.n_chains_early: int = self.options.n_chains_early
         self.n_chains_mid: int = self.options.n_chains_mid
         self.n_chains_final: int = self.options.n_chains_final
 
-        self.stage_init: Stage
-        self.stage_early: Stage
-        self.stage_mid: Stage
-        self.stage_final: Stage
-        self.run_stages: list[Stage]
+        self.map_stage_init: PosteriorMapStage
+        self.map_stage_early: PosteriorMapStage
+        self.map_stage_mid: PosteriorMapStage
+        self.map_stage_final: PosteriorMapStage
+        self.map_stages: list[PosteriorMapStage]
 
     @override
     def _setup(self, *, nflow: "NFlowModel") -> None:
@@ -101,92 +70,69 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
         self.nflow = nflow
         self.nflow.load()
 
-        if self.nflow.model.physical_latents and self.options.train_delta_av:
-            self.options.train_delta_av = False
-            self.log.warning(
-                f"ΔAᵥ is already included in the {self.nflow.name} Normalising Flow model, so will not be used as a free parameter."
-            )
-
-        self.train_data = self.nflow.pae.train_data
-        self.test_data = self.nflow.pae.test_data
-        self.val_data = self.nflow.pae.val_data
-
         self._model()
         self.savepath = self.paths.out / self.model.name
 
         # --- Stages ---
-        stage_data = {
-            "train_data": self.train_data,
-            "test_data": self.test_data,
-            "val_data": self.val_data,
-            "debug": self.debug,
-        }
-        self.stage_init = Stage.model_validate({
-            "stage": 1,
+        self.map_stage_init = PosteriorMapStage.model_validate({
+            "stage": 0,
             "name": "init",
             "fname": "init",
             "n_chains": 1,
-            "init_latents": "init",
-            "init_delta_av": "init",
-            "init_delta_m": "init",
-            "init_delta_p": "init",
-            "init_bias": "init",
-            **stage_data,
+            "init": True,
         })
-        self.stage_early = Stage.model_validate({
-            "stage": 2,
-            "name": "early",
-            "fname": "early",
+        self.map_stage_early = PosteriorMapStage.model_validate({
+            "stage": 1,
+            "name": "random",
+            "fname": "random",
             "n_chains": self.n_chains_early,
-            "init_latents": "random",
-            "init_delta_av": "random",
+            "init_u_delta_av": "random",
+            "init_latents": "u_random",
+            "init_delta_av": "data",
             "init_delta_m": "random",
             "init_delta_p": "random",
-            "init_bias": "random",
-            **stage_data,
+            "init_bias": "current",
         })
-        self.stage_mid = Stage.model_validate({
-            "stage": 3,
-            "name": "mid",
-            "fname": "mid",
+        self.map_stage_mid = PosteriorMapStage.model_validate({
+            "stage": 2,
+            "name": "delta_m",
+            "fname": "delta_m",
             "n_chains": self.n_chains_mid,
-            "init_latents": "trivial",
+            "init_u_delta_av": "constant",
+            "init_latents": "u_constant",
             "init_delta_av": "data",
             "init_delta_m": "scale",
             "init_delta_p": "random",
-            "init_bias": "random",
-            **stage_data,
+            "init_bias": "current",
         })
-        self.stage_final = Stage.model_validate({
-            "stage": 4,
-            "name": "final",
-            "fname": "final",
+        self.map_stage_final = PosteriorMapStage.model_validate({
+            "stage": 3,
+            "name": "delta_av",
+            "fname": "delta_av",
             "n_chains": self.n_chains_final,
-            "init_latents": "trivial",
+            "init_u_delta_av": "data",
+            "init_latents": "z_constant",
             "init_delta_av": "scale",
-            "init_delta_m": "random",
+            "init_delta_m": "constant",
             "init_delta_p": "random",
-            "init_bias": "random",
-            **stage_data,
+            "init_bias": "current",
         })
-        self.run_stages = [
-            self.stage_init,
-            self.stage_early,
-            self.stage_mid,
-            self.stage_final,
+
+        self.map_stages = [
+            self.map_stage_init,
+            self.map_stage_early,
+            self.map_stage_mid,
+            self.map_stage_final,
         ]
 
     @override
     def _completed(self) -> bool:
         self._model()
+        savepath = self.savepath / self.model.model_path
 
-        final_stage = self.run_stages[-1]
-        self.model.stage = final_stage
-        final_savepath = self.savepath / final_stage.fname / self.model.model_path
-
-        if not final_savepath.exists():
+        if not savepath.exists():
             self.log.debug(
-                f"{self.name} has not completed as {final_savepath} does not exist"
+                f"{self.name} has not completed as {savepath} does not exist"
             )
             return False
         return True
@@ -195,50 +141,71 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
     def _load(self) -> None:
         self._model()
 
-        final_stage = self.run_stages[-1]
-        self.model.stage = final_stage
-        final_savepath = self.savepath / final_stage.fname
+        self.log.debug(f"Loading final Posterior model weights from {self.savepath}")
+        self.model.load_checkpoint(self.savepath)
 
-        self.log.debug(f"Loading final Posterior model weights from {final_savepath}")
-        self.model.load_checkpoint(final_savepath)
+        self._result()
 
     @override
     def _run(self) -> None:
         self._model()
-        savepath: Path | None = None
-        for i, stage in enumerate(self.run_stages):
-            self.log.debug(f"Starting Stage {i}: {stage.name}")
-            if savepath is not None:
-                stage.loadpath = savepath
-            savepath = self.paths.out / self.model.name / stage.fname
-            stage.savepath = savepath
-
-            model_path = savepath / self.model.model_path
-            weights_path = savepath / self.model.weights_path
-            if model_path.exists() and not self.force:
-                # Don't retrain stages if you don't need to
-                self.log.debug(f"Loading stage weights from {weights_path}")
-                self.model.stage = stage
-                self.model.load_checkpoint(savepath)
-            else:
-                self.model.train_model(stage)
-            self.model.save_checkpoint(savepath)
+        model_path = self.savepath / self.model.model_path
+        weights_path = self.savepath / self.model.weights_path
+        if model_path.exists() and not self.force:
+            # Don't retrain stages if you don't need to
+            self.log.debug(f"Loading weights from {weights_path}")
+            self.model.load_checkpoint(self.savepath)
+        else:
+            self.model.train_model(self.map_stages, savepath=self.savepath)
+        self.model.save_checkpoint(self.savepath)
 
     @override
     def _result(self) -> None:
         self._model()
+        self.log.debug(f"Saving final Posterior model weights to {self.savepath}")
+        self.model.save_checkpoint(self.savepath)
 
-        final_stage = self.run_stages[-1]
-        self.model.stage = final_stage
-        final_savepath = self.savepath / final_stage.fname
+        data = self.nflow.pae.data.data
 
-        self.log.debug(f"Saving final Posterior model weights to {final_savepath}")
-        self.model.save_checkpoint(final_savepath)
+        map_results = {
+            "chain_min": self.model.map.chain_min.numpy(),
+            "converged": self.model.map.converged.numpy(),
+            "num_evaluations": self.model.map.num_evaluations.numpy(),
+            "negative_log_prob": self.model.map.negative_log_prob.numpy(),
+            "init_u_delta_av": self.model.map.u_delta_av.initial.numpy(),
+            "init_u_latents": self.model.map.u_latents.initial.numpy(),
+            "init_delta_av": self.model.map.delta_av.initial.numpy(),
+            "init_delta_m": self.model.map.delta_m.initial.numpy(),
+            "init_delta_p": self.model.map.delta_p.initial.numpy(),
+            "init_z_latents": self.model.map.z_latents.initial.numpy(),
+            "best_u_delta_av": self.model.map.u_delta_av.best.numpy(),
+            "best_u_latents": self.model.map.u_latents.best.numpy(),
+            "best_delta_av": self.model.map.delta_av.best.numpy(),
+            "best_delta_m": self.model.map.delta_m.best.numpy(),
+            "best_delta_p": self.model.map.delta_p.best.numpy(),
+            "best_z_latents": self.model.map.z_latents.best.numpy(),
+        }
+
+        hmc_results = {
+            "samples": self.model.hmc.samples.numpy(),
+            "step_sizes_final": self.model.hmc.step_sizes_final.numpy(),
+            "is_accepted": self.model.hmc.is_accepted.numpy(),
+        }
+
+        model_results = {
+            "ind": data.ind,
+            "sn_name": data.sn_name,
+            "spectra_id": data.spectra_id,
+            "map": map_results,
+            "hmc": hmc_results,
+        }
+
+        self.results = PosteriorStepResult.model_validate(model_results)
 
     @override
     def _analyse(self) -> None:
         pass
 
     #
-    # === Posterior Specific Functions ===
+    # === PosteriorModel Specific Functions ===
     #

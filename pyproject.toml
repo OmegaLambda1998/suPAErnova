@@ -67,7 +67,8 @@ conflicts = [
 environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
 
 [tool.uv.sources]
-supaernova_legacy = { git = "https://github.com/OmegaLambda1998/suPAErnova_legacy.git"} #, path = "../suPAErnova_legacy/",  }
+# supaernova_legacy = { git = "https://github.com/OmegaLambda1998/suPAErnova_legacy.git"}
+supaernova_legacy = { path = "../suPAErnova_legacy/"  }
 tensorflow-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4/tensorflow_rocm-2.18.1-cp312-cp312-manylinux_2_28_x86_64.whl" }
 
 [tool.pytest.ini_options]
@@ -145,6 +146,8 @@ numpy = "np"
 pandas = "pd"
 pytorch = "tch"
 tensorflow = "tf"
+keras = "ks"
+tf_keras = "ks"
 "tensorflow.keras" = "ks"
 "tensorflow_probability" = "tfp"
 

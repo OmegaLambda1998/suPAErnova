@@ -13,10 +13,14 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Callable
 
+    from numpy import typing as npt
+
     from suPAErnova.steps.data import DataStep
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
+    from suPAErnova.typing.dimensions import WLDim, SpecDim, PhaseDim
     from suPAErnova.configs.steps.data import DataStepResult
+    from suPAErnova.typing.steps.pae.pae import NZLatents, NPAELatents, NPhysicalLatents
     from suPAErnova.configs.steps.pae.model import PAEModelConfig
 
     from .tf import TFPAEModel
@@ -47,9 +51,9 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         # --- Config Variables ---
         # Required
         self.physical_latents: bool
-        self.n_physical: int
-        self.n_zs: int
-        self.n_pae_latents: int
+        self.n_physical_latents: NPhysicalLatents
+        self.n_z_latents: NZLatents
+        self.n_pae_latents: NPAELatents
 
         self.seperate_latent_training: bool
         self.seperate_z_latent_training: bool
@@ -63,6 +67,8 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.max_test_redshift: float
         self.min_val_redshift: float
         self.max_val_redshift: float
+        self.min_all_redshift: float
+        self.max_all_redshift: float
 
         self.min_train_phase: float
         self.max_train_phase: float
@@ -70,16 +76,28 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.max_test_phase: float
         self.min_val_phase: float
         self.max_val_phase: float
+        self.min_all_phase: float
+        self.max_all_phase: float
+
+        self.train_sn_mask: npt.NDArray[np.bool_]
+        self.test_sn_mask: npt.NDArray[np.bool_]
+        self.val_sn_mask: npt.NDArray[np.bool_]
+        self.all_sn_mask: npt.NDArray[np.bool_]
+        self.train_spec_mask: npt.NDArray[np.bool_]
+        self.test_spec_mask: npt.NDArray[np.bool_]
+        self.val_spec_mask: npt.NDArray[np.bool_]
+        self.all_spec_mask: npt.NDArray[np.bool_]
 
         # --- Previous Step Variables ---
         self.data: DataStep
         self.train_data: DataStepResult
         self.test_data: DataStepResult
         self.val_data: DataStepResult
+        self.all_data: DataStepResult
 
-        self.nspec_dim: int
-        self.wl_dim: int
-        self.phase_dim: int
+        self.spec_dim: SpecDim
+        self.wl_dim: WLDim
+        self.phase_dim: PhaseDim = 1
 
         # --- Setup Variables ---
         self.stage_delta_av: PAEStage
@@ -99,6 +117,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         train_data: "DataStepResult",
         test_data: "DataStepResult",
         val_data: "DataStepResult",
+        all_data: "DataStepResult",
     ) -> None:
         # --- Config Variables ---
         # Required
@@ -119,6 +138,8 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.max_test_redshift = self.options.max_test_redshift
         self.min_val_redshift = self.options.min_val_redshift
         self.max_val_redshift = self.options.max_val_redshift
+        self.min_all_redshift = self.options.min_redshift
+        self.max_all_redshift = self.options.max_redshift
 
         self.min_train_phase = self.options.min_train_phase
         self.max_train_phase = self.options.max_train_phase
@@ -126,28 +147,40 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.max_test_phase = self.options.max_test_phase
         self.min_val_phase = self.options.min_val_phase
         self.max_val_phase = self.options.max_val_phase
+        self.min_all_phase = self.options.min_phase
+        self.max_all_phase = self.options.max_phase
 
         # --- Previous Step Variables ---
         self.data = data
         self.train_data = train_data
         self.test_data = test_data
         self.val_data = val_data
+        self.all_data = all_data
         self.setup_data_masks()
 
-        self.nspec_dim = self.data.nspec_dim
+        self.spec_dim = self.data.spec_dim
         self.wl_dim = self.data.wl_dim
-        self.phase_dim = 1
 
         # --- PAEStages ---
         stage_data = {
             "train_data": self.train_data,
+            "train_sn_mask": self.train_sn_mask,
+            "train_spec_mask": self.train_spec_mask,
             "test_data": self.test_data,
+            "test_sn_mask": self.test_sn_mask,
+            "test_spec_mask": self.test_spec_mask,
             "val_data": self.val_data,
+            "val_sn_mask": self.val_sn_mask,
+            "val_spec_mask": self.val_spec_mask,
+            "all_data": self.all_data,
+            "all_sn_mask": self.all_sn_mask,
+            "all_spec_mask": self.all_spec_mask,
             "debug": self.debug,
         }
 
         self.stage_delta_av = PAEStage.model_validate({
             "stage": 1,
+            "prev_stage": None,
             "name": "ΔAᵥ",
             "fname": "delta_av",
             "epochs": self.options.delta_av_epochs,
@@ -162,6 +195,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.stage_zs = [
             PAEStage.model_validate({
                 "stage": z0 + i,
+                "prev_stage": z0 + i - 1,
                 "name": f"z{i + 1}",
                 "fname": f"z{i + 1}",
                 "epochs": self.options.zs_epochs,
@@ -174,10 +208,12 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             for i in range(self.n_zs)
         ]
         if not self.seperate_z_latent_training:
-            self.stage_zs = [self.stage_zs[-1]]
+            self.stage_zs = self.stage_zs[-1:]
+            self.stage_zs[0].prev_stage = 1
 
         self.stage_delta_m = PAEStage.model_validate({
             "stage": z0 + self.n_zs,
+            "prev_stage": z0 + self.n_zs - 1,
             "name": "Δℳ",
             "fname": "delta_m",
             "epochs": self.options.delta_m_epochs,
@@ -190,6 +226,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
 
         self.stage_delta_p = PAEStage.model_validate({
             "stage": z0 + self.n_zs + 1,
+            "prev_stage": z0 + self.n_zs,
             "name": "Δ𝓅",
             "fname": "delta_p",
             "epochs": self.options.delta_p_epochs,
@@ -202,6 +239,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
 
         self.stage_final = PAEStage.model_validate({
             "stage": self.n_pae_latents,
+            "prev_stage": None,
             "name": "Final",
             "fname": "final",
             "epochs": self.options.final_epochs,
@@ -249,6 +287,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self._model(force=True)
 
         final_stage = self.run_stages[-1]
+        final_stage.prev_stage = None
         self.model.stage = final_stage
         final_savepath = (
             self.paths.out
@@ -282,6 +321,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
     def _result(self) -> None:
         self._model(force=True)
         final_stage = self.run_stages[-1]
+        final_stage.prev_stage = None
         self.model.stage = final_stage
         final_savepath = (
             self.paths.out
@@ -296,7 +336,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.model.save_checkpoint(final_savepath)
 
         self.log.debug("Calculating PAE results")
-        data = self.data.data
+        data = self.all_data
         model_results: dict[str, PAEStepResult] = {}
 
         for stage in self.run_stages:
@@ -305,13 +345,19 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             self.model.stage = stage
             self.model.load_checkpoint(savepath, reset_weights=False)
 
-            input_phase = data.phase
+            input_phase = data.time
             input_amplitude = data.amplitude
             input_d_amplitude = data.sigma
             input_mask = data.mask
 
+            mask = (
+                input_mask
+                * self.model.stage.all_sn_mask
+                * self.model.stage.all_spec_mask
+            )
+
             latents, output_amplitude = self.model(
-                (input_phase, input_amplitude), training=False, mask=input_mask
+                (input_phase, input_amplitude), training=False, mask=mask
             )
 
             loss = self.model.compute_loss(
@@ -320,7 +366,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                 output_amplitude,
                 sample_weight=input_d_amplitude,
                 training=False,
-                mask=input_mask,
+                mask=mask,
             )
 
             pred_loss = self.model.get_loss("loss_pred")
@@ -336,11 +382,12 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                 "spectra_id": data.spectra_id,
                 "input_amp": data.amplitude,
                 "input_d_amp": data.sigma,
-                "input_phase": data.phase,
-                "input_mask": data.mask,
+                "input_phase": data.time,
+                "input_mask": mask,
+                "input_colourlaw": self.model.decoder.colourlaw,
                 "latents": latents.numpy()[:, 0, :],
                 "output_amp": output_amplitude.numpy(),
-                "diff_amp": input_amplitude - output_amplitude.numpy(),
+                "diff_amp": np.abs(input_amplitude - output_amplitude.numpy()),
                 "loss": loss,
                 "pred_loss": pred_loss,
                 "model_loss": model_loss,
@@ -361,18 +408,27 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
     #
 
     def setup_data_masks(self) -> None:
-        for mask_type in ["train", "test", "val"]:
+        for mask_type in ["train", "test", "val", "all"]:
             data: DataStepResult = getattr(self, f"{mask_type}_data")
             min_redshift: float = getattr(self, f"min_{mask_type}_redshift")
             max_redshift: float = getattr(self, f"max_{mask_type}_redshift")
-            redshift_mask = (data.redshift >= min_redshift) & (
-                data.redshift <= max_redshift
-            )
+            redshift_mask = (
+                (data.redshift >= min_redshift) & (data.redshift <= max_redshift)
+            )[:, 0:1, 0:1]
 
             min_phase: float = getattr(self, f"min_{mask_type}_phase")
             max_phase: float = getattr(self, f"max_{mask_type}_phase")
-            phase_mask = (data.phase >= min_phase) & (data.phase <= max_phase)
+            phase_mask = ((data.phase >= min_phase) & (data.phase <= max_phase))[
+                ..., 0:1
+            ]
 
-            mask = (redshift_mask & phase_mask).astype(np.int32)
-            data.mask *= mask
-            setattr(self, f"{mask_type}_data", data)
+            # Mask out supernovae outside the redshift range, or with no spectra within the phase range
+            sn_mask = (
+                np.any(phase_mask, axis=(1, 2), keepdims=True) & redshift_mask
+            ).astype(np.int32)
+
+            # Mask out spectra outside the phase range
+            spec_mask = phase_mask.astype(np.int32)
+
+            setattr(self, f"{mask_type}_sn_mask", sn_mask)
+            setattr(self, f"{mask_type}_spec_mask", spec_mask)

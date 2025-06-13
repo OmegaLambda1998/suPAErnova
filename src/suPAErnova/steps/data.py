@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
+    from suPAErnova.typing.dimensions import SNDim, WLDim, SpecDim
     from suPAErnova.configs.steps.data import DataStepConfig
 
     SNeDataFrame = pd.DataFrame
@@ -82,9 +83,9 @@ class DataStep(SNPAEStep):
         self.test_data: list[DataStepResult]
 
         # Data Dimensions
-        self.sn_dim: int
-        self.nspec_dim: int
-        self.wl_dim: int
+        self.sn_dim: SNDim
+        self.spec_dim: SpecDim
+        self.wl_dim: WLDim
 
     @override
     def _setup(self) -> None:
@@ -407,9 +408,9 @@ class DataStep(SNPAEStep):
         self.nspectra_per_sn = np.array(
             [len(spectra) for spectra in self.sne["spectra"]],
         )
-        self.nspec_dim = self.nspectra_per_sn.max()
+        self.spec_dim = self.nspectra_per_sn.max()
         self.log.debug(
-            f"Maximum number of observations for any given SN: {self.nspec_dim}",
+            f"Maximum number of observations for any given SN: {self.spec_dim}",
         )
 
         # Wavelength grid
@@ -421,40 +422,40 @@ class DataStep(SNPAEStep):
 
     def prepare_data_arrays(self) -> None:
         self.log.debug("Preparing data arrays")
-        # Each element of data is a 3D Array of shape (sn_dim x nspec_dim x data_dim) where:
-        #   sn_dim = Number of SNe
-        #   nspec_dim = Maximum number of observations for any given SN (padded if needed)
-        #   data_dim = Length of datatype
+        # Each element of data is a 3D Array of shape (SNDim x SpecDim x DataDim) where:
+        #   SNDim = Number of SNe
+        #   SpecDim = Maximum number of observations for any given SN (padded if needed)
+        #   DataDim = Length of datatype
 
         # Allows for filling an array with padding
         phase_axis = self.nspectra_per_sn.copy()
-        phase_axis.fill(self.nspec_dim)
+        phase_axis.fill(self.spec_dim)
 
         # --- Get Parameters ---
         data = {}
 
-        # Given an array of shape sn_dim by N <= nspec_dim
-        # Create an array of shape sn_dim by nspec_dim, padding if needed
+        # Given an array of shape (sn_dim x N <= spec_dim)
+        # Create an array of shape sn_dim by spec_dim padding if needed
         def pad[T: np.generic](
             arr: "Iterable[Sequence[T | npt.NDArray[T]]]",
             padding: "T | npt.NDArray[T]",
         ) -> "npt.NDArray[T]":
             if isinstance(padding, np.ndarray):
                 padded_arr: npt.NDArray[T] = np.full(
-                    (self.sn_dim, self.nspec_dim, *padding.shape),
+                    (self.sn_dim, self.spec_dim, *padding.shape),
                     padding,
                 )
             else:
-                padded_arr = np.full((self.sn_dim, self.nspec_dim), padding)
+                padded_arr = np.full((self.sn_dim, self.spec_dim), padding)
             for i, row in enumerate(arr):
                 row_length = len(row)
                 padded_arr[i, :row_length] = row
             return padded_arr
 
         # Given a list of value-per-row of length sn_dim
-        # Fill each row with nspec_dim repeats of that row's value
+        # Fill each row with spec_dim repeats of that row's value
         def fill_rows[T: np.generic](values: "npt.NDArray[T]") -> "npt.NDArray[T]":
-            return np.repeat(values, phase_axis).reshape((self.sn_dim, self.nspec_dim))
+            return np.repeat(values, phase_axis).reshape((self.sn_dim, self.spec_dim))
 
         # Index of each SNe
         data["ind"] = fill_rows(np.array(range(self.sn_dim)))
@@ -516,7 +517,7 @@ class DataStep(SNPAEStep):
                 padding,
             )
 
-        data["wavelength"] = np.tile(self.wavelength, (self.sn_dim, self.nspec_dim, 1))
+        data["wavelength"] = np.tile(self.wavelength, (self.sn_dim, self.spec_dim, 1))
 
         # Ensure everything has the right number of axes
         for k, v in data.items():
@@ -565,7 +566,7 @@ class DataStep(SNPAEStep):
 
         # Create a mask of wavelength outside of the wavelength limits
         data["mask"] = np.full(
-            (self.sn_dim, self.nspec_dim, self.wl_dim), fill_value=False
+            (self.sn_dim, self.spec_dim, self.wl_dim), fill_value=False
         )
 
         valid_wavelength_mask = nearest_mask(

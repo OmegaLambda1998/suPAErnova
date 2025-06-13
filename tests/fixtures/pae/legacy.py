@@ -48,6 +48,10 @@ def legacy_pae_step(
     # Import here to avoid dependency conflicts
     from supaernova_legacy.models.losses import compute_loss_ae
     from supaernova_legacy.scripts.train_ae import train_ae
+    from supaernova_legacy.utils.data_loader import (
+        get_train_mask,
+        get_train_mask_spectra,
+    )
 
     # Except where indicated, this is running the `train_ae` script verbatim
 
@@ -165,7 +169,7 @@ def legacy_pae_step(
     results = train_ae(args)
 
     pae_step_results = {}
-    for stage, (model, _params) in results.items():
+    for stage, (model, params) in results.items():
         pae_step = {}
         pae_step["stage"] = stage
         pae_step["ind"] = data.ind
@@ -173,21 +177,28 @@ def legacy_pae_step(
         pae_step["spectra_id"] = data.spectra_id
 
         x = data.amplitude
-        cond = (data.phase - data.phase.min()) / (data.phase.max() - data.phase.min())
+        cond = data.time
         sigma = data.sigma
         mask = data.mask
 
         x = tf.cast(x, tf.float32)
         cond = tf.cast(cond, tf.float32)
         mask = tf.cast(mask, tf.float32)
+        data_mask_dict = {"redshift": data.redshift, "times_orig": data.phase}
+        sn_mask = get_train_mask(data_mask_dict, params)[:, 0:1, 0:1]
+        spec_mask = get_train_mask_spectra(data_mask_dict, params)[..., 0:1]
+
+        mask_vary = sn_mask * spec_mask
+        mask *= mask_vary
 
         z = model.encode(x, cond, mask)
         x_pred = model.decode(z, cond, mask)
 
         pae_step["input_amp"] = data.amplitude
         pae_step["input_d_amp"] = data.sigma
-        pae_step["input_phase"] = data.phase
-        pae_step["input_mask"] = data.mask
+        pae_step["input_phase"] = data.time
+        pae_step["input_mask"] = mask.numpy()
+        pae_step["input_colourlaw"] = model.colorlaw
 
         # Legacy latent ordering:
         # Δ𝓅 -> Δℳ  -> ΔAᵥ -> zs ([0, 1, 2, 3, 4, 5])
@@ -196,7 +207,7 @@ def legacy_pae_step(
         pae_step["latents"] = z.numpy()[:, [2, 3, 4, 5, 1, 0]]
 
         pae_step["output_amp"] = x_pred.numpy()
-        pae_step["diff_amp"] = x.numpy() - x_pred.numpy()
+        pae_step["diff_amp"] = np.abs(x.numpy() - x_pred.numpy())
 
         _loss, (loss, pred_loss, resid_loss, delta_loss, cov_loss, model_loss) = (
             compute_loss_ae(model, x, cond, sigma, mask)

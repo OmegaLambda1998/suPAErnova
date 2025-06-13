@@ -1,9 +1,13 @@
+import os
 from typing import Any, Concatenate, cast, override
 from functools import cached_property
 from collections.abc import Callable
 
-import keras
 from pydantic import PositiveFloat, computed_field
+
+os.environ["TF_USE_LEGACY_KERAS"] = "1"
+os.environ["KERAS_BACKEND"] = "tensorflow"
+os.environ["TF_DETERMINISTIC_OPS"] = "1"
 import tensorflow as tf
 from tensorflow import keras as ks
 
@@ -25,9 +29,7 @@ LossObject = type[ks.losses.Loss] | Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 
 
 def validate_activation(activation: ConfigInputObject[ActivationObject]):
-    return validate_object(
-        activation, dummy_obj=ks.activations.linear, mod=ks.activations
-    )
+    return validate_object(activation, dummy_obj=tf.nn.relu, mod=tf.nn)
 
 
 def validate_kernel_regulariser(
@@ -72,7 +74,7 @@ def validate_loss(
 def get_loss(
     loss_fn: Callable[[tf.Tensor, tf.Tensor], tf.Tensor],
 ) -> type[ks.losses.Loss]:
-    @keras.saving.register_keras_serializable("SuPAErnova")
+    @ks.utils.register_keras_serializable("SuPAErnova")
     class CustomLoss(ks.losses.Loss):
         @override
         def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:

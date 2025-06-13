@@ -41,6 +41,7 @@ class PAEStep[Backend: str](AbstractModelStep[Backend, PAEModelStep[Backend]]):
         self.train_data: list[DataStepResult]
         self.test_data: list[DataStepResult]
         self.val_data: list[DataStepResult]
+        self.all_data: list[DataStepResult]
         self.n_models: int
         self.n_kfolds: int
 
@@ -68,6 +69,7 @@ class PAEStep[Backend: str](AbstractModelStep[Backend, PAEModelStep[Backend]]):
         # --- Data ---
         train_data = self.data.train_data
         test_data = self.data.test_data
+        all_data = self.data.data
         if self.validation_frac > 0:
             ind_split = int(self.data.sn_dim * self.validation_frac)
             val_data = [
@@ -104,12 +106,15 @@ class PAEStep[Backend: str](AbstractModelStep[Backend, PAEModelStep[Backend]]):
             self.test_data = test_data
             self.val_data = val_data
 
+        self.all_data = all_data
+
         for i, model in enumerate(self.models):
             model.setup(
                 data=self.data,
                 train_data=self.train_data[self.kfolds[i]],
                 test_data=self.test_data[self.kfolds[i]],
                 val_data=self.val_data[self.kfolds[i]],
+                all_data=self.all_data,
             )
 
 

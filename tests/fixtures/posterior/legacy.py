@@ -132,7 +132,7 @@ def legacy_posterior_step(
             "out_file_tail": "",
             "posterior_file_tail": "",
             "overfit": not posterior_params["save_best"],
-            "verbose": True,
+            "verbose": False,
             "model_summary": False,
             "print_params": True,
             "nunit": posterior_params["n_hidden_units"],
@@ -179,12 +179,42 @@ def legacy_posterior_step(
         yaml.safe_dump(config, io)
 
     args = [f"--yaml_config={yaml_config}", "--config=posterior"]
-    run_posterior_analysis(args)
+    _params, results = run_posterior_analysis(args)
+    legacy_map_results = results[0]["train"]["map_results"][0]
+    legacy_hmc_results = results[0]["train"]["hmc_results"][0]
 
-    posterior_step_results = {}
-    posterior_step_results["ind"] = data.ind
-    posterior_step_results["sn_name"] = data.sn_name
-    posterior_step_results["spectra_id"] = data.spectra_id
+    map_results = {
+        "chain_min": legacy_map_results["chain_min"].numpy(),
+        "converged": legacy_map_results["converged"].numpy(),
+        "num_evaluations": legacy_map_results["num_evaluations"].numpy(),
+        "negative_log_prob": legacy_map_results["negative_log_likelihood"].numpy(),
+        "init_u_delta_av": legacy_map_results["MAPu_ini"].numpy()[:, 0:1],
+        "init_u_latents": legacy_map_results["MAPu_ini"].numpy()[:, 1:],
+        "init_delta_av": legacy_map_results["MAPz_ini"].numpy()[:, 0:1],
+        "init_z_latents": legacy_map_results["MAPz_ini"].numpy()[:, 1:],
+        "init_delta_m": legacy_map_results["amplitude_ini"].numpy()[..., None],
+        "init_delta_p": legacy_map_results["dtime_ini"].numpy()[..., None],
+        "best_u_delta_av": legacy_map_results["MAPu"].numpy()[:, 0:1],
+        "best_u_latents": legacy_map_results["MAPu"].numpy()[:, 1:],
+        "best_delta_av": legacy_map_results["MAPz"].numpy()[:, 0:1],
+        "best_z_latents": legacy_map_results["MAPz"].numpy()[:, 1:],
+        "best_delta_m": legacy_map_results["amplitude"].numpy()[..., None],
+        "best_delta_p": legacy_map_results["dtime"].numpy()[..., None],
+    }
+
+    hmc_results = {
+        "samples": legacy_hmc_results["samples"].numpy(),
+        "step_sizes_final": legacy_hmc_results["step_sizes_final"].numpy(),
+        "is_accepted": legacy_hmc_results["is_accepted"].numpy(),
+    }
+
+    posterior_step_results = {
+        "ind": data.ind,
+        "sn_name": data.sn_name,
+        "spectra_id": data.spectra_id,
+        "map": map_results,
+        "hmc": hmc_results,
+    }
 
     np.savez_compressed(savepath, **posterior_step_results)
     with np.load(savepath, allow_pickle=True) as io:
@@ -237,6 +267,8 @@ def legacy_posterior_result_factory(
         posterior_step_results = legacy_posterior_step_factory(
             data_params, pae_params, nflow_params, posterior_params
         )
+        posterior_step_results["map"] = posterior_step_results["map"].item()
+        posterior_step_results["hmc"] = posterior_step_results["hmc"].item()
         return PosteriorStepResult.model_validate(posterior_step_results)
 
     return _legacy_posterior_result

@@ -1,4 +1,4 @@
-# suPAErnova
+# SuPAErnova
 
 This repository contains the codes required to the train models and perform analyses for
 
@@ -6,67 +6,27 @@ This repository contains the codes required to the train models and perform anal
 
 Constructed in TensorFlow 2 and TensorFlow Probability.
 
-![alt text](figures/network_illustration.png)
+## Terminology
 
-## Installation
+In an attempt to maintain consistency throughout this codebase I've chosen the following terms as standards for variable names, functions, etc…
 
-Install the package requirements with conda
+### [Dimensions](./src/suPAErnova/typing/dimensions.py)
 
-`conda env create -f environment.yml`
+- `sn_dim: SNDim`: Traverses across each SN in a given batch / survey.
+- `spec_dim: SpecDim`: Traverse across each spectrum of a given SN.
+- `wl_dim: WLDim`: Traverse across each wavelength of a given spectrum.
+- `phase_dim: PhaseDim`: The value `1`, tracks “the number of phases for a given spectrum” which is always `1`.
 
-Activate conda environment, `conda activate suPAErnova`, and install suPAErnova package in your python environment:
+### [Data](./src/suPAErnova/typing/steps/data.py)
 
-`pip install -e .`
+### [PAE](./src/suPAErnova/typing/steps/pae/pae.py)
 
-## Use trained models and make plots
+- `n_physical_latents: NPhysicalLatents`: The number of **physical** PAE latents, always either `0` or `3`.
+- `n_z_latents: NZLatents`: The number of **non-physical** PAE latents.
+- `n_pae_latents: NPAELatents`: The **total** number of PAE latents.
 
-See examples in `notebooks/`
+#### [TensorFlow](./src/suPAErnova/typing/steps/pae/tf.py)
 
-`use_PAE_model.ipynb` demonstrates how to use the publicly available trained PAE models to generate new SN observations.
+### [NFlow](./src/suPAErnova/typing/steps/nflow.py)
 
-`plots_and_analysis.ipynb` This notebook creates the plots for the paper. Note that the dataset is not yet public. But, this notebook should give a clear example on how the analysis was performed, and how to reproduce a similar analysis on SN Ia datasets.
-
-The trained models are made public, and you will find them in `../outputs/`
-
-## Training a new PAE model on your dataset
-
-This requires 3 steps. You will find the necessary scripts in `scripts/`:
-
-1.) `suPAErnova/make_datasets/make_train_test_data.py:`
-Individual spectra from each supernova first need to be reshaped along the time dimension, as the PAE model requires training data of dimensionality (N\_SN, N\_timesteps, N\_wavelengths), with a corresponding mask array to denote any missing spectra.
-
-2.) `scripts/train_ae.py`:
-    Trains the autoencoder based on setup detailed in training configuration file, config/train.yaml`.
-    Models are saved to outputs/tensorflow_models/
-
-2.) `scripts/train_flow.py`:
-    Trains the flow based on setup detailed in training configuration file, `config/train.yaml`
-    Models are saved to `outputs/tensorflow_models/`
-
-## Performing inference with a trained model
-
-`scripts/run_posterior_analysis.py:`
-    Runs posterior analysis based on setup detailed in training configuration file, `config/posterior_analysis.yaml`. Outputs are saved to `outputs/`
-
-## Codebase
-
-suPAErnova/models/: contains custom machine learning models, loading functions, and training loss updates
-
- autoencoder.py:
-  Autoencoder model
- autoencoder_training.py:
-  Training functions for autoencoder model
- flows.py:
-  Flow model
- flow_training.py:
-  Training functions for flow model
- posterior.py:
-  posterior analysis setup
- posterior_analysis.py:
-  Functions to run posterior analysis
- losses.py:
-  Various losses for autoencoder training
- loader.py:
-  Load in models
-
-suPAErnova/utils/: contains functionality to load in data and perform a few calculations
+### [Posterior](./src/suPAErnova/typing/steps/posterior.py)

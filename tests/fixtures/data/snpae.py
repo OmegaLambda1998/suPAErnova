@@ -39,6 +39,7 @@ def snpae_data_step_factory(
         }
         snpae = suPAErnova.prepare_config(
             config,
+            verbose=True,
             base_path=root_path,
             out_path=cache_path / data_params["fname"] / "data" / "snpae",
         )

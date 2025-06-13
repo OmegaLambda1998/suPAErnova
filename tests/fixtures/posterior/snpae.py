@@ -122,6 +122,7 @@ def snpae_posterior_step_factory(
         }
         snpae = suPAErnova.prepare_config(
             config,
+            verbose=False,
             base_path=root_path,
             out_path=cache_path
             / posterior_params["fname"]

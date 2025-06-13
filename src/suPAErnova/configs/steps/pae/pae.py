@@ -9,6 +9,7 @@ from numpy import typing as npt
 from pydantic import (
     Field,
     BaseModel,
+    ConfigDict,
     PositiveInt,
     PositiveFloat,
     NonNegativeInt,
@@ -23,7 +24,10 @@ from .model import PAEModelConfig
 
 
 class PAEStage(BaseModel):
+    model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True)
+
     stage: PositiveInt
+    prev_stage: PositiveInt | None
     name: str
     fname: str
     savepath: Path | None = None
@@ -38,8 +42,17 @@ class PAEStage(BaseModel):
     learning_rate_weight_decay_rate: PositiveFloat
 
     train_data: DataStepResult
+    train_sn_mask: npt.NDArray[np.bool_]
+    train_spec_mask: npt.NDArray[np.bool_]
     test_data: DataStepResult
+    test_sn_mask: npt.NDArray[np.bool_]
+    test_spec_mask: npt.NDArray[np.bool_]
     val_data: DataStepResult
+    val_sn_mask: npt.NDArray[np.bool_]
+    val_spec_mask: npt.NDArray[np.bool_]
+    all_data: DataStepResult
+    all_sn_mask: npt.NDArray[np.bool_]
+    all_spec_mask: npt.NDArray[np.bool_]
 
 
 class PAEStepResult(AbstractStepResult):
@@ -53,6 +66,7 @@ class PAEStepResult(AbstractStepResult):
     input_d_amp: "npt.NDArray[np.float32]"
     input_phase: "npt.NDArray[np.float32]"
     input_mask: "npt.NDArray[np.float32]"
+    input_colourlaw: "npt.NDArray[np.float32] | None"
 
     latents: "npt.NDArray[np.float32]"
 

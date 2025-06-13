@@ -1,7 +1,8 @@
 # Copyright 2025 Patrick Armstrong
-
 from typing import TYPE_CHECKING, ClassVar, override
 import importlib
+
+import numpy as np
 
 from suPAErnova.steps.backends import AbstractModel
 from suPAErnova.configs.steps.nflow import NFlowStepResult
@@ -83,10 +84,11 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
     def _run(self) -> None:
         self._model()
         model_path = self.savepath / self.model.model_path
-        weights_path = self.savepath / self.model.weights_path
         if model_path.exists() and not self.force:
             # Don't retrain stages if you don't need to
-            self.log.debug(f"Loading weights from {weights_path}")
+            self.log.debug(
+                f"Loading weights from {self.savepath / self.model.ckpt_path}"
+            )
             self.model.load_checkpoint(self.savepath)
         else:
             self.model.train_model(savepath=self.savepath)
@@ -98,32 +100,39 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
         self.log.debug(f"Saving final NFlow model weights to {self.savepath}")
         self.model.save_checkpoint(self.savepath)
 
-        data = self.pae.data.data
+        data = self.model.pae.stage.all_data
+        all_sn_mask = self.model.pae.stage.all_sn_mask
+        all_spec_mask = self.model.pae.stage.all_spec_mask
 
-        input_phase = data.phase
+        input_phase = data.time
         input_amplitude = data.amplitude
         input_mask = data.mask
 
         latents = self.model.pae.encoder(
-            (input_phase, input_amplitude), training=False, mask=input_mask
+            (input_phase, input_amplitude),
+            training=False,
+            mask=input_mask * all_spec_mask,
         )
 
-        z = latents[:, :, :4]
+        inds = np.squeeze(all_sn_mask.astype(np.bool), axis=(1, 2))
+        latents = latents[inds]
+
+        z = latents[:, 0, :4]
         if not self.model.physical_latents:
-            z = z[:, :, 1:]
+            z = z[:, 1:]
 
         log_prob = self.model(z)
-        u = self.model.flow.bijector.inverse(z)
-        uz = self.model.flow.bijector.forward(u)
+        u = self.model.z_to_u(z)
+        uz = self.model.u_to_z(u)
 
         model_results = {
             "ind": data.ind,
             "sn_name": data.sn_name,
             "spectra_id": data.spectra_id,
-            "latents": z.numpy()[:, 0, :],
-            "log_prob": -log_prob.numpy()[:, 0],
-            "z_to_u": u.numpy()[:, 0, :],
-            "u_to_z": uz.numpy()[:, 0, :],
+            "latents": z.numpy(),
+            "log_prob": -log_prob.numpy(),
+            "z_to_u": u.numpy(),
+            "u_to_z": uz.numpy(),
         }
 
         self.results = NFlowStepResult.model_validate(model_results)

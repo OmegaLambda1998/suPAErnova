@@ -93,6 +93,8 @@ class PAEModelConfig(AbstractModelConfig):
     max_test_redshift: float
     min_val_redshift: float
     max_val_redshift: float
+    min_redshift: float
+    max_redshift: float
 
     min_train_phase: float
     max_train_phase: float
@@ -100,6 +102,8 @@ class PAEModelConfig(AbstractModelConfig):
     max_test_phase: float
     min_val_phase: float
     max_val_phase: float
+    min_phase: float
+    max_phase: float
 
     # --- Data Offsets ---
     phase_offset_scale: float

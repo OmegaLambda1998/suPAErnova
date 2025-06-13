@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 
 def legacy_nflow_step(
+    pae_params: "PAEParams",
     nflow_params: "NFlowParams",
     data: "DataStepResult",
     pae: "PAEStepResult",
@@ -51,6 +52,10 @@ def legacy_nflow_step(
             return dict(io.items())
 
     # Import here to avoid dependency conflicts
+    from supaernova_legacy.utils.data_loader import (
+        get_train_mask,
+        get_train_mask_spectra,
+    )
     from supaernova_legacy.scripts.train_flow import train_flow
 
     # Except where indicated, this is running the `train_flow` script verbatim
@@ -114,7 +119,7 @@ def legacy_nflow_step(
             "prev_train_stage": "5",
             "set_data_min_val": 0,
             "checkpoint_flow_every": 10,
-            "patience": 30,
+            "patience": nflow_params["patience"],
             "encode_dims": (*nflow_params["encode_dims"], 32),
             "latent_dims": (nflow_params["n_z_latents"],),
             "overfit": not nflow_params["save_best"],
@@ -134,18 +139,36 @@ def legacy_nflow_step(
     args = [f"--yaml_config={yaml_config}", "--config=nflow"]
     model, flow, params = train_flow(args)
 
+    params["min_train_redshift"] = pae_params["min_train_redshift"]
+    params["max_train_redshift"] = pae_params["max_train_redshift"]
+    params["max_light_cut"] = (
+        pae_params["min_train_phase"],
+        pae_params["max_train_phase"],
+    )
+    params["max_light_cut_spectra"] = (
+        pae_params["min_train_phase"],
+        pae_params["max_train_phase"],
+    )
+    params["twins_cut"] = False
+    params["inverse_spectra_cut"] = False
+
+    data_mask_dict = {"redshift": data.redshift, "times_orig": data.phase}
+    sn_mask = get_train_mask(data_mask_dict, params)[:, 0, 0:1]
+
     nflow_step_results = {}
     nflow_step_results["ind"] = data.ind
     nflow_step_results["sn_name"] = data.sn_name
     nflow_step_results["spectra_id"] = data.spectra_id
 
+    inds = np.squeeze(sn_mask.astype(np.bool), axis=-1)
+
     # SNPAE latent ordering:
     # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅 ([0, 1, 2, 3, 4, 5])
     # Legacy latent ordering:
     # Δ𝓅 -> Δℳ  -> ΔAᵥ -> zs ([5, 4, 0, 1, 2, 3])
-    z = pae.latents[:, [5, 4, 0, 1, 2, 3]]
+    z = pae.latents[:, [5, 4, 0, 1, 2, 3]][inds]
 
-    z = pae.latents[:, -4:]
+    z = z[:, -4:]
     if not params["use_extrinsic_params"]:
         z = z[:, 1:]
     nflow_step_results["latents"] = z
@@ -184,7 +207,7 @@ def legacy_nflow_step_factory(
         pae = PAEStepResult.model_validate(
             legacy_pae_step_factory(data_params, pae_params)["6"]
         )
-        return legacy_nflow_step(nflow_params, data, pae)
+        return legacy_nflow_step(pae_params, nflow_params, data, pae)
 
     return _legacy_nflow_step
 

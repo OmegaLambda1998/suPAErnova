@@ -7,8 +7,9 @@ import matplotlib as mpl
 from matplotlib import pyplot as plt
 
 if TYPE_CHECKING:
-    from typing import Any
+    from typing import Any, TypeVar
     from pathlib import Path
+    from collections.abc import Callable
 
     from numpy import typing as npt
 
@@ -20,6 +21,10 @@ if TYPE_CHECKING:
         PosteriorStepResults,
         PosteriorResultFactory,
     )
+
+    N = TypeVar("N", np.number)
+    B = TypeVar("B", np.bool)
+    T = TypeVar("T", N | B)
 
 pytestmark = pytest.mark.paper_parity
 
@@ -40,12 +45,18 @@ def seed(request) -> tuple[int, str]:
 class PaperParityUtils:
     @staticmethod
     def equal(
-        snpae: "npt.NDArray[Any]",
-        legacy: "npt.NDArray[Any]",
+        snpae: "npt.NDArray[N]",
+        legacy: "npt.NDArray[N]",
         *,
-        snpae_sigma: "float | npt.NDArray[Any] | None" = None,
-        legacy_sigma: "float | npt.NDArray[Any] | None" = None,
-    ) -> "npt.NDArray[np.bool]":
+        snpae_sigma: "N | npt.NDArray[N] | None" = None,
+        legacy_sigma: "N | npt.NDArray[N] | None" = None,
+    ) -> tuple[
+        "npt.NDArray[np.bool]",
+        "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
+        "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
+    ]:
+        sum_fn = np.add
+        diff_fn = np.subtract
         if np.issubdtype(snpae.dtype, np.number) and np.issubdtype(
             legacy.dtype, np.number
         ):
@@ -53,54 +64,180 @@ class PaperParityUtils:
                 atol = 0.5 * (snpae_sigma + legacy_sigma)
             else:
                 atol = 1e-8
-            return np.isclose(snpae, legacy, atol=atol)
-        return snpae == legacy
-
-    @staticmethod
-    def le(
-        snpae: "npt.NDArray[Any]",
-        legacy: "npt.NDArray[Any]",
-        *,
-        _snpae_sigma: "float | npt.NDArray[Any] | None" = None,
-        _legacy_sigma: "float | npt.NDArray[Any] | None" = None,
-    ) -> "npt.NDArray[np.bool]":
-        return snpae <= legacy
+            comparison = np.isclose(snpae, legacy, atol=atol)
+        else:
+            comparison = snpae == legacy
+        return comparison, sum_fn, diff_fn
 
     @staticmethod
     def lt(
-        snpae: "npt.NDArray[Any]",
-        legacy: "npt.NDArray[Any]",
+        snpae: "npt.NDArray[N]",
+        legacy: "npt.NDArray[N]",
         *,
-        _snpae_sigma: "float | npt.NDArray[Any] | None" = None,
-        _legacy_sigma: "float | npt.NDArray[Any] | None" = None,
-    ) -> "npt.NDArray[np.bool]":
-        return snpae < legacy
+        snpae_sigma: "N | npt.NDArray[N] | None" = None,
+        legacy_sigma: "N | npt.NDArray[N] | None" = None,
+    ) -> tuple[
+        "npt.NDArray[np.bool]",
+        "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
+        "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
+    ]:
+        sum_fn = np.add
+        diff_fn = np.subtract
+        comparison = snpae < legacy
+        return comparison, sum_fn, diff_fn
 
     @staticmethod
-    def ge(
-        snpae: "npt.NDArray[Any]",
-        legacy: "npt.NDArray[Any]",
+    def le(
+        snpae: "npt.NDArray[N]",
+        legacy: "npt.NDArray[N]",
         *,
-        _snpae_sigma: "float | npt.NDArray[Any] | None" = None,
-        _legacy_sigma: "float | npt.NDArray[Any] | None" = None,
-    ) -> "npt.NDArray[np.bool]":
-        return snpae >= legacy
+        snpae_sigma: "N | npt.NDArray[N] | None" = None,
+        legacy_sigma: "N | npt.NDArray[N] | None" = None,
+    ) -> tuple[
+        "npt.NDArray[np.bool]",
+        "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
+        "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
+    ]:
+        sum_fn = np.add
+        diff_fn = np.subtract
+        comparison = np.logical_or(
+            PaperParityUtils.lt(
+                snpae, legacy, snpae_sigma=snpae_sigma, legacy_sigma=legacy_sigma
+            )[0],
+            PaperParityUtils.equal(
+                snpae, legacy, snpae_sigma=snpae_sigma, legacy_sigma=legacy_sigma
+            )[0],
+        )
+        return comparison, sum_fn, diff_fn
 
     @staticmethod
     def gt(
-        snpae: "npt.NDArray[Any]",
-        legacy: "npt.NDArray[Any]",
+        snpae: "npt.NDArray[N]",
+        legacy: "npt.NDArray[N]",
         *,
-        _snpae_sigma: "float | npt.NDArray[Any] | None" = None,
-        _legacy_sigma: "float | npt.NDArray[Any] | None" = None,
-    ) -> "npt.NDArray[np.bool]":
-        return snpae < legacy
+        snpae_sigma: "N | npt.NDArray[N] | None" = None,
+        legacy_sigma: "N | npt.NDArray[N] | None" = None,
+    ) -> tuple[
+        "npt.NDArray[np.bool]",
+        "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
+        "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
+    ]:
+        sum_fn = np.add
+        diff_fn = np.subtract
+        comparison = snpae > legacy
+        return comparison, sum_fn, diff_fn
+
+    @staticmethod
+    def ge(
+        snpae: "npt.NDArray[N]",
+        legacy: "npt.NDArray[N]",
+        *,
+        snpae_sigma: "N | npt.NDArray[N] | None" = None,
+        legacy_sigma: "N | npt.NDArray[N] | None" = None,
+    ) -> tuple[
+        "npt.NDArray[np.bool]",
+        "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
+        "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
+    ]:
+        sum_fn = np.add
+        diff_fn = np.subtract
+        comparison = np.logical_or(
+            PaperParityUtils.gt(
+                snpae, legacy, snpae_sigma=snpae_sigma, legacy_sigma=legacy_sigma
+            )[0],
+            PaperParityUtils.equal(
+                snpae, legacy, snpae_sigma=snpae_sigma, legacy_sigma=legacy_sigma
+            )[0],
+        )
+        return comparison, sum_fn, diff_fn
+
+    @staticmethod
+    def logical_and(
+        snpae: "npt.NDArray[B]",
+        legacy: "npt.NDArray[B]",
+        *,
+        snpae_sigma: "B | npt.NDArray[B] | None" = None,
+        legacy_sigma: "B| npt.NDArray[B] | None" = None,
+    ) -> tuple[
+        "npt.NDArray[np.bool]",
+        "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
+        "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
+    ]:
+        sum_fn = np.logical_or
+        diff_fn = np.logical_xor
+        return np.logical_and(snpae, legacy), sum_fn, diff_fn
+
+    @staticmethod
+    def logical_or(
+        snpae: "npt.NDArray[B]",
+        legacy: "npt.NDArray[B]",
+        *,
+        snpae_sigma: "B | npt.NDArray[B] | None" = None,
+        legacy_sigma: "B| npt.NDArray[B] | None" = None,
+    ) -> tuple[
+        "npt.NDArray[np.bool]",
+        "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
+        "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
+    ]:
+        sum_fn = np.logical_or
+        diff_fn = np.logical_xor
+        return np.logical_or(snpae, legacy), sum_fn, diff_fn
+
+    @staticmethod
+    def logical_not(
+        snpae: "npt.NDArray[B]",
+        legacy: "npt.NDArray[B]",
+        *,
+        snpae_sigma: "B | npt.NDArray[B] | None" = None,
+        legacy_sigma: "B| npt.NDArray[B] | None" = None,
+    ) -> tuple[
+        "npt.NDArray[np.bool]",
+        "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
+        "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
+    ]:
+        sum_fn = np.logical_or
+        diff_fn = np.logical_xor
+        return np.logical_not(snpae, legacy), sum_fn, diff_fn
+
+    @staticmethod
+    def logical_xor(
+        snpae: "npt.NDArray[B]",
+        legacy: "npt.NDArray[B]",
+        *,
+        snpae_sigma: "B | npt.NDArray[B] | None" = None,
+        legacy_sigma: "B| npt.NDArray[B] | None" = None,
+    ) -> tuple[
+        "npt.NDArray[np.bool]",
+        "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
+        "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
+    ]:
+        sum_fn = np.logical_or
+        diff_fn = np.logical_xor
+        return np.logical_xor(snpae, legacy), sum_fn, diff_fn
+
+    @staticmethod
+    def logical_nor(
+        snpae: "npt.NDArray[B]",
+        legacy: "npt.NDArray[B]",
+        *,
+        snpae_sigma: "B | npt.NDArray[B] | None" = None,
+        legacy_sigma: "B| npt.NDArray[B] | None" = None,
+    ) -> tuple[
+        "npt.NDArray[np.bool]",
+        "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
+        "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
+    ]:
+        sum_fn = np.logical_or
+        diff_fn = np.logical_xor
+        return np.logical_not(np.logical_xor(snpae, legacy)), sum_fn, diff_fn
 
     @staticmethod
     def context(
-        snpae: "npt.NDArray[Any]",
-        legacy: "npt.NDArray[Any]",
+        snpae: "npt.NDArray[T]",
+        legacy: "npt.NDArray[T]",
         diff_mask: "npt.NDArray[np.bool]",
+        sum_fn: "Callable[[npt.NDArray[T], npt.NDArray[T]], npt.NDArray[T]]",
+        diff_fn: "Callable[[npt.NDArray[T], npt.NDArray[T]], npt.NDArray[T]]",
         metadata: dict[str, "Any"],
         *,
         max_diffs: int = 5,
@@ -108,31 +245,31 @@ class PaperParityUtils:
         spectra: "npt.NDArray[np.str_] | None" = None,
         snpae_sigma: "npt.NDArray[Any] | None" = None,
         legacy_sigma: "npt.NDArray[Any] | None" = None,
+        data: "npt.NDArray[Any] | None" = None,
+        data_sigma: "npt.NDArray[Any] | None" = None,
     ) -> str:
         s = ""
         for k, v in metadata.items():
             s += f"{k}: {v}\n"
 
-        eps = 1e-10
-
         # Element-wise comparison
         diff_indices = np.argwhere(diff_mask)
 
         # Summary Statistics
-        diff = snpae - legacy
+        diff = diff_fn(snpae, legacy)[diff_mask]
         abs_diff = np.abs(diff)
         min_abs_diff = abs_diff.min()
         max_abs_diff = abs_diff.max()
         mean_abs_diff = abs_diff.mean()
         std_abs_diff = abs_diff.std()
-        abs_sort_mask = np.argsort(abs_diff[diff_mask])[::-1]
+        abs_sort_mask = np.argsort(abs_diff)[::-1]
 
-        rel_diff = 2 * diff / (snpae + legacy + eps)
+        rel_diff = 2 * diff / sum_fn(snpae, legacy)[diff_mask]
         min_rel_diff = rel_diff.min()
         max_rel_diff = rel_diff.max()
         mean_rel_diff = rel_diff.mean()
         std_rel_diff = rel_diff.std()
-        rel_sort_mask = np.argsort(rel_diff[diff_mask])[::-1]
+        rel_sort_mask = np.argsort(rel_diff)[::-1]
 
         s += f"{len(diff_indices)} differences ({int(100 * len(diff_indices) / diff_mask.size)}%):\n"
         s += f"Absolute Difference - min: {min_abs_diff:.2f}, max: {max_abs_diff:.2f}, mean±std: {mean_abs_diff:.2f}±{std_abs_diff:.2f}\n"
@@ -150,18 +287,20 @@ class PaperParityUtils:
         for idx in indices:
             snpae_val = snpae[tuple(idx)]
             legacy_val = legacy[tuple(idx)]
+            data_val = None if data is None else data[tuple(idx)]
             snpae_val_sigma = None if snpae_sigma is None else snpae_sigma[tuple(idx)]
             legacy_val_sigma = (
                 None if legacy_sigma is None else legacy_sigma[tuple(idx)]
             )
+            data_val_sigma = None if data_sigma is None else data_sigma[tuple(idx)]
 
             # Summary Statistics
-            val_diff = snpae_val - legacy_val
+            val_diff = diff_fn(snpae_val, legacy_val)
             abs_val_diff = abs(val_diff)
-            rel_val_diff = 2 * val_diff / (snpae_val + legacy_val + eps)
+            rel_val_diff = 2 * val_diff / sum_fn(snpae_val, legacy_val)
 
             s += f"  At index {[int(i) for i in tuple(idx)]}{f' ({spectra[idx[0]][idx[1]][0]})' if spectra is not None else ''}:\n"
-            s += f"    snpae = {snpae_val:.4f}{f'±{snpae_val_sigma:.4f}' if snpae_val_sigma is not None else ''}, legacy = {legacy_val:.4f}{f'±{legacy_val_sigma:.4f}' if legacy_val_sigma is not None else ''}\n"
+            s += f"    snpae = {snpae_val:.4f}{f'±{snpae_val_sigma:.4f}' if snpae_val_sigma is not None else ''}, legacy = {legacy_val:.4f}{f'±{legacy_val_sigma:.4f}' if legacy_val_sigma is not None else ''}{f', data = {data_val:.4f}{f"±{data_val_sigma:.4f}" if data_val_sigma is not None else ""}' if data_val is not None else ''}\n"
             s += f"    abs diff = {abs_val_diff:.2f}, rel diff = {rel_val_diff:.2%}\n"
 
         if len(diff_indices) > max_diffs:
@@ -179,6 +318,8 @@ class PaperParityUtils:
         spectra: "npt.NDArray[np.str_] | None" = None,
         snpae_sigma: "npt.NDArray[Any] | None" = None,
         legacy_sigma: "npt.NDArray[Any] | None" = None,
+        data: "npt.NDArray[Any] | None" = None,
+        data_sigma: "npt.NDArray[Any] | None" = None,
         metadata: dict[str, "Any"] | None = None,
         compare: "Any" = None,
     ) -> None:
@@ -188,7 +329,7 @@ class PaperParityUtils:
         if compare is None:
             compare = PaperParityUtils.equal
 
-        diff_mask = compare(
+        diff_mask, sum_fn, diff_fn = compare(
             snpae, legacy, snpae_sigma=snpae_sigma, legacy_sigma=legacy_sigma
         )
 
@@ -196,12 +337,16 @@ class PaperParityUtils:
             snpae,
             legacy,
             np.logical_not(diff_mask),
+            sum_fn,
+            diff_fn,
             metadata,
             max_diffs=max_diffs,
             sort=sort,
             spectra=spectra,
             snpae_sigma=snpae_sigma,
             legacy_sigma=legacy_sigma,
+            data=data,
+            data_sigma=data_sigma,
         )
 
     @staticmethod
@@ -373,16 +518,20 @@ def pae_params(
         "min_train_redshift": 0.02,
         "min_test_redshift": 0.02,
         "min_val_redshift": 0.02,
+        "min_redshift": 0.02,
         "max_train_redshift": 1.0,
         "max_test_redshift": 1.0,
         "max_val_redshift": 1.0,
+        "max_redshift": 1.0,
         # Phase
         "min_train_phase": -10,
         "min_test_phase": -10,
         "min_val_phase": -10,
+        "min_phase": -10,
         "max_train_phase": 40,
         "max_test_phase": 40,
         "max_val_phase": 40,
+        "max_phase": 40,
         # Latents
         "n_z_latents": 3,
         "physical_latents": True,
@@ -465,6 +614,7 @@ def nflow_params(pae_params: "PAEParams") -> "NFlowParams":
         "physical_latents": True,
         "n_hidden_units": 8,
         "n_layers": 12,
+        "patience": 30,
         "epochs": 500,
         "batch_normalisation": False,
         "validation_frac": 0.22,
@@ -530,7 +680,6 @@ def posterior_params(
         "max_train_phase": pae_params["max_train_phase"],
         "batch_size": 171,  # Apparently
         "random_initial_positions": False,
-        "train_delta_av": False,
         "train_delta_m": True,
         "train_delta_p": True,
         "train_bias": False,
