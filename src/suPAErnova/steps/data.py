@@ -6,6 +6,7 @@ import pandas as pd
 from astropy import cosmology as cosmo
 import sncosmo
 
+from suPAErnova.analysis.spectra import SpectraPlotter
 from suPAErnova.configs.steps.data import DataStepResult
 
 from .steps import SNPAEStep
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
     from suPAErnova.typing.dimensions import SNDim, WLDim, SpecDim
-    from suPAErnova.configs.steps.data import DataStepConfig
+    from suPAErnova.configs.steps.data import DataStepConfig, DataStepAnalysis
 
     SNeDataFrame = pd.DataFrame
 
@@ -86,6 +87,9 @@ class DataStep(SNPAEStep):
         self.sn_dim: SNDim
         self.spec_dim: SpecDim
         self.wl_dim: WLDim
+
+        # --- Analysis Variables ---
+        self.analysis: tuple[DataStepAnalysis] = self.options.analysis
 
     @override
     def _setup(self) -> None:
@@ -232,7 +236,27 @@ class DataStep(SNPAEStep):
 
     @override
     def _analyse(self) -> None:
-        pass
+        if self.analysis.plot_spectra is not None:
+            if not isinstance(self.analysis.plot_spectra, list):
+                self.analysis.plot_spectra = [self.analysis.plot_spectra]
+            for opts in self.analysis.plot_spectra:
+                if opts.name is None:
+                    opts.name = "spectra"
+                if opts.savepath is None:
+                    opts.savepath = self.paths.out / "plots" / str(self.seed)
+                opts.savepath.mkdir(parents=True, exist_ok=True)
+                SpectraPlotter.plot_spectra(self.data, opts)
+
+        if self.analysis.plot_summary is not None:
+            if not isinstance(self.analysis.plot_summary, list):
+                self.analysis.plot_summary = [self.analysis.plot_summary]
+            for opts in self.analysis.plot_summary:
+                if opts.name is None:
+                    opts.name = "summary"
+                if opts.savepath is None:
+                    opts.savepath = self.paths.out / "plots" / str(self.seed)
+                opts.savepath.mkdir(parents=True, exist_ok=True)
+                SpectraPlotter.plot_summary(self.data, opts)
 
     #
     # === DataStep Specific Functions ===

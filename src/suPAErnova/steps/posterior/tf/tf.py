@@ -167,6 +167,18 @@ class PosteriorMap(tf.Module):
             tf.Variable(np.inf * tf.ones((self.sn_dim, self.n_pos)))
         )
 
+        self.labels: list[str] = []
+        if self.train_delta_m:
+            self.labels.append("Δℳ")
+        if self.train_delta_p:
+            self.labels.append("Δp")
+        if self.train_bias:
+            self.labels.append("Bias")
+        if self.nflow.physical_latents:
+            self.labels.append("μΔAᵥ")
+        for i in range(self.n_u_latents):
+            self.labels.append(f"μ{i}")
+
     def setup(
         self,
         stage: "PosteriorMapStage",
@@ -518,12 +530,12 @@ class PosteriorMap(tf.Module):
         u_latents = position[:, 4:]
 
         log_prior = self.u_latents_prior.log_prob(u_latents)
-        if self.train_delta_m:
-            log_prior += self.delta_m_prior.log_prob(delta_m)[:, 0]
-        if self.train_delta_p:
-            log_prior += self.delta_p_prior.log_prob(delta_p)[:, 0]
-        if self.train_bias:
-            log_prior += self.bias_prior.log_prob(bias)[:, 0]
+        # if self.train_delta_m:
+        #     log_prior += self.delta_m_prior.log_prob(delta_m)[:, 0]
+        # if self.train_delta_p:
+        #     log_prior += self.delta_p_prior.log_prob(delta_p)[:, 0]
+        # if self.train_bias:
+        #     log_prior += self.bias_prior.log_prob(bias)[:, 0]
         if self.nflow.physical_latents:
             log_prior += self.u_delta_av_prior.log_prob(u_delta_av)[:, 0]
 
@@ -613,14 +625,17 @@ class TFPosteriorModel(ks.Model):
                 shape=(self.n_samples, self.sn_dim, self.map.n_pae_latents),
             ),
             tf.Variable(
-                [[0] * self.map.n_pae_latents] * self.sn_dim,
+                [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.n_samples,
                 dtype=tf.float32,
-                shape=(self.sn_dim, self.map.n_pae_latents),
+                shape=(self.n_samples, self.sn_dim, self.map.n_pae_latents),
             ),
             tf.Variable(
-                [False] * self.sn_dim,
+                [[False] * self.sn_dim] * self.n_samples,
                 dtype=tf.bool,
-                shape=(self.sn_dim,),
+                shape=(
+                    self.n_samples,
+                    self.sn_dim,
+                ),
             ),
         )
 
@@ -681,11 +696,8 @@ class TFPosteriorModel(ks.Model):
             bias = ks.layers.RepeatVector(1)(bias)
             synth_amp += bias
 
-        phase = input_phase
-
-        if self.map.train_delta_p and not self.pae.physical_latents:
-            delta_p = ks.layers.RepeatVector(1)(delta_p)
-            phase += delta_p
+        delta_p = ks.layers.RepeatVector(1)(delta_p)
+        phase = input_phase + delta_p
 
         # Measured average AE reconstruction error at current times
         sigma_recon = tf.transpose(
@@ -784,9 +796,9 @@ class TFPosteriorModel(ks.Model):
                         * tf.cast(self.map.improved, tf.int32)
                     ).numpy(),
                     "neg_log_prob": (
-                        tf.reduce_min(self.map.negative_log_prob).numpy(),
-                        tf.reduce_mean(self.map.negative_log_prob).numpy(),
-                        tf.reduce_max(self.map.negative_log_prob).numpy(),
+                        f"{float(tf.reduce_min(self.map.negative_log_prob).numpy()):.2E}",
+                        f"{float(tf.reduce_mean(self.map.negative_log_prob).numpy()):.2E}",
+                        f"{float(tf.reduce_max(self.map.negative_log_prob).numpy()):.2E}",
                     ),
                 })
                 self.train_map(stage, c, chain, savepath=savepath)
@@ -1107,22 +1119,52 @@ class TFPosteriorModel(ks.Model):
 
         initial_position = self.map.position.best
 
+        mask = np.squeeze(self.sn_mask.astype(np.bool), axis=(1, 2))
+
+        z_latents = self.pae.encoder(
+            (self.data.time, self.data.amplitude),
+            training=False,
+            mask=self.data.mask,
+        ).numpy()[mask][:, 0, :]
+        z_latent_std = np.std(z_latents, axis=0)
+
+        zs = z_latents[
+            :, : self.map.pae.n_z_latents + (1 if self.map.pae.physical_latents else 0)
+        ]
+        if not self.nflow.physical_latents:
+            zs = zs[:, 1:]
+
+        u_latents = self.nflow.z_to_u(zs, permute=True)
+        u_latent_std = np.std(u_latents, axis=0)
+
         stds = []
+        ind = 0
         if self.map.train_delta_m:
-            stds.append(self.map.delta_m.original)
+            stds.append(z_latent_std[ind : ind + 1])
+            ind += 1
         if self.map.train_delta_p:
-            stds.append(self.map.delta_p.original)
-        if self.map.train_bias:
-            stds.append(self.map.bias.original)
+            stds.append(z_latent_std[ind : ind + 1])
+            ind += 1
+
+        ind = 0
         if self.map.nflow.physical_latents:
-            stds.append(self.map.u_delta_av.original)
-        stds.append(self.map.u_latents.original)
+            stds.append(u_latent_std[ind : ind + 1])
+            ind += 1
+        stds.append(u_latent_std[ind:])
+        step_size = tf.zeros_like(initial_position) + tf.concat(stds, axis=-1)
 
-        latent_std = tf.math.reduce_std(tf.concat(stds, axis=-1), axis=0)
+        progress = tqdm(
+            total=self.n_leapfrog * (self.n_burnin + self.n_samples),
+            leave=True,
+        )
 
-        step_size = tf.zeros_like(initial_position) + latent_std
+        @tf.py_function(Tout=[])
+        def update_progress() -> None:
+            progress.update()
 
+        @tf.function
         def unnormalized_posterior_log_prob(pos):
+            update_progress()
             return self(
                 (
                     self.map.get_position(pos, best=True),
@@ -1134,27 +1176,11 @@ class TFPosteriorModel(ks.Model):
                 mask=self.data.mask,
             )
 
-        def trace_fn(_, pkr, *_reducer_args):
-            return [
-                pkr.inner_results.accepted_results.step_size,
-                pkr.inner_results.is_accepted,
-            ]
-
-        pbar_burnin = tfp.experimental.mcmc.ProgressBarReducer(
-            self.n_burnin,
-            progress_bar_fn=tfp.experimental.mcmc.make_tqdm_progress_bar_fn(
-                description="burnin"
-            ),
-        )
-        pbar_burnin.initialize(None)
-
-        pbar = tfp.experimental.mcmc.ProgressBarReducer(
-            self.n_samples,
-            progress_bar_fn=tfp.experimental.mcmc.make_tqdm_progress_bar_fn(
-                description="run"
-            ),
-        )
-        pbar.initialize(None)
+        @tf.function
+        def trace_fn(_, pkr):
+            step_size = pkr.inner_results.accepted_results.step_size
+            is_accepted = pkr.inner_results.is_accepted
+            return [step_size, is_accepted]
 
         @tf.function
         def sample_chain():
@@ -1173,36 +1199,14 @@ class TFPosteriorModel(ks.Model):
                 target_accept_prob=self.target_acceptance_rate,
             )
 
-            burnin_result = tfp.experimental.mcmc.sample_chain(
+            samples, [step_sizes_final, is_accepted] = tfp.mcmc.sample_chain(
+                self.n_samples,
+                initial_position,
                 kernel=kernel,
-                num_results=self.n_burnin,
-                current_state=initial_position,
-                reducer=pbar_burnin,
-                trace_fn=trace_fn,
-                name="burnin",
-            )
-
-            burnin_state = burnin_result[-1]["current_state"]
-            burnin_kernel = burnin_result[-1]["kernel"]
-            burnin_kernel_results = burnin_result[-1]["previous_kernel_results"]
-
-            result = tfp.experimental.mcmc.sample_chain(
-                kernel=burnin_kernel,
-                num_results=self.n_samples,
-                current_state=burnin_state,
-                previous_kernel_results=burnin_kernel_results,
-                reducer=pbar,
+                num_burnin_steps=self.n_burnin,
                 trace_fn=trace_fn,
                 name="run",
             )
-
-            samples = result[0][0]
-            step_sizes_final = result[-1][
-                "previous_kernel_results"
-            ].inner_results.accepted_results.step_size
-            is_accepted = result[-1][
-                "previous_kernel_results"
-            ].inner_results.is_accepted
 
             return samples, step_sizes_final, is_accepted
 

@@ -9,6 +9,7 @@ import pytest
 from astropy import cosmology as cosmo
 import sncosmo
 
+from suPAErnova.analysis.spectra import SpectraPlot, SpectraPlotter
 from suPAErnova.configs.steps.data import DataStepResult
 
 if TYPE_CHECKING:
@@ -83,7 +84,7 @@ def legacy_data_step_factory(
         data_params["root_path"] = str(root_path)
         data_params["cache_path"] = str(cache_path)
         data_params["tmp_path"] = str(tmp_path_factory.mktemp("config"))
-        return legacy_data_step(data_params)
+        return legacy_data_step(data_params), data_params
 
     return _legacy_data_step
 
@@ -93,6 +94,29 @@ def legacy_data_result_factory(
     legacy_data_step_factory: "DataStepFactory",
 ) -> "DataResultFactory":
     def _legacy_data_result(data_params: "DataParams") -> "DataStepResults":
-        return DataStepResult.model_validate(legacy_data_step_factory(data_params))
+        data, params = legacy_data_step_factory(data_params)
+        result = DataStepResult.model_validate(data)
+        savepath = (
+            Path(params["cache_path"])
+            / params["fname"]
+            / "data"
+            / "legacy"
+            / "plots"
+            / data_params["seed"]
+        )
+        savepath.mkdir(parents=True, exist_ok=True)
+        plot_spectra = SpectraPlot.model_validate({
+            "name": "spectra",
+            "savepath": savepath,
+            "filter": {"spectra_id": {"contains": "CSS110918"}},
+        })
+        SpectraPlotter.plot_spectra(result, plot_spectra)
+
+        plot_summary = SpectraPlot.model_validate({
+            "name": "summary",
+            "savepath": savepath,
+        })
+        SpectraPlotter.plot_summary(result, plot_summary)
+        return result
 
     return _legacy_data_result

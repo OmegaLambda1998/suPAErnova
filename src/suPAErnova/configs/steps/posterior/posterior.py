@@ -97,9 +97,6 @@ class PosteriorStepConfig[Backend: str](
         "TensorFlow": lambda: (
             importlib.import_module(".tf", __package__)
         ).TFPosteriorModelConfig,
-        "PyTorch": lambda: (
-            importlib.import_module(".tch", __package__)
-        ).TCHPosteriorModelConfig,
     }
     id: ClassVar[str] = "posterior"
     required_steps: ClassVar[list[str]] = [NFlowStepConfig.id]

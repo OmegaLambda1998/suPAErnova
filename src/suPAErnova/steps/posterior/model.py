@@ -4,7 +4,10 @@ from typing import TYPE_CHECKING, ClassVar, override
 import importlib
 
 from suPAErnova.steps.backends import AbstractModel
-from suPAErnova.configs.steps.posterior import PosteriorStepResult
+from suPAErnova.analysis.distribution import DistributionPlotter
+from suPAErnova.configs.steps.posterior import (
+    PosteriorStepResult,
+)
 from suPAErnova.configs.steps.posterior.posterior import PosteriorMapStage
 
 if TYPE_CHECKING:
@@ -15,6 +18,9 @@ if TYPE_CHECKING:
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
     from suPAErnova.steps.nflow.model import NFlowModel
+    from suPAErnova.configs.steps.posterior import (
+        PosteriorStepAnalysis,
+    )
     from suPAErnova.configs.steps.posterior.model import PosteriorModelConfig
 
     from .tf import TFPosteriorModel
@@ -28,9 +34,6 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
         "TensorFlow": lambda: importlib.import_module(
             ".tf", __package__
         ).TFPosteriorModel,
-        "PyTorch": lambda: importlib.import_module(
-            ".tch", __package__
-        ).TCHposteriorModel,
     }
     id: ClassVar[str] = "posterior_model"
 
@@ -62,6 +65,8 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
         self.map_stage_mid: PosteriorMapStage
         self.map_stage_final: PosteriorMapStage
         self.map_stages: list[PosteriorMapStage]
+
+        self.analysis: tuple[PosteriorStepAnalysis] = self.options.analysis
 
     @override
     def _setup(self, *, nflow: "NFlowModel") -> None:
@@ -204,7 +209,14 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
 
     @override
     def _analyse(self) -> None:
-        pass
+        if self.analysis.plot_distribution is not None:
+            if not isinstance(self.analysis.plot_distribution, list):
+                self.analysis.plot_distribution = [self.analysis.plot_distribution]
+            for opts in self.analysis.plot_distribution:
+                opts.savepath = self.paths.out / "plots" / "distribution"
+                opts.savepath.mkdir(parents=True, exist_ok=True)
+                opts.labels = self.model.map.labels
+                DistributionPlotter.plot(self.results, opts)
 
     #
     # === PosteriorModel Specific Functions ===

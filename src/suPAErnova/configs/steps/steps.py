@@ -85,6 +85,18 @@ def validate_object[T: Fn](
     return validate_signature(obj, dummy_obj, attr=attr)
 
 
+class AbstractStepResult(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(arbitrary_types_allowed=True)
+
+    metadata: dict[str, Any] | None = None
+
+
+class AbstractStepAnalysis(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        arbitrary_types_allowed=True, allow="extra"
+    )
+
+
 class StepConfig(SNPAEConfig):
     # Class Variables
     steps: ClassVar[dict[str, type["StepConfig"]]] = {}
@@ -113,9 +125,3 @@ class StepConfig(SNPAEConfig):
             mkdir=True,
         )
         return super().from_config(step_config)
-
-
-class AbstractStepResult(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(arbitrary_types_allowed=True)
-
-    metadata: dict[str, Any] | None = None

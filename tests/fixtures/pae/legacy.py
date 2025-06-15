@@ -5,8 +5,10 @@ import numpy as np
 import pytest
 import tensorflow as tf
 
+from suPAErnova.analysis.spectra import SpectraPlot, SpectraPlotter
 from suPAErnova.configs.steps.pae import PAEStepResult
 from suPAErnova.configs.steps.data import DataStepResult
+from suPAErnova.analysis.distribution import DistributionPlot, DistributionPlotter
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -95,7 +97,7 @@ def legacy_pae_step(
             "test_data_file": str(
                 data_out_path / "test" / f"kfold{pae_params['kfold']}.npz"
             ),
-            "verbose": True,
+            "verbose": False,
             "overfit": not pae_params["save_best"],
             "epochs": pae_params["delta_av_epochs"],
             "epochs_latent": pae_params["zs_epochs"],
@@ -242,8 +244,8 @@ def legacy_pae_step_factory(
         pae_params["cache_path"] = cache_path
         pae_params["tmp_path"] = tmp_path_factory.mktemp("config")
 
-        data = DataStepResult.model_validate(legacy_data_step_factory(data_params))
-        return legacy_pae_step(pae_params, data)
+        data = DataStepResult.model_validate(legacy_data_step_factory(data_params)[0])
+        return legacy_pae_step(pae_params, data), (pae_params, data)
 
     return _legacy_pae_step
 
@@ -255,10 +257,51 @@ def legacy_pae_result_factory(
     def _legacy_pae_result(
         data_params: "DataParams", pae_params: "PAEParams"
     ) -> "PAEStepResults":
-        pae_step_results = legacy_pae_step_factory(data_params, pae_params)
-        return {
+        pae_step_results, (params, data) = legacy_pae_step_factory(
+            data_params, pae_params
+        )
+
+        results = {
             stage: PAEStepResult.model_validate(pae_step)
             for stage, pae_step in pae_step_results.items()
         }
+
+        labels = {}
+        ind = 0
+        if params["physical_latents"]:
+            labels[0] = "ΔAᵥ"
+            ind = 1
+            labels[params["n_z_latents"] + 1] = "Δℳ"
+            labels[params["n_z_latents"] + 2] = "Δ𝓅"
+        for i in range(params["n_z_latents"]):
+            labels[ind] = f"z{i}"
+            ind += 1
+
+        for stage, result in results.items():
+            s = int(stage)
+            savepath = (
+                params["cache_path"]
+                / params["fname"]
+                / "pae"
+                / "legacy"
+                / "plots"
+                / params["seed"]
+                / stage
+            )
+            savepath.mkdir(parents=True, exist_ok=True)
+            plot_residual = SpectraPlot.model_validate({
+                "name": "residual",
+                "savepath": savepath,
+            })
+            SpectraPlotter.plot_residual(data, result.output_amp, plot_residual)
+
+            plot_latents = DistributionPlot.model_validate({
+                "name": "latents",
+                "savepath": savepath,
+                "labels": {i: labels[i] for i in range(s)},
+            })
+            DistributionPlotter.plot_corner(result.latents[:, :s], plot_latents)
+
+        return results
 
     return _legacy_pae_result

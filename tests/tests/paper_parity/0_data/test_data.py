@@ -47,21 +47,3 @@ def test_matching_values(
         legacy_vals,
         metadata={**snpae_data.metadata, **legacy_data.metadata, "key": key},
     )
-
-
-@pytest.mark.plot
-@pytest.mark.parametrize("key", KEYS)
-def test_plots(
-    key: str,
-    snpae_data: "DataStepResults",
-    legacy_data: "DataStepResults",
-    utils: "PaperParityUtils",
-) -> None:
-    snpae_vals = getattr(snpae_data, key)
-    legacy_vals = getattr(legacy_data, key)
-
-    utils.plot_arrays(
-        snpae_vals,
-        legacy_vals,
-        metadata={**snpae_data.metadata, **legacy_data.metadata, "title": key},
-    )

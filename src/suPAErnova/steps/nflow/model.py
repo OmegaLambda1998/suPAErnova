@@ -18,16 +18,14 @@ if TYPE_CHECKING:
     from suPAErnova.configs.steps.nflow.model import NFlowModelConfig
 
     from .tf import TFNFlowModel
-    from .tch import TCHNFlowModel
 
-    NFlowModel = TFNFlowModel | TCHNFlowModel
+    NFlowModel = TFNFlowModel
 
 
 class NFlowModelStep[Backend: str](AbstractModel[Backend]):
     # --- Class Variables ---
     model_backend: ClassVar[dict[str, "Callable[[], type[NFlowModel]]"]] = {
         "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFNFlowModel,
-        "PyTorch": lambda: importlib.import_module(".tch", __package__).TCHNFlowModel,
     }
     id: ClassVar[str] = "nflow_model"
 

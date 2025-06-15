@@ -113,7 +113,7 @@ def legacy_nflow_step(
             "test_data_file": str(
                 data_out_path / "test" / f"kfold{nflow_params['kfold']}.npz"
             ),
-            "verbose": True,
+            "verbose": False,
             "kfold": nflow_params["kfold"],
             "seed": int(nflow_params["seed"]),
             "prev_train_stage": "5",

@@ -10,7 +10,9 @@ if TYPE_CHECKING:
     from suPAErnova.steps.nflow import NFlowStep
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
-    from suPAErnova.configs.steps.posterior import PosteriorStepConfig
+    from suPAErnova.configs.steps.posterior import (
+        PosteriorStepConfig,
+    )
 
 
 class PosteriorStep[Backend: str](

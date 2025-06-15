@@ -3,8 +3,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-import matplotlib as mpl
-from matplotlib import pyplot as plt
+
+from suPAErnova.analysis.spectra import SpectraPlotter
 
 if TYPE_CHECKING:
     from typing import Any, TypeVar
@@ -31,9 +31,6 @@ pytestmark = pytest.mark.paper_parity
 # --- Constants ---
 # SEEDS = list(enumerate(("12345", "23456", "34567", "45678")))
 SEEDS = [(0, "12345")]
-
-
-mpl.use("svg")
 
 
 @pytest.fixture(scope="module", params=SEEDS)
@@ -349,84 +346,6 @@ class PaperParityUtils:
             data_sigma=data_sigma,
         )
 
-    @staticmethod
-    def pre_plot() -> tuple[
-        "mpl.figure.Figure", "mpl.axes.Axes | npt.NDArray[mpl.axes.Axes]"
-    ]:
-        fig, axes = plt.subplots()
-        return fig, axes
-
-    @staticmethod
-    def post_plot(filepath: "Path") -> None:
-        plt.savefig(filepath)
-        plt.close("all")
-        gc.collect()
-
-    @staticmethod
-    def hist_plot(
-        snpae: "npt.NDArray[Any]",
-        legacy: "npt.NDArray[Any]",
-        diff_mask: "npt.NDArray[np.bool]",
-        metadata: dict[str, "Any"],
-        *,
-        snpae_sigma: "npt.NDArray[Any] | None" = None,
-        legacy_sigma: "npt.NDArray[Any] | None" = None,
-    ) -> None:
-        pass
-
-    @staticmethod
-    def spec_plot(
-        snpae: "npt.NDArray[Any]",
-        legacy: "npt.NDArray[Any]",
-        diff_mask: "npt.NDArray[np.bool]",
-        metadata: dict[str, "Any"],
-        *,
-        snpae_sigma: "npt.NDArray[Any] | None" = None,
-        legacy_sigma: "npt.NDArray[Any] | None" = None,
-    ) -> None:
-        _n_sn, _n_spec, _n_data = diff_mask.shape
-
-        _fig, _axes = PaperParityUtils.pre_plot()
-
-    @staticmethod
-    def plot_arrays(
-        snpae: "npt.NDArray[Any]",
-        legacy: "npt.NDArray[Any]",
-        *,
-        snpae_sigma: "npt.NDArray[Any] | None" = None,
-        legacy_sigma: "npt.NDArray[Any] | None" = None,
-        metadata: dict[str, "Any"] | None = None,
-        compare: "Any" = None,
-    ) -> None:
-        if metadata is None:
-            metadata = {}
-
-        if compare is None:
-            compare = PaperParityUtils.equal
-
-        diff_mask = np.logical_not(
-            compare(snpae, legacy, snpae_sigma=snpae_sigma, legacy_sigma=legacy_sigma)
-        )
-
-        plot_fn = None
-        if len(diff_mask.shape) == 3:
-            if diff_mask.shape[-1] == 1:
-                plot_fn = PaperParityUtils.hist_plot
-            else:
-                plot_fn = PaperParityUtils.spec_plot
-        if plot_fn is None:
-            err = f"No plotting method for data with shape {diff_mask.shape}\nMetadata: {metadata}"
-            raise AssertionError(err)
-        plot_fn(
-            snpae,
-            legacy,
-            diff_mask,
-            metadata,
-            snpae_sigma=snpae_sigma,
-            legacy_sigma=legacy_sigma,
-        )
-        PaperParityUtils.post_plot()
-
 
 @pytest.fixture(scope="module")
 def utils() -> PaperParityUtils:
@@ -446,6 +365,10 @@ def data_params() -> "DataParams":
         "cosmological_model": "WMAP7",
         "salt_model": "salt2",
         "seed": SEEDS[0][-1],
+        "analysis": {
+            "plot_spectra": {"filter": {"spectra_id": {"contains": "CSS110918"}}},
+            "plot_summary": {},
+        },
     }
 
 
@@ -457,6 +380,7 @@ def snpae_data(
     result = snpae_data_result_factory(data_params)
     if result.metadata is None:
         result.metadata = {}
+    gc.collect()
     return result
 
 
@@ -468,6 +392,7 @@ def legacy_data(
     result = legacy_data_result_factory(data_params)
     if result.metadata is None:
         result.metadata = {}
+    gc.collect()
     return result
 
 
@@ -479,6 +404,10 @@ def pae_params(
     data_path: "Path",
 ) -> "PAEParams":
     return {
+        "analysis": {
+            "plot_residual": {},
+            "plot_latents": {},
+        },
         "fname": "paper_parity",
         "validation_frac": 0,
         "save_best": False,
@@ -580,6 +509,7 @@ def snpae_pae(
         if result.metadata is None:
             result.metadata = {}
         result.metadata["seed"] = pae_params["seed"]
+    gc.collect()
     return results
 
 
@@ -596,6 +526,7 @@ def legacy_pae(
         if result.metadata is None:
             result.metadata = {}
         result.metadata["seed"] = pae_params["seed"]
+    gc.collect()
     return results
 
 
@@ -637,6 +568,7 @@ def snpae_nflow(
     if result.metadata is None:
         result.metadata = {}
     result.metadata["seed"] = nflow_params["seed"]
+    gc.collect()
     return result
 
 
@@ -654,6 +586,7 @@ def legacy_nflow(
     if result.metadata is None:
         result.metadata = {}
     result.metadata["seed"] = nflow_params["seed"]
+    gc.collect()
     return result
 
 
@@ -710,12 +643,17 @@ def snpae_posterior(
     pae_params["kfold"], pae_params["seed"] = seed
     nflow_params["kfold"], nflow_params["seed"] = seed
     posterior_params["kfold"], posterior_params["seed"] = seed
+    posterior_params["analysis"] = {
+        "plot_distribution": {"name": str(posterior_params["seed"])}
+    }
+
     result = snpae_posterior_result_factory(
         data_params, pae_params, nflow_params, posterior_params
     )
     if result.metadata is None:
         result.metadata = {}
     result.metadata["seed"] = nflow_params["seed"]
+    gc.collect()
     return result
 
 
@@ -737,4 +675,5 @@ def legacy_posterior(
     if result.metadata is None:
         result.metadata = {}
     result.metadata["seed"] = nflow_params["seed"]
+    gc.collect()
     return result

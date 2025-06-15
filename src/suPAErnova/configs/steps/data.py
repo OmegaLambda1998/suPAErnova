@@ -1,12 +1,9 @@
 # Copyright 2025 Patrick Armstrong
 
 
-from typing import (
-    Self,
-    ClassVar,
-    Annotated,
-)
+from typing import Self, Literal, ClassVar, Annotated
 from pathlib import Path
+from collections.abc import Callable
 
 import numpy as np
 from numpy import typing as npt
@@ -18,7 +15,9 @@ from pydantic import (
     model_validator,
 )
 
-from .steps import StepConfig, AbstractStepResult
+from suPAErnova.analysis.spectra import SpectraPlot
+
+from .steps import StepConfig, AbstractStepResult, AbstractStepAnalysis
 
 
 class DataStepResult(AbstractStepResult):
@@ -45,6 +44,11 @@ class DataStepResult(AbstractStepResult):
     time: "npt.NDArray[np.float32]"
 
 
+class DataStepAnalysis(AbstractStepAnalysis):
+    plot_spectra: SpectraPlot | list[SpectraPlot] | None = None
+    plot_summary: SpectraPlot | list[SpectraPlot] | None = None
+
+
 class DataStepConfig(StepConfig):
     # --- Class Variables ---
     id: ClassVar[str] = "data"
@@ -54,6 +58,7 @@ class DataStepConfig(StepConfig):
     meta: Path
     idr: Path
     mask: Path
+    analysis: DataStepAnalysis
 
     # --- Optional ---
     cosmological_model: str

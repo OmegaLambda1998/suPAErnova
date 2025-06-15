@@ -58,23 +58,12 @@ def pytest_configure(config: "Config") -> None:
         "posterior: Posterior Step tests",
     )
 
-    config.addinivalue_line(
-        "markers",
-        "plot: Plotting tests",
-    )
-
 
 def pytest_addoption(parser: "Parser") -> None:
     parser.addoption(
         "--setup",
         action="store",
         help='--setup "snpae"|"legacy_snpae"|"all": Setup cached data without running any tests',
-    )
-
-    parser.addoption(
-        "--plot",
-        action="store_true",
-        help="--plot: Enable plotting",
     )
 
 
@@ -89,8 +78,3 @@ def pytest_runtest_setup(item: "Item") -> None:
             pytest.skip("Setup skipped")
     elif item.config.getoption("--setup"):
         pytest.skip("Setting up, so not running tests")
-
-    # Handle `plot` tests
-    plot = list(item.iter_markers(name="plot"))
-    if plot and not item.config.getoption("--plot"):
-        pytest.skip("Plotting skipped")

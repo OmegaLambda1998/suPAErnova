@@ -1,5 +1,4 @@
 # Copyright 2025 Patrick Armstrong
-
 from typing import Self, Literal, ClassVar, Annotated
 from pathlib import Path
 import itertools
@@ -13,14 +12,23 @@ from pydantic import (
     model_validator,
 )
 
+from suPAErnova.analysis.spectra import SpectraPlot
 from suPAErnova.configs.steps.data import DataStepConfig
+from suPAErnova.configs.steps.steps import AbstractStepAnalysis
+from suPAErnova.analysis.distribution import DistributionPlot
 from suPAErnova.configs.steps.backends import AbstractModelConfig
+
+
+class PAEStepAnalysis(AbstractStepAnalysis):
+    plot_residual: SpectraPlot | list[SpectraPlot] | None = None
+    plot_latents: DistributionPlot | list[DistributionPlot] | None = None
 
 
 class PAEModelConfig(AbstractModelConfig):
     # --- Class Variables ---
     id: ClassVar[str] = "pae_model"
     required_steps: ClassVar[list[str]] = [DataStepConfig.id]
+    analysis: PAEStepAnalysis
 
     # === Required ===
     debug: bool = False

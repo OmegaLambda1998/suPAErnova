@@ -87,9 +87,6 @@ class PAEStepConfig[Backend: str](AbstractModelStepConfig[Backend, PAEModelConfi
         "TensorFlow": lambda: importlib.import_module(
             ".tf", __package__
         ).TFPAEModelConfig,
-        "PyTorch": lambda: importlib.import_module(
-            ".tch", __package__
-        ).TCHPAEModelConfig,
     }
     id: ClassVar[str] = "pae"
     required_steps: ClassVar[list[str]] = [DataStepConfig.id]
@@ -97,7 +94,7 @@ class PAEStepConfig[Backend: str](AbstractModelStepConfig[Backend, PAEModelConfi
     # --- Previous Steps ---
     data: DataStep | None = None
     validation_frac: Annotated[float, Field(ge=0, le=1)]
-    kfolds: list[NonNegativeInt] or None = None
+    kfolds: list[NonNegativeInt] | None = None
 
     # --- Optional ---
     seed: int

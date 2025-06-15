@@ -6,7 +6,9 @@ import importlib
 import numpy as np
 
 from suPAErnova.steps.backends import AbstractModel
+from suPAErnova.analysis.spectra import SpectraPlotter
 from suPAErnova.configs.steps.pae import PAEStage, PAEStepResult
+from suPAErnova.analysis.distribution import DistributionPlotter
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -21,19 +23,17 @@ if TYPE_CHECKING:
     from suPAErnova.typing.dimensions import WLDim, SpecDim, PhaseDim
     from suPAErnova.configs.steps.data import DataStepResult
     from suPAErnova.typing.steps.pae.pae import NZLatents, NPAELatents, NPhysicalLatents
-    from suPAErnova.configs.steps.pae.model import PAEModelConfig
+    from suPAErnova.configs.steps.pae.model import PAEModelConfig, PAEStepAnalysis
 
     from .tf import TFPAEModel
-    from .tch import TCHPAEModel
 
-    PAEModel = TFPAEModel | TCHPAEModel
+    PAEModel = TFPAEModel
 
 
 class PAEModelStep[Backend: str](AbstractModel[Backend]):
     # --- Class Variables ---
     model_backend: ClassVar[dict[str, "Callable[[], type[PAEModelConfig]]"]] = {
         "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFPAEModel,
-        "PyTorch": lambda: importlib.import_module(".tch", __package__).TCHPAEModel,
     }
     id: ClassVar[str] = "pae_model"
 
@@ -108,6 +108,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.run_stages: list[PAEStage]
 
         self.results: dict[str, PAEStepResult]
+        self.analysis: tuple[PAEStepAnalysis] = self.options.analysis
 
     @override
     def _setup(
@@ -122,9 +123,9 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         # --- Config Variables ---
         # Required
         self.physical_latents = self.options.physical_latents
-        self.n_physical = 3 if self.options.physical_latents else 0
-        self.n_zs = self.options.n_z_latents
-        self.n_pae_latents = self.n_physical + self.n_zs
+        self.n_physical_latents = 3 if self.options.physical_latents else 0
+        self.n_z_latents = self.options.n_z_latents
+        self.n_pae_latents = self.n_physical_latents + self.n_z_latents
 
         self.seperate_latent_training = self.options.seperate_latent_training
         self.seperate_z_latent_training = self.options.seperate_z_latent_training
@@ -205,15 +206,15 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                 "learning_rate_weight_decay_rate": self.options.zs_lr_weight_decay_rate,
                 **stage_data,
             })
-            for i in range(self.n_zs)
+            for i in range(self.n_z_latents)
         ]
         if not self.seperate_z_latent_training:
             self.stage_zs = self.stage_zs[-1:]
             self.stage_zs[0].prev_stage = 1
 
         self.stage_delta_m = PAEStage.model_validate({
-            "stage": z0 + self.n_zs,
-            "prev_stage": z0 + self.n_zs - 1,
+            "stage": z0 + self.n_z_latents,
+            "prev_stage": z0 + self.n_z_latents - 1,
             "name": "Δℳ",
             "fname": "delta_m",
             "epochs": self.options.delta_m_epochs,
@@ -225,8 +226,8 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         })
 
         self.stage_delta_p = PAEStage.model_validate({
-            "stage": z0 + self.n_zs + 1,
-            "prev_stage": z0 + self.n_zs,
+            "stage": z0 + self.n_z_latents + 1,
+            "prev_stage": z0 + self.n_z_latents,
             "name": "Δ𝓅",
             "fname": "delta_p",
             "epochs": self.options.delta_p_epochs,
@@ -401,7 +402,57 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
 
     @override
     def _analyse(self) -> None:
-        pass
+        labels = {}
+        ind = 0
+        if self.physical_latents:
+            labels[0] = "ΔAᵥ"
+            ind = 1
+            labels[self.n_pae_latents - 2] = "Δℳ"
+            labels[self.n_pae_latents - 1] = "Δ𝓅"
+        for i in range(self.n_z_latents):
+            labels[ind] = f"z{i}"
+            ind += 1
+
+        for stage in self.run_stages:
+            if self.analysis.plot_residual is not None:
+                if not isinstance(self.analysis.plot_residual, list):
+                    self.analysis.plot_residual = [self.analysis.plot_residual]
+                for opts in self.analysis.plot_residual:
+                    o = opts.model_copy()
+                    if o.name is None:
+                        o.name = "residual"
+                    if o.savepath is None:
+                        o.savepath = (
+                            self.paths.out
+                            / "plots"
+                            / str(self.model.seed)
+                            / str(stage.stage)
+                        )
+                    o.savepath.mkdir(parents=True, exist_ok=True)
+                    SpectraPlotter.plot_residual(
+                        self.data.data, self.results[str(stage.stage)].output_amp, o
+                    )
+
+            if self.analysis.plot_latents is not None:
+                if not isinstance(self.analysis.plot_latents, list):
+                    self.analysis.plot_latents = [self.analysis.plot_latents]
+                for opts in self.analysis.plot_latents:
+                    o = opts.model_copy()
+                    if o.labels is None:
+                        o.labels = {i: labels[i] for i in range(stage.stage)}
+                    if o.name is None:
+                        o.name = "latents"
+                    if o.savepath is None:
+                        o.savepath = (
+                            self.paths.out
+                            / "plots"
+                            / str(self.model.seed)
+                            / str(stage.stage)
+                        )
+                    o.savepath.mkdir(parents=True, exist_ok=True)
+                    DistributionPlotter.plot_corner(
+                        self.results[str(stage.stage)].latents[:, : stage.stage], o
+                    )
 
     #
     # === PAEModel Specific Functions ===

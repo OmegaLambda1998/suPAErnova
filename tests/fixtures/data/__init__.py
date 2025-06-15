@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
     DataParams = dict[str, Any]
     DataResults = dict[str, Any] | DataStep
-    DataStepFactory = Callable[[DataParams], DataResults]
+    DataStepFactory = Callable[[DataParams], tuple[DataResults, DataParams]]
 
     DataStepResults = DataStepResult
     DataResultFactory = Callable[[DataParams], DataStepResults]

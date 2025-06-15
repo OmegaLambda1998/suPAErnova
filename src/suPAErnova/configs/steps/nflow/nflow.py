@@ -34,9 +34,6 @@ class NFlowStepConfig[Backend: str](AbstractModelStepConfig[Backend, NFlowModelC
         "TensorFlow": lambda: importlib.import_module(
             ".tf", __package__
         ).TFNFlowModelConfig,
-        "PyTorch": lambda: importlib.import_module(
-            ".tch", __package__
-        ).TCHNFlowModelConfig,
     }
     id: ClassVar[str] = "nflow"
     required_steps: ClassVar[list[str]] = [PAEStepConfig.id]

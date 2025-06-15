@@ -1,9 +1,24 @@
 from typing import ClassVar
+from pathlib import Path
 
 from pydantic import PositiveInt, PositiveFloat
 
 from suPAErnova.configs.steps.nflow import NFlowStepConfig
+from suPAErnova.configs.steps.steps import AbstractStepResult, AbstractStepAnalysis
 from suPAErnova.configs.steps.backends import AbstractModelConfig
+
+
+class PosteriorStepPlotDistribution(AbstractStepAnalysis):
+    name: str
+    savepath: Path | None = None
+    ext: str = "svg"
+    labels: list[str] = []
+
+
+class PosteriorStepAnalysis(AbstractStepAnalysis):
+    plot_distribution: (
+        PosteriorStepPlotDistribution | list[PosteriorStepPlotDistribution] | None
+    ) = None
 
 
 class PosteriorModelConfig(AbstractModelConfig):
@@ -18,6 +33,7 @@ class PosteriorModelConfig(AbstractModelConfig):
     seed: int
     batch_size: PositiveInt
     train: bool = True
+    analysis: PosteriorStepAnalysis
 
     save_best: bool
 

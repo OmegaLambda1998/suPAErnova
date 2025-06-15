@@ -7,10 +7,13 @@ if TYPE_CHECKING:
     from tests.fixtures.data import DataParams
     from suPAErnova.steps.pae import PAEStep
     from suPAErnova.configs.steps.pae import PAEStepResult
+    from suPAErnova.configs.steps.data import DataStepResult
 
     PAEParams = dict[str, Any]
     PAEResults = dict[str, dict[str, Any]] | PAEStep
-    PAEStepFactory = Callable[[DataParams, PAEParams], PAEResults]
+    PAEStepFactory = Callable[
+        [DataParams, PAEParams], tuple[PAEResults, tuple[PAEParams, DataStepResult]]
+    ]
 
     PAEStepResults = dict[str, PAEStepResult]
     PAEResultFactory = Callable[[DataParams, PAEParams], PAEStepResults]
