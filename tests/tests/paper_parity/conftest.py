@@ -536,6 +536,10 @@ def legacy_pae(
 @pytest.fixture(scope="module")
 def nflow_params(pae_params: "PAEParams") -> "NFlowParams":
     return {
+        "analysis": {
+            "plot_z_latents": {},
+            "plot_u_latents": {},
+        },
         "fname": "paper_parity",
         "n_z_latents": pae_params["n_z_latents"],
         "encode_dims": pae_params["encode_dims"],
@@ -598,6 +602,10 @@ def posterior_params(
     pae_params: "PAEParams", nflow_params: "NFlowParams"
 ) -> "PosteriorParams":
     return {
+        "analysis": {
+            "plot_z_latents": {},
+            "plot_u_latents": {},
+        },
         "fname": "paper_parity",
         "n_z_latents": pae_params["n_z_latents"],
         "encode_dims": pae_params["encode_dims"],

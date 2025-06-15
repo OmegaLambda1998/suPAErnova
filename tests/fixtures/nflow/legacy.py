@@ -7,6 +7,7 @@ import pytest
 from suPAErnova.configs.steps.pae import PAEStepResult
 from suPAErnova.configs.steps.data import DataStepResult
 from suPAErnova.configs.steps.nflow import NFlowStepResult
+from suPAErnova.analysis.distribution import DistributionPlot, DistributionPlotter
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -203,11 +204,11 @@ def legacy_nflow_step_factory(
         nflow_params["cache_path"] = cache_path
         nflow_params["tmp_path"] = tmp_path_factory.mktemp("config")
 
-        data = DataStepResult.model_validate(legacy_data_step_factory(data_params))
+        data = DataStepResult.model_validate(legacy_data_step_factory(data_params)[0])
         pae = PAEStepResult.model_validate(
-            legacy_pae_step_factory(data_params, pae_params)["6"]
+            legacy_pae_step_factory(data_params, pae_params)[0]["6"]
         )
-        return legacy_nflow_step(pae_params, nflow_params, data, pae)
+        return legacy_nflow_step(pae_params, nflow_params, data, pae), nflow_params
 
     return _legacy_nflow_step
 
@@ -221,9 +222,48 @@ def legacy_nflow_result_factory(
         pae_params: "PAEParams",
         nflow_params: "NFlowParams",
     ) -> "NFlowStepResults":
-        nflow_step_results = legacy_nflow_step_factory(
+        nflow_step_results, params = legacy_nflow_step_factory(
             data_params, pae_params, nflow_params
         )
-        return NFlowStepResult.model_validate(nflow_step_results)
+
+        results = NFlowStepResult.model_validate(nflow_step_results)
+
+        savepath = (
+            params["cache_path"]
+            / params["fname"]
+            / "nflow"
+            / "legacy"
+            / "plots"
+            / params["seed"]
+        )
+        savepath.mkdir(parents=True, exist_ok=True)
+
+        z_labels = {}
+        u_labels = {}
+        ind = 0
+        if params["physical_latents"]:
+            z_labels[0] = "ΔAᵥ"
+            u_labels[0] = "μΔAᵥ"
+            ind = 1
+        for i in range(params["n_z_latents"]):
+            z_labels[ind] = f"z{i}"
+            u_labels[ind] = f"μ{i}"
+            ind += 1
+
+        plot_u_latents = DistributionPlot.model_validate({
+            "labels": u_labels,
+            "name": "u_latents",
+            "savepath": savepath,
+        })
+        DistributionPlotter.plot_corner(results.z_to_u, plot_u_latents)
+
+        plot_z_latents = DistributionPlot.model_validate({
+            "labels": z_labels,
+            "name": "z_latents",
+            "savepath": savepath,
+        })
+        DistributionPlotter.plot_corner(results.u_to_z, plot_z_latents)
+
+        return results
 
     return _legacy_nflow_result

@@ -11,7 +11,9 @@ if TYPE_CHECKING:
 
     NFlowParams = dict[str, Any]
     NFlowResults = dict[str, Any] | NFlowStep
-    NFlowStepFactory = Callable[[DataParams, PAEParams, NFlowParams], NFlowResults]
+    NFlowStepFactory = Callable[
+        [DataParams, PAEParams, NFlowParams], tuple[NFlowResults, NFlowParams]
+    ]
 
     NFlowStepResults = NFlowStepResult
     NFlowResultFactory = Callable[

@@ -6,6 +6,7 @@ import numpy as np
 
 from suPAErnova.steps.backends import AbstractModel
 from suPAErnova.configs.steps.nflow import NFlowStepResult
+from suPAErnova.analysis.distribution import DistributionPlotter
 
 if TYPE_CHECKING:
     from logging import Logger
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
     from suPAErnova.steps.pae.model import PAEModel
-    from suPAErnova.configs.steps.nflow.model import NFlowModelConfig
+    from suPAErnova.configs.steps.nflow.model import NFlowModelConfig, NFlowStepAnalysis
 
     from .tf import TFNFlowModel
 
@@ -46,6 +47,7 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
         self.pae: PAEModel
 
         self.results: NFlowStepResult
+        self.analysis: tuple[NFlowStepAnalysis] = self.options.analysis
 
     @override
     def _setup(self, *, pae: "PAEModel") -> None:
@@ -137,7 +139,43 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
 
     @override
     def _analyse(self) -> None:
-        pass
+        z_labels = {}
+        u_labels = {}
+        ind = 0
+        if self.model.physical_latents:
+            z_labels[0] = "ΔAᵥ"
+            u_labels[0] = "μΔAᵥ"
+            ind = 1
+        for i in range(self.model.n_u_latents):
+            z_labels[ind] = f"z{i}"
+            u_labels[ind] = f"μ{i}"
+            ind += 1
+
+        if self.analysis.plot_u_latents is not None:
+            if not isinstance(self.analysis.plot_u_latents, list):
+                self.analysis.plot_u_latents = [self.analysis.plot_u_latents]
+            for opts in self.analysis.plot_u_latents:
+                if opts.labels is None:
+                    opts.labels = u_labels
+                if opts.name is None:
+                    opts.name = "u_latents"
+                if opts.savepath is None:
+                    opts.savepath = self.paths.out / "plots" / str(self.model.seed)
+                opts.savepath.mkdir(parents=True, exist_ok=True)
+                DistributionPlotter.plot_corner(self.results.z_to_u, opts)
+
+        if self.analysis.plot_z_latents is not None:
+            if not isinstance(self.analysis.plot_z_latents, list):
+                self.analysis.plot_z_latents = [self.analysis.plot_z_latents]
+            for opts in self.analysis.plot_z_latents:
+                if opts.labels is None:
+                    opts.labels = z_labels
+                if opts.name is None:
+                    opts.name = "z_latents"
+                if opts.savepath is None:
+                    opts.savepath = self.paths.out / "plots" / str(self.model.seed)
+                opts.savepath.mkdir(parents=True, exist_ok=True)
+                DistributionPlotter.plot_corner(self.results.u_to_z, opts)
 
     #
     # === NFlowModel Specific Functions ===

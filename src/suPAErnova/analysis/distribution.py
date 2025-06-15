@@ -31,7 +31,7 @@ class DistributionPlotter(Plotter):
     @staticmethod
     def prep_from_array(data: "np.ndarray", config: DistributionPlot) -> pd.DataFrame:
         return pd.DataFrame({
-            label: data[:1, ind] for (ind, label) in (config.labels or {}).items()
+            label: data[:, ind] for (ind, label) in (config.labels or {}).items()
         })
 
     @staticmethod
