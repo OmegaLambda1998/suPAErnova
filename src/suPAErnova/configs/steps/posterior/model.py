@@ -1,4 +1,4 @@
-from typing import ClassVar
+from typing import Literal, ClassVar
 from pathlib import Path
 
 from pydantic import PositiveInt, PositiveFloat
@@ -28,8 +28,8 @@ class PosteriorModelConfig(AbstractModelConfig):
 
     # === Optional ===
     seed: int
+    subset: Literal["train", "test"]
     batch_size: PositiveInt
-    train: bool = True
     analysis: PosteriorStepAnalysis
 
     save_best: bool

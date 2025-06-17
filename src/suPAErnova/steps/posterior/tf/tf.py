@@ -15,7 +15,7 @@ import tensorflow_probability as tfp
 from tensorflow_probability import distributions as tfd
 
 if TYPE_CHECKING:
-    from typing import Any, Self
+    from typing import Any, Self, Literal
     from logging import Logger
     from pathlib import Path
     from collections.abc import Sequence
@@ -576,6 +576,7 @@ class TFPosteriorModel(ks.Model):
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
         self.seed: int = config.options.seed
+        self.subset: Literal["train", "test"] = config.options.subset
         self.set_seed()
 
         self.debug: bool = options.debug
@@ -585,12 +586,20 @@ class TFPosteriorModel(ks.Model):
         self.nflow.trainable = False
         self.nflow.flow.trainable = False
 
-        self.data: DataStepResult = self.pae.stage.train_data
-        self.sn_mask: npt.NDArray[np.int32] = self.pae.stage.train_sn_mask.astype(
-            np.int32
+        self.data: DataStepResult = (
+            self.pae.stage.train_data
+            if self.subset == "train"
+            else self.pae.stage.test_data
         )
-        self.spec_mask: npt.NDArray[np.int32] = self.pae.stage.train_spec_mask.astype(
-            np.int32
+        self.sn_mask: npt.NDArray[np.int32] = (
+            self.pae.stage.train_sn_mask.astype(np.int32)
+            if self.subset == "train"
+            else self.pae.stage.test_sn_mask.astype(np.int32)
+        )
+        self.spec_mask: npt.NDArray[np.int32] = (
+            self.pae.stage.train_spec_mask.astype(np.int32)
+            if self.subset == "train"
+            else self.pae.stage.test_spec_mask.astype(np.int32)
         )
         self.data.mask *= self.spec_mask
 

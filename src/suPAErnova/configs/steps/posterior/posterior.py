@@ -113,6 +113,8 @@ class PosteriorStepConfig[Backend: str](
 
     # --- Optional ---
     seeds: list[int] = [12345]
+    train_subset: bool = True
+    test_subset: bool = True
 
 
 PosteriorStepConfig.register_step()
