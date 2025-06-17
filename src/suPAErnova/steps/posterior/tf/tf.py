@@ -73,9 +73,9 @@ class PosteriorMap(tf.Module):
     ) -> None:
         self.random_initial_positions: bool = config.random_initial_positions
         # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
-        vars(self)["nflow"]: TFPAEModel = nflow
+        vars(self)["nflow"]: TFNFlowModel = nflow
         vars(self)["pae"]: TFPAEModel = pae
-        self.data: "DataStepResult" = data
+        self.data: DataStepResult = data
 
         self.sn_dim = self.data.amplitude.shape[0]
         self.spec_dim = self.data.amplitude.shape[1]
@@ -580,7 +580,7 @@ class TFPosteriorModel(ks.Model):
 
         self.debug: bool = options.debug
         # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
-        vars(self)["nflow"]: TFPAEModel = cast("TFNFlowModel", config.nflow.model)
+        vars(self)["nflow"]: TFNFlowModel = config.nflow.model
         vars(self)["pae"]: TFPAEModel = self.nflow.pae
         self.nflow.trainable = False
         self.nflow.flow.trainable = False
@@ -598,7 +598,9 @@ class TFPosteriorModel(ks.Model):
         self.spec_dim = self.data.time.shape[1]
 
         # MAP Variables
-        self.map: PosteriorMap = PosteriorMap(options, self.nflow, self.pae, self.data)
+        vars(self)["map"]: PosteriorMap = PosteriorMap(
+            options, self.nflow, self.pae, self.data
+        )
         self.tolerance = options.tolerance
         self.max_iterations = options.max_iterations
 
@@ -631,7 +633,7 @@ class TFPosteriorModel(ks.Model):
         self.n_leapfrog: int = options.n_leapfrog
         self.target_acceptance_rate: float = options.target_acceptance_rate
 
-        self.hmc: PosteriorHMCValue = PosteriorHMCValue(
+        vars(self)["hmc"]: PosteriorHMCValue = PosteriorHMCValue(
             tf.Variable(
                 [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.n_samples,
                 dtype=tf.float32,
@@ -782,16 +784,35 @@ class TFPosteriorModel(ks.Model):
 
         return log_prior + log_likelihood
 
-    def save_checkpoint(self, savepath: "Path") -> None:
-        self.save_weights(savepath / self.weights_path)
-        self.save(savepath / self.model_path)
+    def save_checkpoint(
+        self, savepath: "Path", *, save_map: bool = False, save_hmc: bool = False
+    ) -> None:
         (savepath / self.ckpt_path).mkdir(parents=True, exist_ok=True)
-        tf.train.Checkpoint(self, map=self.map, hmc=self.hmc).save(
-            f"{savepath / self.ckpt_path}/"
-        )
 
-    def load_checkpoint(self, loadpath: "Path") -> None:
-        tf.train.Checkpoint(self, map=self.map, hmc=self.hmc).restore(
+        if save_map and save_hmc:
+            ckpt = tf.train.Checkpoint(self, map=self.map, hmc=self.hmc)
+        elif save_map:
+            ckpt = tf.train.Checkpoint(self, map=self.map)
+        elif save_hmc:
+            ckpt = tf.train.Checkpoint(self, hmc=self.hmc)
+        else:
+            ckpt = tf.train.Checkpoint(self)
+
+        ckpt.save(f"{savepath / self.ckpt_path}/")
+
+    def load_checkpoint(
+        self, loadpath: "Path", *, load_map: bool = False, load_hmc: bool = False
+    ) -> None:
+        if load_map and load_hmc:
+            ckpt = tf.train.Checkpoint(self, map=self.map, hmc=self.hmc)
+        elif load_map:
+            ckpt = tf.train.Checkpoint(self, map=self.map)
+        elif load_hmc:
+            ckpt = tf.train.Checkpoint(self, hmc=self.hmc)
+        else:
+            ckpt = tf.train.Checkpoint(self)
+
+        ckpt.restore(
             tf.train.latest_checkpoint(f"{loadpath / self.ckpt_path}/")
         ).assert_existing_objects_matched()
 
@@ -820,7 +841,7 @@ class TFPosteriorModel(ks.Model):
     ) -> None:
         if savepath is not None and (savepath / self.ckpt_path).exists():
             self.log.debug(f"Loading Posterior from {savepath}")
-            self.load_checkpoint(savepath)
+            self.load_checkpoint(savepath, load_map=True, load_hmc=True)
 
             return
 
@@ -851,7 +872,7 @@ class TFPosteriorModel(ks.Model):
         self.hmc_train(savepath=savepath)
 
         if savepath is not None:
-            self.save_checkpoint(savepath)
+            self.save_checkpoint(savepath, save_map=True, save_hmc=True)
 
     def vals_and_grads(self, position):
         input_position = self.map.get_position(position)
@@ -883,7 +904,7 @@ class TFPosteriorModel(ks.Model):
                 self.log.debug(
                     f"Loading MAP stage: {stage.name}_{chain} from {stage_savepath}"
                 )
-                self.load_checkpoint(stage_savepath)
+                self.load_checkpoint(stage_savepath, load_map=True)
 
                 return
         self.log.debug(f"Running MAP stage: {stage.name}_{chain}")
@@ -1141,7 +1162,7 @@ class TFPosteriorModel(ks.Model):
                 f"Saving MAP stage: {stage.name}_{chain} from {stage_savepath}"
             )
             (stage_savepath / self.ckpt_path).mkdir(parents=True, exist_ok=True)
-            self.save_checkpoint(stage_savepath)
+            self.save_checkpoint(stage_savepath, save_map=True)
 
     # === HMC Functions ===
 
@@ -1155,7 +1176,7 @@ class TFPosteriorModel(ks.Model):
             hmc_savepath.mkdir(parents=True, exist_ok=True)
             if (hmc_savepath / self.ckpt_path).exists():
                 self.log.debug(f"Loading HMC from {hmc_savepath}")
-                self.load_checkpoint(hmc_savepath)
+                self.load_checkpoint(hmc_savepath, load_hmc=True)
 
                 samples = self.hmc.samples.numpy()
 
@@ -1193,7 +1214,7 @@ class TFPosteriorModel(ks.Model):
                 else:
                     delta_av = self.hmc.delta_av
 
-                self.hmc = PosteriorHMCValue(
+                vars(self)["hmc"] = PosteriorHMCValue(
                     tf.Variable(samples),
                     tf.Variable(self.hmc.step_sizes_final),
                     tf.Variable(self.hmc.is_accepted),
@@ -1342,7 +1363,7 @@ class TFPosteriorModel(ks.Model):
         else:
             delta_av = self.hmc.delta_av
 
-        self.hmc = PosteriorHMCValue(
+        vars(self)["hmc"] = PosteriorHMCValue(
             tf.Variable(samples),
             tf.Variable(step_sizes_final),
             tf.Variable(is_accepted),
@@ -1355,4 +1376,4 @@ class TFPosteriorModel(ks.Model):
         )
 
         if savepath is not None:
-            self.save_checkpoint(hmc_savepath)
+            self.save_checkpoint(hmc_savepath, save_hmc=True)

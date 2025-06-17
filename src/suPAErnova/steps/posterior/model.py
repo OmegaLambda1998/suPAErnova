@@ -140,11 +140,12 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
         for seed in self.seeds:
             self.options.seed = seed
             self._model(force=True)
-            savepath = self.savepath / str(seed) / self.model.model_path
-            self.log.debug(
-                f"{self.name} has not completed as {savepath} does not exist"
-            )
-            return False
+            savepath = self.savepath / str(seed) / self.model.ckpt_path
+            if not (savepath.exists() and any(savepath.iterdir())):
+                self.log.debug(
+                    f"{self.name} has not completed as {savepath} does not exist"
+                )
+                return False
         return True
 
     @override

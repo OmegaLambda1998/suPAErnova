@@ -62,9 +62,9 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
     @override
     def _completed(self) -> bool:
         self._model()
-        savepath = self.savepath / self.model.model_path
+        savepath = self.savepath / self.model.ckpt_path
 
-        if not savepath.exists():
+        if not (savepath.exists() and any(savepath.iterdir())):
             self.log.debug(
                 f"{self.name} has not completed as {savepath} does not exist"
             )

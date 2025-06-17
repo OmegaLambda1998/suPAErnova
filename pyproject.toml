@@ -28,7 +28,7 @@ legacy = ["supaernova_legacy"]
 tf-cpu = ["tensorflow-cpu>=2.18.1"]
 tf-cuda = []
 tf-metal = []
-tf-rocm = ["tensorflow-rocm; sys_platform == 'linux'"]
+tf-rocm = []
 
 tch-cpu = []
 tch-cuda = []

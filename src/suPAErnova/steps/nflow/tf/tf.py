@@ -318,8 +318,6 @@ class TFNFlowModel(ks.Model):
             self.built = True
 
     def save_checkpoint(self, savepath: "Path") -> None:
-        self.save_weights(savepath / self.weights_path)
-        self.save(savepath / self.model_path)
         (savepath / self.ckpt_path).mkdir(parents=True, exist_ok=True)
         tf.train.Checkpoint(
             self,
@@ -327,11 +325,6 @@ class TFNFlowModel(ks.Model):
 
     def load_checkpoint(self, loadpath: "Path") -> None:
         self.build_model()
-
-        # self.train_step((
-        #     tf.zeros_like(self.data),
-        #     tf.zeros_like(self.data),
-        # ))
 
         tf.train.Checkpoint(
             self,

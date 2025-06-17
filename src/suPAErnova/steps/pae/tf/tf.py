@@ -1054,8 +1054,6 @@ class TFPAEModel(ks.Model):
         return self._loss_terms.get(loss, tf.constant(0, dtype=tf.float32))
 
     def save_checkpoint(self, savepath: "Path") -> None:
-        self.save_weights(savepath / self.weights_path)
-        self.save(savepath / self.model_path)
         (savepath / self.ckpt_path).mkdir(parents=True, exist_ok=True)
         tf.train.Checkpoint(
             self,

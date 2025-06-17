@@ -273,10 +273,10 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             # / self.model.name
             / f"{self.name.split()[-1]}PAEModel"
             / f"{final_stage.stage}_{final_stage.fname}"
-            / self.model.model_path
+            / self.model.ckpt_path
         )
 
-        if not final_savepath.exists():
+        if not (final_savepath.exists() and any(final_savepath.iterdir())):
             self.log.debug(
                 f"{self.name} has not completed as {final_savepath} does not exist"
             )
