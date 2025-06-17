@@ -482,8 +482,6 @@ class TFPAEModel(ks.Model):
 
         self.batch_size: int = self.options.batch_size
         self.save_best: bool = self.options.save_best
-        self.weights_path: str = f"{'best' if self.save_best else 'latest'}.weights.h5"
-        self.model_path: str = f"{'best' if self.save_best else 'latest'}.model.keras"
         self.ckpt_path: str = (
             f"{'best' if self.save_best else 'latest'}.model.checkpoint/"
         )

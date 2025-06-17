@@ -83,15 +83,15 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
     @override
     def _run(self) -> None:
         self._model()
-        model_path = self.savepath / self.model.model_path
-        if model_path.exists() and not self.force:
-            # Don't retrain stages if you don't need to
+        ckpt_path = self.savepath / self.model.ckpt_path
+        # Don't retrain stages if you don't need to
+        if self.force or not (ckpt_path.exists() and any(ckpt_path.iterdir())):
+            self.model.train_model(savepath=self.savepath)
+        else:
             self.log.debug(
                 f"Loading weights from {self.savepath / self.model.ckpt_path}"
             )
             self.model.load_checkpoint(self.savepath)
-        else:
-            self.model.train_model(savepath=self.savepath)
         self.model.save_checkpoint(self.savepath)
 
     @override

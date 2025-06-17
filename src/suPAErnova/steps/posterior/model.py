@@ -55,8 +55,11 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
 
         self.nflow: NFlowModel
 
+        self.subsets = (["train"] if self.options.train_subset else []) + (
+            ["test"] if self.options.test_subset else []
+        )
         self.seeds: list[int] = self.options.seeds
-        self.results: dict[int, PosteriorStepResult]
+        self.results: dict[str, dict[int, PosteriorStepResult]]
         self.analysis: tuple[PosteriorStepAnalysis] = self.options.analysis
 
         # --- Setup Variables ---
@@ -77,9 +80,11 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
         self.nflow = nflow
         self.nflow.load()
 
-        for seed in self.seeds:
-            self.options.seed = seed
-            self._model(force=True)
+        for subset in self.subsets:
+            for seed in self.seeds:
+                self.options.subset = subset
+                self.options.seed = seed
+                self._model(force=True)
 
         self.savepath = self.paths.out / self.model.name
 
@@ -137,235 +142,277 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
 
     @override
     def _completed(self) -> bool:
-        for seed in self.seeds:
-            self.options.seed = seed
-            self._model(force=True)
-            savepath = self.savepath / str(seed) / self.model.ckpt_path
-            if not (savepath.exists() and any(savepath.iterdir())):
-                self.log.debug(
-                    f"{self.name} has not completed as {savepath} does not exist"
-                )
-                return False
+        for subset in self.subsets:
+            for seed in self.seeds:
+                self.options.subset = subset
+                self.options.seed = seed
+                self._model(force=True)
+                savepath = self.savepath / subset / str(seed) / self.model.ckpt_path
+                if not (savepath.exists() and any(savepath.iterdir())):
+                    self.log.debug(
+                        f"{self.name} has not completed as {savepath} does not exist"
+                    )
+                    return False
         return True
 
     @override
     def _load(self) -> None:
-        for seed in self.seeds:
-            self.options.seed = seed
-            self._model(force=True)
-            self.log.debug(
-                f"Loading final Posterior model weights from {self.savepath / str(seed)}"
-            )
-            self.model.load_checkpoint(self.savepath / str(seed))
+        for subset in self.subsets:
+            for seed in self.seeds:
+                self.options.subset = subset
+                self.options.seed = seed
+                self._model(force=True)
+                self.log.debug(
+                    f"Loading final Posterior model weights from {self.savepath / subset / str(seed)}"
+                )
+                self.model.load_checkpoint(
+                    self.savepath / subset / str(seed), load_map=True, load_hmc=True
+                )
 
         self._result()
 
     @override
     def _run(self) -> None:
-        for seed in self.seeds:
-            self.options.seed = seed
-            self._model(force=True)
-            model_path = self.savepath / str(seed) / self.model.model_path
-            weights_path = self.savepath / str(seed) / self.model.weights_path
-            if model_path.exists() and not self.force:
+        for subset in self.subsets:
+            for seed in self.seeds:
+                self.options.subset = subset
+                self.options.seed = seed
+                self._model(force=True)
+                ckpt_path = self.savepath / subset / str(seed) / self.model.ckpt_path
                 # Don't retrain stages if you don't need to
-                self.log.debug(f"Loading weights from {weights_path}")
-                self.model.load_checkpoint(self.savepath / str(seed))
-            else:
-                self.model.train_model(
-                    self.map_stages, savepath=self.savepath / str(seed)
+                if self.force or not (ckpt_path.exists() and any(ckpt_path.iterdir())):
+                    self.model.train_model(
+                        self.map_stages, savepath=self.savepath / subset / str(seed)
+                    )
+                else:
+                    self.log.debug(f"Loading weights from {ckpt_path}")
+                    self.model.load_checkpoint(
+                        self.savepath / subset / str(seed), load_map=True, load_hmc=True
+                    )
+                self.model.save_checkpoint(
+                    self.savepath / subset / str(seed), save_map=True, save_hmc=True
                 )
-            self.model.save_checkpoint(self.savepath / str(seed))
 
     @override
     def _result(self) -> None:
         data = self.nflow.pae.data.data
         results = {}
 
-        for seed in self.seeds:
-            self.options.seed = seed
-            self._model(force=True)
-            self.model.load_checkpoint(self.savepath / str(seed))
-            self.log.debug(
-                f"Saving final Posterior model weights to {self.savepath / str(seed)}"
-            )
-            self.model.save_checkpoint(self.savepath / str(seed))
+        for subset in self.subsets:
+            results[subset] = {}
+            for seed in self.seeds:
+                self.options.subset = subset
+                self.options.seed = seed
+                self._model(force=True)
+                self.model.load_checkpoint(
+                    self.savepath / subset / str(seed), load_map=True, load_hmc=True
+                )
+                self.log.debug(
+                    f"Saving final Posterior model weights to {self.savepath / subset / str(seed)}"
+                )
+                self.model.save_checkpoint(
+                    self.savepath / subset / str(seed), save_map=True, save_hmc=True
+                )
 
-            map_results = {
-                "chain_min": self.model.map.chain_min.numpy(),
-                "converged": self.model.map.converged.numpy(),
-                "num_evaluations": self.model.map.num_evaluations.numpy(),
-                "negative_log_prob": self.model.map.negative_log_prob.numpy(),
-                "init_u_delta_av": self.model.map.u_delta_av.initial.numpy(),
-                "init_u_latents": self.model.map.u_latents.initial.numpy(),
-                "init_delta_av": self.model.map.delta_av.initial.numpy(),
-                "init_delta_m": self.model.map.delta_m.initial.numpy(),
-                "init_delta_p": self.model.map.delta_p.initial.numpy(),
-                "init_z_latents": self.model.map.z_latents.initial.numpy(),
-                "best_u_delta_av": self.model.map.u_delta_av.best.numpy(),
-                "best_u_latents": self.model.map.u_latents.best.numpy(),
-                "best_delta_av": self.model.map.delta_av.best.numpy(),
-                "best_delta_m": self.model.map.delta_m.best.numpy(),
-                "best_delta_p": self.model.map.delta_p.best.numpy(),
-                "best_z_latents": self.model.map.z_latents.best.numpy(),
-            }
+                map_results = {
+                    "chain_min": self.model.map.chain_min.numpy(),
+                    "converged": self.model.map.converged.numpy(),
+                    "num_evaluations": self.model.map.num_evaluations.numpy(),
+                    "negative_log_prob": self.model.map.negative_log_prob.numpy(),
+                    "init_u_delta_av": self.model.map.u_delta_av.initial.numpy(),
+                    "init_u_latents": self.model.map.u_latents.initial.numpy(),
+                    "init_delta_av": self.model.map.delta_av.initial.numpy(),
+                    "init_delta_m": self.model.map.delta_m.initial.numpy(),
+                    "init_delta_p": self.model.map.delta_p.initial.numpy(),
+                    "init_z_latents": self.model.map.z_latents.initial.numpy(),
+                    "best_u_delta_av": self.model.map.u_delta_av.best.numpy(),
+                    "best_u_latents": self.model.map.u_latents.best.numpy(),
+                    "best_delta_av": self.model.map.delta_av.best.numpy(),
+                    "best_delta_m": self.model.map.delta_m.best.numpy(),
+                    "best_delta_p": self.model.map.delta_p.best.numpy(),
+                    "best_z_latents": self.model.map.z_latents.best.numpy(),
+                }
 
-            hmc_results = {
-                "samples": self.model.hmc.samples.numpy(),
-                "step_sizes_final": self.model.hmc.step_sizes_final.numpy(),
-                "is_accepted": self.model.hmc.is_accepted.numpy(),
-                "u_delta_av": self.model.hmc.u_delta_av.numpy(),
-                "u_latents": self.model.hmc.u_latents.numpy(),
-                "delta_av": self.model.hmc.delta_av.numpy(),
-                "z_latents": self.model.hmc.z_latents.numpy(),
-                "delta_m": self.model.hmc.delta_m.numpy(),
-                "delta_p": self.model.hmc.delta_p.numpy(),
-            }
+                hmc_results = {
+                    "samples": self.model.hmc.samples.numpy(),
+                    "step_sizes_final": self.model.hmc.step_sizes_final.numpy(),
+                    "is_accepted": self.model.hmc.is_accepted.numpy(),
+                    "u_delta_av": self.model.hmc.u_delta_av.numpy(),
+                    "u_latents": self.model.hmc.u_latents.numpy(),
+                    "delta_av": self.model.hmc.delta_av.numpy(),
+                    "z_latents": self.model.hmc.z_latents.numpy(),
+                    "delta_m": self.model.hmc.delta_m.numpy(),
+                    "delta_p": self.model.hmc.delta_p.numpy(),
+                }
 
-            model_results = {
-                "ind": data.ind,
-                "sn_name": data.sn_name,
-                "spectra_id": data.spectra_id,
-                "map": map_results,
-                "hmc": hmc_results,
-            }
+                model_results = {
+                    "ind": data.ind,
+                    "sn_name": data.sn_name,
+                    "spectra_id": data.spectra_id,
+                    "map": map_results,
+                    "hmc": hmc_results,
+                }
+                results[subset][seed] = PosteriorStepResult.model_validate(
+                    model_results
+                )
 
-            results[seed] = model_results
-
-        self.results = {
-            seed: PosteriorStepResult.model_validate(model_results)
-            for seed, model_results in results.items()
-        }
+        self.results = results
 
     @override
     def _analyse(self) -> None:
-        for seed in self.seeds:
-            self.options.seed = seed
-            self._model(force=True)
-            self.model.load_checkpoint(self.savepath / str(seed))
-
-            map_init_results = []
-            map_best_results = []
-            map_labels = {}
-            ind = 0
-            if self.model.map.nflow.physical_latents:
-                map_init_results.append(self.results[seed].map.init_u_delta_av)
-                map_best_results.append(self.results[seed].map.best_u_delta_av)
-                map_labels[0] = "μΔAᵥ"
-                ind = 1
-            for i in range(self.model.map.n_u_latents):
-                map_labels[ind] = f"μ{i}"
-                ind += 1
-            map_init_results.append(self.results[seed].map.init_u_latents)
-            map_best_results.append(self.results[seed].map.best_u_latents)
-            if self.model.map.pae.physical_latents:
-                map_init_results.append(self.results[seed].map.init_delta_av)
-                map_best_results.append(self.results[seed].map.best_delta_av)
-                map_labels[ind] = "ΔAᵥ"
-                ind += 1
-            for i in range(self.model.map.n_z_latents):
-                map_labels[ind] = f"z{i}"
-                ind += 1
-            map_init_results.append(self.results[seed].map.init_z_latents)
-            map_best_results.append(self.results[seed].map.best_z_latents)
-            if self.model.map.pae.physical_latents:
-                map_init_results.extend((
-                    self.results[seed].map.init_delta_m,
-                    self.results[seed].map.init_delta_p,
-                ))
-                map_best_results.extend((
-                    self.results[seed].map.best_delta_m,
-                    self.results[seed].map.best_delta_p,
-                ))
-                map_labels[ind] = "Δℳ"
-                ind += 1
-                map_labels[ind] = "Δp"
-            map_init_results = np.concat(map_init_results, axis=-1)
-            map_best_results = np.concat(map_best_results, axis=-1)
-
-            hmc_labels = {}
-            hmc_ind = 0
-            if self.model.map.train_delta_m:
-                hmc_labels[hmc_ind] = "Δℳ"
-                hmc_ind += 1
-            if self.model.map.train_delta_p:
-                hmc_labels[hmc_ind] = "Δp"
-                hmc_ind += 1
-            if self.model.map.nflow.physical_latents:
-                hmc_labels[hmc_ind] = "μΔAᵥ"
-                hmc_ind += 1
-            for i in range(self.model.map.n_u_latents):
-                hmc_labels[hmc_ind + i] = f"μ{i}"
-
-            if self.analysis.plot_map_init is not None:
-                if not isinstance(self.analysis.plot_map_init, list):
-                    self.analysis.plot_map_init = [self.analysis.plot_map_init]
-                for opts in self.analysis.plot_map_init:
-                    o = opts.model_copy()
-                    if o.labels is None:
-                        o.labels = map_labels
-                    if o.name is None:
-                        o.name = "map_init"
-                    if o.savepath is None:
-                        o.savepath = self.paths.out / "plots" / str(seed)
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    DistributionPlotter.plot_corner(map_init_results, o)
-
-            if self.analysis.plot_map_best is not None:
-                if not isinstance(self.analysis.plot_map_best, list):
-                    self.analysis.plot_map_best = [self.analysis.plot_map_best]
-                for opts in self.analysis.plot_map_best:
-                    o = opts.model_copy()
-                    if o.labels is None:
-                        o.labels = map_labels
-                    if o.name is None:
-                        o.name = "map_best"
-                    if o.savepath is None:
-                        o.savepath = self.paths.out / "plots" / str(seed)
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    DistributionPlotter.plot_corner(map_best_results, o)
-
-            if self.analysis.plot_hmc is not None:
-                if not isinstance(self.analysis.plot_hmc, list):
-                    self.analysis.plot_hmc = [self.analysis.plot_hmc]
-                for opts in self.analysis.plot_hmc:
-                    o = opts.model_copy()
-                    if o.labels is None:
-                        o.labels = hmc_labels
-                    if o.name is None:
-                        o.name = "hmc"
-                    if o.savepath is None:
-                        o.savepath = self.paths.out / "plots" / str(seed)
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    samples = self.results[seed].hmc.samples
-                    chains = [samples[:, i, :] for i in range(samples.shape[1])]
-                    DistributionPlotter.plot_corner(chains, o)
-
-        if self.analysis.plot_dispersion is not None:
-            if not isinstance(self.analysis.plot_dispersion, list):
-                self.analysis.plot_dispersion = [self.analysis.plot_dispersion]
-            for opts in self.analysis.plot_dispersion:
-                o = opts.model_copy()
-                if o.name is None:
-                    o.name = f"{o.subset}_dispersion"
-                if o.savepath is None:
-                    o.savepath = self.paths.out / "plots" / str(self.seeds[0])
-                o.savepath.mkdir(parents=True, exist_ok=True)
-                data = (
-                    self.nflow.pae.model.stage.train_data
-                    if o.subset == "train"
-                    else self.nflow.pae.model.stage.test_data
+        for subset in self.subsets:
+            for seed in self.seeds:
+                self.options.subset = subset
+                self.options.seed = seed
+                self._model(force=True)
+                self.model.load_checkpoint(
+                    self.savepath / subset / str(seed), load_map=True, load_hmc=True
                 )
-                data.mask *= (
-                    (
-                        self.nflow.pae.model.stage.train_sn_mask
-                        * self.nflow.pae.model.stage.train_spec_mask
+
+                results = self.results[subset][seed]
+
+                map_init_results = []
+                map_best_results = []
+                map_labels = {}
+                ind = 0
+                if self.model.map.nflow.physical_latents:
+                    map_init_results.append(results.map.init_u_delta_av)
+                    map_best_results.append(results.map.best_u_delta_av)
+                    map_labels[0] = "μΔAᵥ"
+                    ind = 1
+                for i in range(self.model.map.n_u_latents):
+                    map_labels[ind] = f"μ{i}"
+                    ind += 1
+                map_init_results.append(results.map.init_u_latents)
+                map_best_results.append(results.map.best_u_latents)
+                if self.model.map.pae.physical_latents:
+                    map_init_results.append(results.map.init_delta_av)
+                    map_best_results.append(results.map.best_delta_av)
+                    map_labels[ind] = "ΔAᵥ"
+                    ind += 1
+                for i in range(self.model.map.n_z_latents):
+                    map_labels[ind] = f"z{i}"
+                    ind += 1
+                map_init_results.append(results.map.init_z_latents)
+                map_best_results.append(results.map.best_z_latents)
+                if self.model.map.pae.physical_latents:
+                    map_init_results.extend((
+                        results.map.init_delta_m,
+                        results.map.init_delta_p,
+                    ))
+                    map_best_results.extend((
+                        results.map.best_delta_m,
+                        results.map.best_delta_p,
+                    ))
+                    map_labels[ind] = "Δℳ"
+                    ind += 1
+                    map_labels[ind] = "Δp"
+                map_init_results = np.concat(map_init_results, axis=-1)
+                map_best_results = np.concat(map_best_results, axis=-1)
+
+                hmc_labels = {}
+                hmc_ind = 0
+                if self.model.map.train_delta_m:
+                    hmc_labels[hmc_ind] = "Δℳ"
+                    hmc_ind += 1
+                if self.model.map.train_delta_p:
+                    hmc_labels[hmc_ind] = "Δp"
+                    hmc_ind += 1
+                if self.model.map.nflow.physical_latents:
+                    hmc_labels[hmc_ind] = "μΔAᵥ"
+                    hmc_ind += 1
+                for i in range(self.model.map.n_u_latents):
+                    hmc_labels[hmc_ind + i] = f"μ{i}"
+
+                if self.analysis.plot_map_init is not None:
+                    if not isinstance(self.analysis.plot_map_init, list):
+                        self.analysis.plot_map_init = [self.analysis.plot_map_init]
+                    for opts in self.analysis.plot_map_init:
+                        o = opts.model_copy()
+                        if o.labels is None:
+                            o.labels = map_labels
+                        if o.name is None:
+                            o.name = "map_init"
+                        if o.savepath is None:
+                            o.savepath = (
+                                self.paths.out
+                                / "plots"
+                                / str(self.seeds[0])
+                                / subset
+                                / str(seed)
+                            )
+                        o.savepath.mkdir(parents=True, exist_ok=True)
+                        DistributionPlotter.plot_corner(map_init_results, o)
+
+                if self.analysis.plot_map_best is not None:
+                    if not isinstance(self.analysis.plot_map_best, list):
+                        self.analysis.plot_map_best = [self.analysis.plot_map_best]
+                    for opts in self.analysis.plot_map_best:
+                        o = opts.model_copy()
+                        if o.labels is None:
+                            o.labels = map_labels
+                        if o.name is None:
+                            o.name = "map_best"
+                        if o.savepath is None:
+                            o.savepath = (
+                                self.paths.out
+                                / "plots"
+                                / str(self.seeds[0])
+                                / subset
+                                / str(seed)
+                            )
+                        o.savepath.mkdir(parents=True, exist_ok=True)
+                        DistributionPlotter.plot_corner(map_best_results, o)
+
+                if self.analysis.plot_hmc is not None:
+                    if not isinstance(self.analysis.plot_hmc, list):
+                        self.analysis.plot_hmc = [self.analysis.plot_hmc]
+                    for opts in self.analysis.plot_hmc:
+                        o = opts.model_copy()
+                        if o.labels is None:
+                            o.labels = hmc_labels
+                        if o.name is None:
+                            o.name = "hmc"
+                        if o.savepath is None:
+                            o.savepath = (
+                                self.paths.out
+                                / "plots"
+                                / str(self.seeds[0])
+                                / subset
+                                / str(seed)
+                            )
+                        o.savepath.mkdir(parents=True, exist_ok=True)
+                        samples = results.hmc.samples
+                        chains = [samples[:, i, :] for i in range(samples.shape[1])]
+                        DistributionPlotter.plot_corner(chains, o)
+
+            if self.analysis.plot_dispersion is not None:
+                if not isinstance(self.analysis.plot_dispersion, list):
+                    self.analysis.plot_dispersion = [self.analysis.plot_dispersion]
+                for opts in self.analysis.plot_dispersion:
+                    o = opts.model_copy()
+                    if o.name is None:
+                        o.name = "dispersion"
+                    if o.savepath is None:
+                        o.savepath = (
+                            self.paths.out / "plots" / str(self.seeds[0]) / subset
+                        )
+                    o.savepath.mkdir(parents=True, exist_ok=True)
+                    data = (
+                        self.nflow.pae.model.stage.train_data
+                        if subset == "train"
+                        else self.nflow.pae.model.stage.test_data
                     )
-                    if o.subset == "train"
-                    else (
-                        self.nflow.pae.model.stage.test_sn_mask
-                        * self.nflow.pae.model.stage.test_spec_mask
+                    data.mask *= (
+                        (
+                            self.nflow.pae.model.stage.train_sn_mask
+                            * self.nflow.pae.model.stage.train_spec_mask
+                        )
+                        if subset == "train"
+                        else (
+                            self.nflow.pae.model.stage.test_sn_mask
+                            * self.nflow.pae.model.stage.test_spec_mask
+                        )
                     )
-                )
-                hmc = list(self.results.values())
-                DispersionPlotter.plot_dispersion(data, hmc, o)
+                    hmc = list(self.results[subset].values())
+                    DispersionPlotter.plot_dispersion(data, hmc, o)

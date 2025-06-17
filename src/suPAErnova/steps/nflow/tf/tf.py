@@ -69,8 +69,6 @@ class TFNFlowModel(ks.Model):
         self.save_best: bool = self.options.save_best
         self.patience: float = self.options.patience
         self.validation_frac: float = self.options.validation_frac
-        self.weights_path: str = f"{'best' if self.save_best else 'latest'}.weights.h5"
-        self.model_path: str = f"{'best' if self.save_best else 'latest'}.model.keras"
         self.ckpt_path: str = (
             f"{'best' if self.save_best else 'latest'}.model.checkpoint/"
         )

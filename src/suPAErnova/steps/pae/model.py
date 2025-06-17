@@ -312,9 +312,9 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             savepath = self.paths.out / self.model.name / f"{stage.stage}_{stage.fname}"
             stage.savepath = savepath
 
-            model_path = savepath / self.model.model_path
+            ckpt_path = savepath / self.model.ckpt_path
             # Don't retrain stages if you don't need to
-            if self.force or not model_path.exists():
+            if self.force or not (ckpt_path.exists() and any(ckpt_path.iterdir())):
                 self.model.train_model(stage)
                 self.model.save_checkpoint(savepath)
 
