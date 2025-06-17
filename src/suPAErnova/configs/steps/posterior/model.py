@@ -28,6 +28,8 @@ class PosteriorModelConfig(AbstractModelConfig):
 
     # === Optional ===
     seed: int
+    train_subset: bool = True
+    test_subset: bool = True
     subset: Literal["train", "test"] = "train"
     batch_size: PositiveInt
     analysis: PosteriorStepAnalysis
