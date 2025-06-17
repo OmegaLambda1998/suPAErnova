@@ -7,6 +7,7 @@ import pytest
 from suPAErnova.configs.steps.pae import PAEStepResult
 from suPAErnova.configs.steps.data import DataStepResult
 from suPAErnova.configs.steps.nflow import NFlowStepResult
+from suPAErnova.analysis.distribution import DistributionPlot, DistributionPlotter
 from suPAErnova.configs.steps.posterior import PosteriorStepResult
 
 if TYPE_CHECKING:
@@ -242,14 +243,16 @@ def legacy_posterior_step_factory(
         posterior_params["cache_path"] = cache_path
         posterior_params["tmp_path"] = tmp_path_factory.mktemp("config")
 
-        data = DataStepResult.model_validate(legacy_data_step_factory(data_params))
+        data = DataStepResult.model_validate(legacy_data_step_factory(data_params)[0])
         pae = PAEStepResult.model_validate(
-            legacy_pae_step_factory(data_params, pae_params)["6"]
+            legacy_pae_step_factory(data_params, pae_params)[0]["6"]
         )
         nflow = NFlowStepResult.model_validate(
-            legacy_nflow_step_factory(data_params, pae_params, nflow_params)
+            legacy_nflow_step_factory(data_params, pae_params, nflow_params)[0]
         )
-        return legacy_posterior_step(posterior_params, data, pae, nflow)
+        return legacy_posterior_step(
+            posterior_params, data, pae, nflow
+        ), posterior_params
 
     return _legacy_posterior_step
 
@@ -264,11 +267,95 @@ def legacy_posterior_result_factory(
         nflow_params: "NFlowParams",
         posterior_params: "PosteriorParams",
     ) -> "PosteriorStepResults":
-        posterior_step_results = legacy_posterior_step_factory(
+        posterior_step_results, params = legacy_posterior_step_factory(
             data_params, pae_params, nflow_params, posterior_params
         )
         posterior_step_results["map"] = posterior_step_results["map"].item()
         posterior_step_results["hmc"] = posterior_step_results["hmc"].item()
-        return PosteriorStepResult.model_validate(posterior_step_results)
+        results = PosteriorStepResult.model_validate(posterior_step_results)
+
+        savepath = (
+            params["cache_path"]
+            / params["fname"]
+            / "posterior"
+            / "legacy"
+            / "plots"
+            / params["seed"]
+        )
+        savepath.mkdir(parents=True, exist_ok=True)
+
+        map_init_results = []
+        map_best_results = []
+        map_labels = {}
+        hmc_labels = {}
+        ind = 0
+        if params["nflow_physical_latents"]:
+            map_labels[0] = "μΔAᵥ"
+            map_init_results.append(results.map.init_u_delta_av)
+            map_best_results.append(results.map.best_u_delta_av)
+            ind = 1
+        for i in range(params["n_z_latents"]):
+            map_labels[ind] = f"μ{i}"
+            ind += 1
+        map_init_results.append(results.map.init_u_latents)
+        map_best_results.append(results.map.best_u_latents)
+        hmc_ind = 0
+        if params["pae_physical_latents"]:
+            map_labels[ind] = "ΔAᵥ"
+            hmc_labels[hmc_ind] = "ΔAᵥ"
+            map_init_results.append(results.map.init_delta_av)
+            map_best_results.append(results.map.best_delta_av)
+            ind += 1
+            hmc_ind += 1
+        for i in range(params["n_z_latents"]):
+            map_labels[ind] = f"z{i}"
+            hmc_labels[hmc_ind] = f"z{i}"
+            ind += 1
+            hmc_ind += 1
+        map_init_results.append(results.map.init_z_latents)
+        map_best_results.append(results.map.best_z_latents)
+        if params["pae_physical_latents"]:
+            map_init_results.extend((
+                results.map.init_delta_m,
+                results.map.init_delta_p,
+            ))
+            map_best_results.extend((
+                results.map.best_delta_m,
+                results.map.best_delta_p,
+            ))
+            map_labels[ind] = "Δℳ"
+            ind += 1
+            map_labels[ind] = "Δp"
+            hmc_labels[hmc_ind] = "Δℳ"
+            hmc_ind += 1
+            hmc_labels[hmc_ind] = "Δp"
+
+        map_init_results = np.concat(map_init_results, axis=-1)
+        map_best_results = np.concat(map_best_results, axis=-1)
+
+        plot_map_init = DistributionPlot.model_validate({
+            "labels": map_labels,
+            "name": "map_init",
+            "savepath": savepath,
+        })
+        DistributionPlotter.plot_corner(map_init_results, plot_map_init)
+        plot_map_best = DistributionPlot.model_validate({
+            "labels": map_labels,
+            "name": "map_best",
+            "savepath": savepath,
+        })
+        DistributionPlotter.plot_corner(map_best_results, plot_map_best)
+
+        plot_hmc = DistributionPlot.model_validate({
+            "labels": hmc_labels,
+            "name": "hmc",
+            "savepath": savepath,
+            "mean": True,
+        })
+        samples = results.hmc.samples
+        samples[:, :, -1]
+        chains = [samples[:, i, :] for i in range(samples.shape[1])]
+        DistributionPlotter.plot_corner(chains, plot_hmc)
+        return results
 
     return _legacy_posterior_result

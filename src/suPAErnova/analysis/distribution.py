@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 class DistributionPlot(AbstractPlot):
     labels: "dict[str | int, str] | None" = None
+    mean: bool = False
 
 
 class DistributionPlotter(Plotter):
@@ -36,7 +37,7 @@ class DistributionPlotter(Plotter):
 
     @staticmethod
     def plot_corner(
-        data: "AbstractStepResult | np.ndarray",
+        data: "AbstractStepResult | np.ndarray | list[AbstractStepResult] | list[np.ndarray]",
         config: "DistributionPlot",
         *,
         fig: "Figure | None" = None,
@@ -46,10 +47,19 @@ class DistributionPlotter(Plotter):
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
             return
-        if isinstance(data, np.ndarray):
-            chains = DistributionPlotter.prep_from_array(data, config)
+
+        if not isinstance(data, list):
+            data = [data]
+        if config.mean:
+            chains = DistributionPlotter.prep_from_array(np.mean(data, axis=0), config)
         else:
-            chains = DistributionPlotter.prep_from_result(data, config)
+            chains = []
+            for d in data:
+                if isinstance(d, np.ndarray):
+                    chain = DistributionPlotter.prep_from_array(d, config)
+                else:
+                    chain = DistributionPlotter.prep_from_result(d, config)
+                chains.append(chain)
         fig, ax = Plotter.corner(chains, fig=fig, ax=ax)
         fig = Plotter.save(fig, savepath)
         Plotter.close(fig, ax)

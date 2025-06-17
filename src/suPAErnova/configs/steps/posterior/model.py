@@ -3,28 +3,25 @@ from pathlib import Path
 
 from pydantic import PositiveInt, PositiveFloat
 
+from suPAErnova.analysis.dispersion import DispersionPlot
 from suPAErnova.configs.steps.nflow import NFlowStepConfig
 from suPAErnova.configs.steps.steps import AbstractStepResult, AbstractStepAnalysis
+from suPAErnova.analysis.distribution import DistributionPlot
 from suPAErnova.configs.steps.backends import AbstractModelConfig
 
 
-class PosteriorStepPlotDistribution(AbstractStepAnalysis):
-    name: str
-    savepath: Path | None = None
-    ext: str = "svg"
-    labels: list[str] = []
-
-
 class PosteriorStepAnalysis(AbstractStepAnalysis):
-    plot_distribution: (
-        PosteriorStepPlotDistribution | list[PosteriorStepPlotDistribution] | None
-    ) = None
+    plot_map_init: DistributionPlot | list[DistributionPlot] | None = None
+    plot_map_best: DistributionPlot | list[DistributionPlot] | None = None
+    plot_hmc: DistributionPlot | list[DistributionPlot] | None = None
+    plot_dispersion: DispersionPlot | list[DispersionPlot] | None = None
 
 
 class PosteriorModelConfig(AbstractModelConfig):
     # --- Class Variables ---
     id: ClassVar[str] = "posterior_model"
     required_steps: ClassVar[list[str]] = [NFlowStepConfig.id]
+    analysis: PosteriorStepAnalysis
 
     # === Required ===
     debug: bool = False

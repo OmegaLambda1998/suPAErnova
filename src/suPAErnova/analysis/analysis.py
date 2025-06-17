@@ -74,7 +74,7 @@ class Plotter:
         ax: "Axis | None" = None,
         **kwargs: "Any",
     ) -> "tuple[Figure, Axis]":
-        fig, ax = Plotter.init(fig, ax, **kwargs)
+        fig, ax = Plotter.init(fig, ax)
         getattr(ax, plot_fn)(*args, **kwargs)
         return fig, ax
 
@@ -160,6 +160,7 @@ class Plotter:
                     *args,
                     samples=chain,
                     name=name,
+                    color="black",
                     **chain_kwargs,
                     **kwargs,
                 )

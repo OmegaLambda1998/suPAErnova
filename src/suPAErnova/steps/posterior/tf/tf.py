@@ -44,10 +44,23 @@ class PosteriorHMCValue(tf.Module):
         samples: tf.Variable,
         step_sizes_final: tf.Variable,
         is_accepted: tf.Variable,
+        u_delta_av: tf.Variable,
+        u_latents: tf.Variable,
+        delta_av: tf.Variable,
+        z_latents: tf.Variable,
+        delta_m: tf.Variable,
+        delta_p: tf.Variable,
     ) -> None:
         self.samples: tf.Variable = samples
         self.step_sizes_final: tf.Variable = step_sizes_final
         self.is_accepted: tf.Variable = is_accepted
+
+        self.u_delta_av: tf.Variable = u_delta_av
+        self.u_latents: tf.Variable = u_latents
+        self.delta_av: tf.Variable = delta_av
+        self.z_latents: tf.Variable = z_latents
+        self.delta_m: tf.Variable = delta_m
+        self.delta_p: tf.Variable = delta_p
 
 
 class PosteriorMap(tf.Module):
@@ -637,6 +650,36 @@ class TFPosteriorModel(ks.Model):
                     self.sn_dim,
                 ),
             ),
+            tf.Variable(
+                [[[0] * 1] * self.sn_dim] * self.n_samples,
+                dtype=tf.float32,
+                shape=(self.n_samples, self.sn_dim, 1),
+            ),
+            tf.Variable(
+                [[[0] * self.map.n_u_latents] * self.sn_dim] * self.n_samples,
+                dtype=tf.float32,
+                shape=(self.n_samples, self.sn_dim, self.map.n_u_latents),
+            ),
+            tf.Variable(
+                [[[0] * 1] * self.sn_dim] * self.n_samples,
+                dtype=tf.float32,
+                shape=(self.n_samples, self.sn_dim, 1),
+            ),
+            tf.Variable(
+                [[[0] * self.map.n_z_latents] * self.sn_dim] * self.n_samples,
+                dtype=tf.float32,
+                shape=(self.n_samples, self.sn_dim, self.map.n_z_latents),
+            ),
+            tf.Variable(
+                [[[0] * 1] * self.sn_dim] * self.n_samples,
+                dtype=tf.float32,
+                shape=(self.n_samples, self.sn_dim, 1),
+            ),
+            tf.Variable(
+                [[[0] * 1] * self.sn_dim] * self.n_samples,
+                dtype=tf.float32,
+                shape=(self.n_samples, self.sn_dim, 1),
+            ),
         )
 
     @override
@@ -1114,6 +1157,54 @@ class TFPosteriorModel(ks.Model):
                 self.log.debug(f"Loading HMC from {hmc_savepath}")
                 self.load_checkpoint(hmc_savepath)
 
+                samples = self.hmc.samples.numpy()
+
+                ind = 0
+                if self.map.train_delta_m:
+                    delta_m = samples[..., ind : ind + 1]
+                    ind += 1
+                else:
+                    delta_m = self.hmc.delta_m
+                if self.map.train_delta_p:
+                    delta_p = samples[..., ind : ind + 1]
+                    ind += 1
+                else:
+                    delta_p = self.hmc.delta_p
+                if self.map.nflow.physical_latents:
+                    u_delta_av = samples[..., ind : ind + 1]
+                    ind += 1
+                else:
+                    u_delta_av = self.hmc.u_delta_av
+                u_latents = samples[..., ind:]
+                if self.map.nflow.physical_latents:
+                    us = np.concat([u_delta_av, u_latents], axis=-1)
+                else:
+                    us = u_latents
+                us = us.reshape(-1, self.map.n_flow_latents)
+                # Transform u_latents to z_latents
+                z_latents = (
+                    self.nflow.u_to_z(us, permute=True)
+                    .numpy()
+                    .reshape(*samples.shape[:-1], self.map.n_flow_latents)
+                )
+                if self.map.pae.physical_latents:
+                    delta_av = z_latents[..., 0:1]
+                    z_latents = z_latents[..., 1:]
+                else:
+                    delta_av = self.hmc.delta_av
+
+                self.hmc = PosteriorHMCValue(
+                    tf.Variable(samples),
+                    tf.Variable(self.hmc.step_sizes_final),
+                    tf.Variable(self.hmc.is_accepted),
+                    tf.Variable(u_delta_av),
+                    tf.Variable(u_latents),
+                    tf.Variable(delta_av),
+                    tf.Variable(z_latents),
+                    tf.Variable(delta_m),
+                    tf.Variable(delta_p),
+                )
+
                 return
         self.log.debug("Running HMC")
 
@@ -1217,10 +1308,50 @@ class TFPosteriorModel(ks.Model):
             is_accepted.numpy(),
         )
 
+        ind = 0
+        if self.map.train_delta_m:
+            delta_m = samples[..., ind : ind + 1]
+            ind += 1
+        else:
+            delta_m = self.hmc.delta_m
+        if self.map.train_delta_p:
+            delta_p = samples[..., ind : ind + 1]
+            ind += 1
+        else:
+            delta_p = self.hmc.delta_p
+        if self.map.nflow.physical_latents:
+            u_delta_av = samples[..., ind : ind + 1]
+            ind += 1
+        else:
+            u_delta_av = self.hmc.u_delta_av
+        u_latents = samples[..., ind:]
+        if self.map.nflow.physical_latents:
+            us = np.concat([u_delta_av, u_latents], axis=-1)
+        else:
+            us = u_latents
+        us = us.reshape(-1, self.map.n_flow_latents)
+        # Transform u_latents to z_latents
+        z_latents = (
+            self.nflow.u_to_z(us, permute=True)
+            .numpy()
+            .reshape(*samples.shape[:-1], self.map.n_flow_latents)
+        )
+        if self.map.pae.physical_latents:
+            delta_av = z_latents[..., 0:1]
+            z_latents = z_latents[..., 1:]
+        else:
+            delta_av = self.hmc.delta_av
+
         self.hmc = PosteriorHMCValue(
             tf.Variable(samples),
             tf.Variable(step_sizes_final),
             tf.Variable(is_accepted),
+            tf.Variable(u_delta_av),
+            tf.Variable(u_latents),
+            tf.Variable(delta_av),
+            tf.Variable(z_latents),
+            tf.Variable(delta_m),
+            tf.Variable(delta_p),
         )
 
         if savepath is not None:

@@ -603,8 +603,10 @@ def posterior_params(
 ) -> "PosteriorParams":
     return {
         "analysis": {
-            "plot_z_latents": {},
-            "plot_u_latents": {},
+            "plot_map_init": {},
+            "plot_map_best": {},
+            "plot_hmc": {"mean": True},
+            "plot_dispersion": [{"subset": "train"}, {"subset": "test"}],
         },
         "fname": "paper_parity",
         "n_z_latents": pae_params["n_z_latents"],
@@ -650,10 +652,8 @@ def snpae_posterior(
 ) -> "PosteriorStepResults":
     pae_params["kfold"], pae_params["seed"] = seed
     nflow_params["kfold"], nflow_params["seed"] = seed
-    posterior_params["kfold"], posterior_params["seed"] = seed
-    posterior_params["analysis"] = {
-        "plot_distribution": {"name": str(posterior_params["seed"])}
-    }
+    posterior_params["kfold"], init_seed = seed
+    posterior_params["seeds"] = [int(init_seed) + i for i in range(8)]
 
     result = snpae_posterior_result_factory(
         data_params, pae_params, nflow_params, posterior_params
@@ -676,7 +676,8 @@ def legacy_posterior(
 ) -> "PosteriorStepResults":
     pae_params["kfold"], pae_params["seed"] = seed
     nflow_params["kfold"], nflow_params["seed"] = seed
-    posterior_params["kfold"], posterior_params["seed"] = seed
+    posterior_params["kfold"], init_seed = seed
+    posterior_params["seeds"] = [int(init_seed) + i for i in range(8)]
     result = legacy_posterior_result_factory(
         data_params, pae_params, nflow_params, posterior_params
     )

@@ -70,7 +70,7 @@ def snpae_posterior_step_factory(
             },
             "pae": {
                 "validation_frac": pae_params["validation_frac"],
-                "seed": posterior_params["seed"],
+                "seed": posterior_params["seeds"][0],
                 "kfolds": [posterior_params["kfold"]],
                 "model": {
                     **{
@@ -88,7 +88,7 @@ def snpae_posterior_step_factory(
             },
             "nflow": {
                 "validation_frac": nflow_params["validation_frac"],
-                "seed": posterior_params["seed"],
+                "seed": posterior_params["seeds"][0],
                 "model": {
                     **{
                         key: val
@@ -104,8 +104,8 @@ def snpae_posterior_step_factory(
                 },
             },
             "posterior": {
-                "seed": posterior_params["seed"],
                 "model": {
+                    "seed": posterior_params["seeds"][0],
                     **{
                         key: val
                         for key, val in posterior_params.items()
@@ -128,7 +128,7 @@ def snpae_posterior_step_factory(
             / posterior_params["fname"]
             / "posterior"
             / "snpae"
-            / posterior_params["seed"],
+            / str(posterior_params["seeds"][0]),
         )
         assert snpae.data is not None, "Error setting up DataStep"
         snpae.data.paths.out = (
@@ -141,7 +141,7 @@ def snpae_posterior_step_factory(
             / posterior_params["fname"]
             / "pae"
             / "snpae"
-            / posterior_params["seed"]
+            / str(posterior_params["seeds"][0])
         )
         for model in snpae.pae.models:
             model.paths.out = snpae.pae.paths.out / "PAEStepConfig" / "TFPAEModelConfig"
@@ -152,7 +152,7 @@ def snpae_posterior_step_factory(
             / posterior_params["fname"]
             / "nflow"
             / "snpae"
-            / posterior_params["seed"]
+            / str(posterior_params["seeds"][0])
         )
         for model in snpae.nflow.models:
             model.paths.out = (

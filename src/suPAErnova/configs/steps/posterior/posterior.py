@@ -79,6 +79,13 @@ class PosteriorStepHMCResult(AbstractStepResult):
     step_sizes_final: npt.NDArray[np.float32]
     is_accepted: npt.NDArray[np.float32]
 
+    u_delta_av: npt.NDArray[np.float32]
+    u_latents: npt.NDArray[np.float32]
+    delta_av: npt.NDArray[np.float32]
+    z_latents: npt.NDArray[np.float32]
+    delta_m: npt.NDArray[np.float32]
+    delta_p: npt.NDArray[np.float32]
+
 
 class PosteriorStepResult(AbstractStepResult):
     ind: npt.NDArray[np.int32]
@@ -105,7 +112,7 @@ class PosteriorStepConfig[Backend: str](
     nflow: NFlowStep[Any] | None = None
 
     # --- Optional ---
-    seed: int = 12345
+    seeds: list[int] = [12345]
 
 
 PosteriorStepConfig.register_step()

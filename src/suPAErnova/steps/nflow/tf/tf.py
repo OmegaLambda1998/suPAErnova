@@ -194,11 +194,7 @@ class TFNFlowModel(ks.Model):
     def u_to_z(self, inputs: "NFlowInputs", *, permute: bool = False) -> "NFlowInputs":
         # If permute is True, then the incoming u_latents need to be permuted correctly
         if permute:
-            # tf.print("before", tf.reduce_mean(inputs, axis=0))
-            # tf.print(tf.reduce_mean(self.flow.bijector.forward(inputs), axis=0))
             inputs = tf.gather(inputs, self.u_permute, axis=-1)
-            # tf.print("after", tf.reduce_mean(inputs, axis=0))
-            # tf.print(tf.reduce_mean(self.flow.bijector.forward(inputs), axis=0))
         return self.flow.bijector.forward(inputs)
 
     def z_to_u(self, inputs: "NFlowInputs", *, permute: bool = False) -> "NFlowInputs":
