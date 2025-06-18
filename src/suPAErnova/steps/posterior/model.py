@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, ClassVar, override
 import importlib
 
 import numpy as np
+import pandas as pd
 
 from suPAErnova.steps.backends import AbstractModel
 from suPAErnova.analysis.dispersion import DispersionPlotter
@@ -60,7 +61,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
         )
         self.seeds: list[int] = self.options.seeds
         self.results: dict[str, dict[int, PosteriorStepResult]]
-        self.analysis: tuple[PosteriorStepAnalysis] = self.options.analysis
+        self.analysis: PosteriorStepAnalysis = self.options.analysis
 
         # --- Setup Variables ---
         self.n_chains_early: int = self.options.n_chains_early
@@ -259,7 +260,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
         self.results = results
 
     @override
-    def _analyse(self) -> None:
+    def _analyse(self: "PosteriorModelStep") -> None:
         for subset in self.subsets:
             for seed in self.seeds:
                 self.options.subset = subset
@@ -403,16 +404,35 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                         if subset == "train"
                         else self.nflow.pae.model.stage.test_data
                     )
-                    data.mask *= (
-                        (
-                            self.nflow.pae.model.stage.train_sn_mask
-                            * self.nflow.pae.model.stage.train_spec_mask
-                        )
-                        if subset == "train"
-                        else (
-                            self.nflow.pae.model.stage.test_sn_mask
-                            * self.nflow.pae.model.stage.test_spec_mask
-                        )
-                    )
                     hmc = list(self.results[subset].values())
-                    DispersionPlotter.plot_dispersion(data, hmc, o)
+
+                    twins = None
+                    if o.twins is not None:
+                        twins_path = self.nflow.pae.data.data_dir / o.twins
+                        if twins_path.exists():
+                            twins = pd.read_csv(twins_path, delimiter=",")
+                        else:
+                            self.log.error(
+                                f"{twins_path} does not exist, can not load twins data."
+                            )
+
+                        min_redshift = (
+                            self.nflow.pae.min_train_redshift
+                            if subset == "train"
+                            else self.nflow.pae.min_test_redshift
+                        )
+
+                        max_redshift = (
+                            self.nflow.pae.max_train_redshift
+                            if subset == "train"
+                            else self.nflow.pae.max_test_redshift
+                        )
+
+                    DispersionPlotter.plot_dispersion(
+                        data,
+                        hmc,
+                        o,
+                        twins=twins,
+                        min_redshift=min_redshift,
+                        max_redshift=max_redshift,
+                    )

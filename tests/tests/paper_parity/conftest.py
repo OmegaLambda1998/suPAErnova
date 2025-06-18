@@ -606,7 +606,10 @@ def posterior_params(
             "plot_map_init": {},
             "plot_map_best": {},
             "plot_hmc": {"mean": True},
-            "plot_dispersion": [{"subset": "train"}, {"subset": "test"}],
+            "plot_dispersion": [
+                {"subset": "train", "twins": "boone_data.dat"},
+                {"subset": "test", "twins": "boone_data.dat"},
+            ],
         },
         "fname": "paper_parity",
         "n_z_latents": pae_params["n_z_latents"],
