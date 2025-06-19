@@ -79,6 +79,9 @@ class DispersionPlotter(Plotter):
             (data.redshift >= min_redshift) & (data.redshift <= max_redshift)
         )[:, 0, 0]
 
+        print("twins", np.sum(twins_mask[:, 0, 0]))
+        print("redshift", np.sum(redshift_mask.astype(np.int32)))
+
         mask = twins_mask.astype(bool)[:, 0, 0] & redshift_mask
         x = data.redshift[mask][:, 0, :]
         y = weighted_mean[mask]

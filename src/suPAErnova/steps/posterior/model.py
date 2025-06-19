@@ -61,6 +61,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
         )
         self.seeds: list[int] = self.options.seeds
         self.results: dict[str, dict[int, PosteriorStepResult]]
+        self.models: dict[str, dict[int, PosteriorModel]]
         self.analysis: PosteriorStepAnalysis = self.options.analysis
 
         # --- Setup Variables ---
@@ -158,7 +159,9 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
 
     @override
     def _load(self) -> None:
+        models = {}
         for subset in self.subsets:
+            models[subset] = {}
             for seed in self.seeds:
                 self.options.subset = subset
                 self.options.seed = seed
@@ -169,12 +172,14 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                 self.model.load_checkpoint(
                     self.savepath / subset / str(seed), load_map=True, load_hmc=True
                 )
-
-        self._result()
+                models[subset][seed] = self.model
+        self.models = models
 
     @override
     def _run(self) -> None:
+        models = {}
         for subset in self.subsets:
+            models[subset] = {}
             for seed in self.seeds:
                 self.options.subset = subset
                 self.options.seed = seed
@@ -193,6 +198,8 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                 self.model.save_checkpoint(
                     self.savepath / subset / str(seed), save_map=True, save_hmc=True
                 )
+                models[subset][seed] = self.model
+        self.models = models
 
     @override
     def _result(self) -> None:
@@ -204,46 +211,37 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
             for seed in self.seeds:
                 self.options.subset = subset
                 self.options.seed = seed
-                self._model(force=True)
-                self.model.load_checkpoint(
-                    self.savepath / subset / str(seed), load_map=True, load_hmc=True
-                )
-                self.log.debug(
-                    f"Saving final Posterior model weights to {self.savepath / subset / str(seed)}"
-                )
-                self.model.save_checkpoint(
-                    self.savepath / subset / str(seed), save_map=True, save_hmc=True
-                )
+                model = self.models[subset][seed]
 
                 map_results = {
-                    "chain_min": self.model.map.chain_min.numpy(),
-                    "converged": self.model.map.converged.numpy(),
-                    "num_evaluations": self.model.map.num_evaluations.numpy(),
-                    "negative_log_prob": self.model.map.negative_log_prob.numpy(),
-                    "init_u_delta_av": self.model.map.u_delta_av.initial.numpy(),
-                    "init_u_latents": self.model.map.u_latents.initial.numpy(),
-                    "init_delta_av": self.model.map.delta_av.initial.numpy(),
-                    "init_delta_m": self.model.map.delta_m.initial.numpy(),
-                    "init_delta_p": self.model.map.delta_p.initial.numpy(),
-                    "init_z_latents": self.model.map.z_latents.initial.numpy(),
-                    "best_u_delta_av": self.model.map.u_delta_av.best.numpy(),
-                    "best_u_latents": self.model.map.u_latents.best.numpy(),
-                    "best_delta_av": self.model.map.delta_av.best.numpy(),
-                    "best_delta_m": self.model.map.delta_m.best.numpy(),
-                    "best_delta_p": self.model.map.delta_p.best.numpy(),
-                    "best_z_latents": self.model.map.z_latents.best.numpy(),
+                    "chain_min": model.map.chain_min.numpy(),
+                    "converged": model.map.converged.numpy(),
+                    "num_evaluations": model.map.num_evaluations.numpy(),
+                    "negative_log_prob": model.map.negative_log_prob.numpy(),
+                    "init_u_delta_av": model.map.u_delta_av.initial.numpy(),
+                    "init_u_latents": model.map.u_latents.initial.numpy(),
+                    "init_delta_av": model.map.delta_av.initial.numpy(),
+                    "init_delta_m": model.map.delta_m.initial.numpy(),
+                    "init_delta_p": model.map.delta_p.initial.numpy(),
+                    "init_z_latents": model.map.z_latents.initial.numpy(),
+                    "best_u_delta_av": model.map.u_delta_av.best.numpy(),
+                    "best_u_latents": model.map.u_latents.best.numpy(),
+                    "best_delta_av": model.map.delta_av.best.numpy(),
+                    "best_delta_m": model.map.delta_m.best.numpy(),
+                    "best_delta_p": model.map.delta_p.best.numpy(),
+                    "best_z_latents": model.map.z_latents.best.numpy(),
                 }
 
                 hmc_results = {
-                    "samples": self.model.hmc.samples.numpy(),
-                    "step_sizes_final": self.model.hmc.step_sizes_final.numpy(),
-                    "is_accepted": self.model.hmc.is_accepted.numpy(),
-                    "u_delta_av": self.model.hmc.u_delta_av.numpy(),
-                    "u_latents": self.model.hmc.u_latents.numpy(),
-                    "delta_av": self.model.hmc.delta_av.numpy(),
-                    "z_latents": self.model.hmc.z_latents.numpy(),
-                    "delta_m": self.model.hmc.delta_m.numpy(),
-                    "delta_p": self.model.hmc.delta_p.numpy(),
+                    "samples": model.hmc.samples.numpy(),
+                    "step_sizes_final": model.hmc.step_sizes_final.numpy(),
+                    "is_accepted": model.hmc.is_accepted.numpy(),
+                    "u_delta_av": model.hmc.u_delta_av.numpy(),
+                    "u_latents": model.hmc.u_latents.numpy(),
+                    "delta_av": model.hmc.delta_av.numpy(),
+                    "z_latents": model.hmc.z_latents.numpy(),
+                    "delta_m": model.hmc.delta_m.numpy(),
+                    "delta_p": model.hmc.delta_p.numpy(),
                 }
 
                 model_results = {
@@ -260,43 +258,40 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
         self.results = results
 
     @override
-    def _analyse(self: "PosteriorModelStep") -> None:
+    def _analyse(self) -> None:
         for subset in self.subsets:
             for seed in self.seeds:
                 self.options.subset = subset
                 self.options.seed = seed
-                self._model(force=True)
-                self.model.load_checkpoint(
-                    self.savepath / subset / str(seed), load_map=True, load_hmc=True
-                )
 
+                model = self.models[subset][seed]
                 results = self.results[subset][seed]
 
                 map_init_results = []
                 map_best_results = []
                 map_labels = {}
                 ind = 0
-                if self.model.map.nflow.physical_latents:
+                if model.map.nflow.physical_latents:
                     map_init_results.append(results.map.init_u_delta_av)
                     map_best_results.append(results.map.best_u_delta_av)
                     map_labels[0] = "μΔAᵥ"
                     ind = 1
-                for i in range(self.model.map.n_u_latents):
+                for i in range(model.map.n_u_latents):
                     map_labels[ind] = f"μ{i}"
                     ind += 1
                 map_init_results.append(results.map.init_u_latents)
                 map_best_results.append(results.map.best_u_latents)
-                if self.model.map.pae.physical_latents:
+                if model.map.pae.physical_latents:
                     map_init_results.append(results.map.init_delta_av)
                     map_best_results.append(results.map.best_delta_av)
                     map_labels[ind] = "ΔAᵥ"
                     ind += 1
-                for i in range(self.model.map.n_z_latents):
+                for i in range(model.map.n_z_latents):
                     map_labels[ind] = f"z{i}"
                     ind += 1
                 map_init_results.append(results.map.init_z_latents)
                 map_best_results.append(results.map.best_z_latents)
-                if self.model.map.pae.physical_latents:
+                if model.map.pae.physical_latents:
                     map_init_results.extend((
                         results.map.init_delta_m,
                         results.map.init_delta_p,
@@ -313,16 +308,16 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
 
                 hmc_labels = {}
                 hmc_ind = 0
-                if self.model.map.train_delta_m:
+                if model.map.train_delta_m:
                     hmc_labels[hmc_ind] = "Δℳ"
                     hmc_ind += 1
-                if self.model.map.train_delta_p:
+                if model.map.train_delta_p:
                     hmc_labels[hmc_ind] = "Δp"
                     hmc_ind += 1
-                if self.model.map.nflow.physical_latents:
+                if model.map.nflow.physical_latents:
                     hmc_labels[hmc_ind] = "μΔAᵥ"
                     hmc_ind += 1
-                for i in range(self.model.map.n_u_latents):
+                for i in range(model.map.n_u_latents):
                     hmc_labels[hmc_ind + i] = f"μ{i}"
 
                 if self.analysis.plot_map_init is not None:
@@ -416,17 +411,17 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                                 f"{twins_path} does not exist, can not load twins data."
                             )
 
-                        min_redshift = (
-                            self.nflow.pae.min_train_redshift
-                            if subset == "train"
-                            else self.nflow.pae.min_test_redshift
-                        )
+                    min_redshift = (
+                        self.nflow.pae.min_train_redshift
+                        if subset == "train"
+                        else self.nflow.pae.min_test_redshift
+                    )
 
-                        max_redshift = (
-                            self.nflow.pae.max_train_redshift
-                            if subset == "train"
-                            else self.nflow.pae.max_test_redshift
-                        )
+                    max_redshift = (
+                        self.nflow.pae.max_train_redshift
+                        if subset == "train"
+                        else self.nflow.pae.max_test_redshift
+                    )
 
                     DispersionPlotter.plot_dispersion(
                         data,

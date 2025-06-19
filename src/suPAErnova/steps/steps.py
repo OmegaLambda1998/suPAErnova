@@ -102,10 +102,9 @@ class SNPAEStep:
 
     @callback
     def result(self) -> None:
-        if self.force or not self.completed():
-            self.log.info(f"Saving {self.name} results")
-            self._result()
-            self.log.info(f"Finished saving {self.name} results")
+        self.log.info(f"Saving {self.name} results")
+        self._result()
+        self.log.info(f"Finished saving {self.name} results")
 
     @abstractmethod
     def _analyse(self) -> None:

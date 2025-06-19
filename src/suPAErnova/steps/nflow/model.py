@@ -74,32 +74,18 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
     @override
     def _load(self) -> None:
         self._model()
-
         self.log.debug(f"Loading final NFlow model weights from {self.savepath}")
         self.model.load_checkpoint(self.savepath)
-
-        self._result()
 
     @override
     def _run(self) -> None:
         self._model()
-        ckpt_path = self.savepath / self.model.ckpt_path
-        # Don't retrain stages if you don't need to
-        if self.force or not (ckpt_path.exists() and any(ckpt_path.iterdir())):
-            self.model.train_model(savepath=self.savepath)
-        else:
-            self.log.debug(
-                f"Loading weights from {self.savepath / self.model.ckpt_path}"
-            )
-            self.model.load_checkpoint(self.savepath)
+        self.model.train_model(savepath=self.savepath)
         self.model.save_checkpoint(self.savepath)
 
     @override
     def _result(self) -> None:
         self._model()
-        self.log.debug(f"Saving final NFlow model weights to {self.savepath}")
-        self.model.save_checkpoint(self.savepath)
-
         data = self.model.pae.stage.all_data
         all_sn_mask = self.model.pae.stage.all_sn_mask
         all_spec_mask = self.model.pae.stage.all_spec_mask
@@ -139,6 +125,7 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
 
     @override
     def _analyse(self) -> None:
+        self._model()
         z_labels = {}
         u_labels = {}
         ind = 0

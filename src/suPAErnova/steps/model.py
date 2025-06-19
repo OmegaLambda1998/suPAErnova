@@ -46,7 +46,6 @@ class AbstractModelStep[Backend: str, Model: AbstractModel[Backend]](SNPAEStep):
     def _load(self) -> None:
         for model in self.models:
             model.load()
-        self.results = [model.results for model in self.models]
 
     @override
     def _run(self) -> None:
