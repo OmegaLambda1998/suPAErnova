@@ -8,6 +8,7 @@ import numpy as np
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import tensorflow as tf
 from tensorflow import keras as ks
 from tqdm.keras import TqdmCallback
@@ -54,7 +55,6 @@ class TFNFlowModel(ks.Model):
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
         self.seed: int = config.options.seed
-        self.set_seed()
 
         self.debug: bool = self.options.debug
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
@@ -115,6 +115,8 @@ class TFNFlowModel(ks.Model):
 
         # --- Layers ---
         self.flow: tfd.TransformedDistribution
+
+        self.set_seed()
 
     @override
     def build(self, input_shape) -> None:
@@ -254,8 +256,8 @@ class TFNFlowModel(ks.Model):
         # )
 
         # === Train ===
-
         self._epoch = 0
+        self.set_seed()
         return self.fit(
             x=self.data,
             y=tf.zeros_like(self.data, dtype=tf.float32),
@@ -343,9 +345,7 @@ class TFNFlowModel(ks.Model):
     def build_from_config(self, _config: dict[str, "Any"]) -> None:
         self.build_model()
 
+    @override
     def set_seed(self, seed: int = 0) -> None:
         seed = self.seed + seed
-        os.environ["PYTHONHASHSEED"] = str(seed)
         tf.random.set_seed(seed)
-        np.random.seed(seed)
-        rn.seed(seed)

@@ -9,6 +9,7 @@ import numpy as np
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import tensorflow as tf
 from tensorflow import keras as ks
 import tensorflow_probability as tfp
@@ -577,7 +578,6 @@ class TFPosteriorModel(ks.Model):
         self.force: bool = config.config.force
         self.seed: int = config.options.seed
         self.subset: Literal["train", "test"] = config.options.subset
-        self.set_seed()
 
         self.debug: bool = options.debug
         # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
@@ -690,6 +690,8 @@ class TFPosteriorModel(ks.Model):
                 shape=(self.n_samples, self.sn_dim, 1),
             ),
         )
+
+        self.set_seed()
 
     @override
     def call(
@@ -833,12 +835,10 @@ class TFPosteriorModel(ks.Model):
         global POSTERIORMODELSTEP
         return cls(POSTERIORMODELSTEP)
 
+    @override
     def set_seed(self, seed: int = 0) -> None:
         seed = self.seed + seed
-        os.environ["PYTHONHASHSEED"] = str(seed)
         tf.random.set_seed(seed)
-        np.random.seed(seed)
-        rn.seed(seed)
 
     def train_model(
         self,
@@ -858,6 +858,7 @@ class TFPosteriorModel(ks.Model):
 
         for stage in stages:
             for c in range(stage.n_chains):
+                self.set_seed(chain)
                 progress.set_description(f"Stage: {chain}/{n_total}")
                 progress.set_postfix({
                     "evals_tot": self.map.num_evaluations.value().numpy(),
@@ -876,6 +877,7 @@ class TFPosteriorModel(ks.Model):
                 progress.update()
                 chain += 1
         self.log.info(f"Minimum found at chains:\n{self.map.chain_min}")
+        self.set_seed()
         self.hmc_train(savepath=savepath)
 
         if savepath is not None:

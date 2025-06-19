@@ -1,3 +1,5 @@
+import os
+import random as rn
 from typing import TYPE_CHECKING, ClassVar, cast, override
 from pathlib import Path
 
@@ -61,8 +63,6 @@ class DataStep(SNPAEStep):
         self.seed: int
 
         # --- Setup Variables ---
-        self.rng: np.random.Generator
-
         # Output paths
         self.out_data: Path
         self.out_sne: Path
@@ -121,9 +121,6 @@ class DataStep(SNPAEStep):
         self.max_phase = self.options.max_phase
         self.train_frac = self.options.train_frac
         self.seed = self.options.seed
-
-        # --- Computed Variables ---
-        self.rng = np.random.default_rng(self.seed)
 
         # Output paths
         self.out_data = self.paths.out / "data.npz"
@@ -652,6 +649,7 @@ class DataStep(SNPAEStep):
         self.data = DataStepResult.model_validate(data)
 
     def split_train_test(self) -> None:
+        self.set_seed()
         self.train_data = []
         self.test_data = []
 
@@ -660,7 +658,7 @@ class DataStep(SNPAEStep):
 
         # Select train_frac for training, the rest for testing
         inds = np.arange(0, self.sn_dim)
-        self.rng.shuffle(inds)
+        np.random.shuffle(inds)
 
         # Split into k cross validation sets
         for kfold in range(self.n_kfolds):

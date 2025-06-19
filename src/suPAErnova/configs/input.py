@@ -77,7 +77,7 @@ class InputConfig(SNPAEConfig):
                 for required_step in step.options.required_steps
             }
             step.setup(*args, **kwargs)
-            step.run()
-            step.result()
-            step.analyse()
+            step.run(*args, **kwargs)
+            step.result(*args, **kwargs)
+            step.analyse(*args, **kwargs)
             setattr(self, step.id + "_step", step)

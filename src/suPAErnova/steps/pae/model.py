@@ -267,14 +267,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
     @override
     def _completed(self) -> bool:
         self._model(force=True)
-        final_stage = self.run_stages[-1]
-        final_savepath = (
-            self.paths.out
-            # / self.model.name
-            / f"{self.name.split()[-1]}PAEModel"
-            / f"{final_stage.stage}_{final_stage.fname}"
-            / self.model.ckpt_path
-        )
+        final_savepath = self.paths.out / self.model.name / self.model.ckpt_path
 
         if not (final_savepath.exists() and any(final_savepath.iterdir())):
             self.log.debug(
@@ -290,14 +283,10 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         final_stage = self.run_stages[-1]
         final_stage.prev_stage = None
         self.model.stage = final_stage
-        final_savepath = (
-            self.paths.out
-            / self.model.name
-            / f"{final_stage.stage}_{final_stage.fname}"
-        )
+        final_loadpath = self.paths.out / self.model.name
 
-        self.log.debug(f"Loading final PAE model weights from {final_savepath}")
-        self.model.load_checkpoint(final_savepath, reset_weights=False)
+        self.log.debug(f"Loading final PAE model weights from {final_loadpath}")
+        self.model.load_checkpoint(final_loadpath, reset_weights=False)
 
     @override
     def _run(self) -> None:
@@ -316,8 +305,24 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                 self.model.train_model(stage)
                 self.model.save_checkpoint(savepath)
 
+        self._model(force=True)
+
+        final_stage = self.run_stages[-1]
+        final_stage.prev_stage = None
+        self.model.stage = final_stage
+        final_loadpath = (
+            self.paths.out / self.model.name / f"{stage.stage}_{stage.fname}"
+        )
+
+        self.log.debug(f"Loading final PAE model weights from {final_loadpath}")
+        self.model.load_checkpoint(final_loadpath, reset_weights=False)
+
     @override
     def _result(self) -> None:
+        final_savepath = self.paths.out / self.model.name
+        self.log.debug(f"Saving final PAE model weights to {final_savepath}")
+        self.model.save_checkpoint(final_savepath)
+
         self.log.debug("Calculating PAE results")
         data = self.all_data
         model_results: dict[str, PAEStepResult] = {}
@@ -325,6 +330,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         for stage in self.run_stages:
             self._model(force=True)
             savepath = self.paths.out / self.model.name / f"{stage.stage}_{stage.fname}"
+            stage.prev_stage = None
             self.model.stage = stage
             self.model.load_checkpoint(savepath, reset_weights=False)
 

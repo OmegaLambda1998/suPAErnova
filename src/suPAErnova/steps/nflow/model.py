@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from suPAErnova.configs.paths import PathConfig
     from suPAErnova.configs.globals import GlobalConfig
-    from suPAErnova.steps.pae.model import PAEModel
+    from suPAErnova.steps.pae.model import PAEModelStep
     from suPAErnova.configs.steps.nflow.model import NFlowModelConfig, NFlowStepAnalysis
 
     from .tf import TFNFlowModel
@@ -44,24 +44,21 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
         self.debug: bool
         self.savepath: Path
 
-        self.pae: PAEModel
+        self.pae: PAEModelStep
 
         self.results: NFlowStepResult
         self.analysis: tuple[NFlowStepAnalysis] = self.options.analysis
 
     @override
-    def _setup(self, *, pae: "PAEModel") -> None:
+    def _setup(self, *, pae: "PAEModelStep") -> None:
         self.debug = self.options.debug
-
         self.pae = pae
-        self.pae.load()
-
-        self._model()
+        self._model(force=True)
         self.savepath = self.paths.out / self.model.name
 
     @override
     def _completed(self) -> bool:
-        self._model()
+        self._model(force=True)
         savepath = self.savepath / self.model.ckpt_path
 
         if not (savepath.exists() and any(savepath.iterdir())):
@@ -73,19 +70,20 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
 
     @override
     def _load(self) -> None:
-        self._model()
+        self._model(force=True)
         self.log.debug(f"Loading final NFlow model weights from {self.savepath}")
         self.model.load_checkpoint(self.savepath)
 
     @override
     def _run(self) -> None:
-        self._model()
+        self._model(force=True)
         self.model.train_model(savepath=self.savepath)
-        self.model.save_checkpoint(self.savepath)
 
     @override
     def _result(self) -> None:
-        self._model()
+        self.log.debug(f"Saving final NFlow model weights to {self.savepath}")
+        self.model.save_checkpoint(self.savepath)
+
         data = self.model.pae.stage.all_data
         all_sn_mask = self.model.pae.stage.all_sn_mask
         all_spec_mask = self.model.pae.stage.all_spec_mask

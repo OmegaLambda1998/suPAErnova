@@ -13,6 +13,7 @@ import numpy as np
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import tensorflow as tf
 from tensorflow import keras as ks
 from tqdm.keras import TqdmCallback
@@ -461,7 +462,6 @@ class TFPAEModel(ks.Model):
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
         self.seed: int = config.options.seed
-        self.set_seed()
 
         # --- Latent Dimensions ---
         self.physical_latents: bool = self.options.physical_latents
@@ -548,6 +548,8 @@ class TFPAEModel(ks.Model):
             name="val_loss_cov"
         )
 
+        self.set_seed()
+
     @override
     def get_config(self) -> dict[str, "Any"]:
         return {**super().get_config(), "stage": self.stage.name}
@@ -565,12 +567,10 @@ class TFPAEModel(ks.Model):
     def build_from_config(self, _config: dict[str, "Any"]) -> None:
         self.build_model()
 
+    @override
     def set_seed(self, seed: int = 0) -> None:
         seed = self.seed + seed
-        os.environ["PYTHONHASHSEED"] = str(seed)
         tf.random.set_seed(seed)
-        np.random.seed(seed)
-        rn.seed(seed)
 
     @property
     @override
@@ -980,6 +980,7 @@ class TFPAEModel(ks.Model):
 
         # === Train ===
         self._epoch.assign(0)
+        self.set_seed(self.stage.stage)
         self.fit(
             x=train_data,
             initial_epoch=self._epoch.numpy(),
@@ -995,6 +996,7 @@ class TFPAEModel(ks.Model):
 
     def build_model(self, *, update: bool = False) -> None:
         if not self.built or update:
+            self.set_seed(self.stage.stage)
             # Mask tensors to select specific latents
             if self.physical_latents:
                 self.latents_z_mask = tf.concat(
@@ -1063,6 +1065,7 @@ class TFPAEModel(ks.Model):
         *,
         reset_weights: bool | None = None,
     ) -> None:
+        self.set_seed(self.stage.stage)
         stage_num = self.stage.stage
         if self.stage.prev_stage is not None:
             self.stage.stage = self.stage.prev_stage

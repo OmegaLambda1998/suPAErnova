@@ -61,4 +61,4 @@ class AbstractModelStep[Backend: str, Model: AbstractModel[Backend]](SNPAEStep):
     @override
     def _analyse(self) -> None:
         for model in self.models:
-            model.analyse()
+            model._analyse()
