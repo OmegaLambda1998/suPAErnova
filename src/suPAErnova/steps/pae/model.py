@@ -396,7 +396,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             labels[0] = "ΔAᵥ"
             ind = 1
             labels[self.n_pae_latents - 2] = "Δℳ"
-            labels[self.n_pae_latents - 1] = "Δ𝓅"
+            labels[self.n_pae_latents - 1] = "Δp"
         for i in range(self.n_z_latents):
             labels[ind] = f"z{i}"
             ind += 1
@@ -438,8 +438,13 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                             / str(stage.stage)
                         )
                     o.savepath.mkdir(parents=True, exist_ok=True)
+                    chains = self.results[str(stage.stage)].latents[:, : stage.stage]
                     DistributionPlotter.plot_corner(
-                        self.results[str(stage.stage)].latents[:, : stage.stage], o
+                        chains,
+                        o,
+                        statistics="max_central",
+                        shade_alpha=0.0,
+                        plot_cloud=True,
                     )
 
     #

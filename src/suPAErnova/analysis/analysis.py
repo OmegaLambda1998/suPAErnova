@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, ClassVar
 from pathlib import Path  # noqa: TC003
 
+import numpy as np
 from pydantic import BaseModel, ConfigDict
 import matplotlib as mpl
 
@@ -9,8 +10,6 @@ mpl.use("Cairo")
 
 import chainconsumer as cc
 import matplotlib.pyplot as plt
-
-plt.style.use("fast")
 
 if TYPE_CHECKING:
     from typing import Any
@@ -87,7 +86,16 @@ class Plotter:
         ax: "Axis | None" = None,
         **kwargs: "Any",
     ) -> "tuple[Figure, Axis]":
-        return Plotter._plot("scatter", x, y, *args, fig=fig, ax=ax, **kwargs)
+        return Plotter._plot(
+            "scatter",
+            x,
+            y,
+            *args,
+            fig=fig,
+            ax=ax,
+            s=1,
+            **kwargs,
+        )
 
     @staticmethod
     def lines(
@@ -98,7 +106,27 @@ class Plotter:
         ax: "Axis | None" = None,
         **kwargs: "Any",
     ) -> "tuple[Figure, Axis]":
-        return Plotter._plot("plot", x, y, *args, fig=fig, ax=ax, **kwargs)
+        return Plotter._plot("plot", x, y, *args, fig=fig, ax=ax, linewidth=1, **kwargs)
+
+    @staticmethod
+    def axvline(
+        x,
+        *args: "Any",
+        fig: "Figure | None" = None,
+        ax: "Axis | None" = None,
+        **kwargs: "Any",
+    ) -> "tuple[Figure, Axis]":
+        return Plotter._plot("axvline", x, *args, fig=fig, ax=ax, linewidth=1, **kwargs)
+
+    @staticmethod
+    def axhline(
+        y,
+        *args: "Any",
+        fig: "Figure | None" = None,
+        ax: "Axis | None" = None,
+        **kwargs: "Any",
+    ) -> "tuple[Figure, Axis]":
+        return Plotter._plot("axhline", y, *args, fig=fig, ax=ax, linewidth=1, **kwargs)
 
     @staticmethod
     def fill_between(
@@ -125,11 +153,26 @@ class Plotter:
         ax: "Axis | None" = None,
         **kwargs: "Any",
     ) -> "tuple[Figure, Axis]":
-        return Plotter._plot("errorbar", x, y, *args, fig=fig, ax=ax, **kwargs)
+        return Plotter._plot(
+            "errorbar",
+            x,
+            y,
+            *args,
+            fig=fig,
+            ax=ax,
+            xerr=xerr,
+            yerr=yerr,
+            linestyle="none",
+            linewidth=1,
+            elinewidth=1,
+            marker="o",
+            markersize=1,
+            **kwargs,
+        )
 
     @staticmethod
     def corner(
-        chains: "dict[str, pd.DataFrame] | list[pd.DataFrame] | pd.DataFrame",
+        chains: "dict[str, pd.DataFrame]",
         *args: "Any",
         chain_args: list["Any"] | None = None,
         chain_kwargs: dict[str, "Any"] | None = None,
@@ -148,10 +191,6 @@ class Plotter:
         if plot_kwargs is None:
             plot_kwargs = {}
         c = cc.ChainConsumer()
-        if isinstance(chains, list):
-            chains = {str(i): chain for (i, chain) in enumerate(chains)}
-        if not isinstance(chains, dict):
-            chains = {"0": chains}
 
         for name, chain in chains.items():
             c.add_chain(
@@ -159,12 +198,12 @@ class Plotter:
                     *chain_args,
                     *args,
                     samples=chain,
-                    name=name,
-                    color="black",
+                    name=str(name),
                     **chain_kwargs,
                     **kwargs,
                 )
             )
+
         fig = c.plotter.plot(*plot_args, *args, **plot_kwargs, **kwargs)
         ax = fig.gca()
         return fig, ax

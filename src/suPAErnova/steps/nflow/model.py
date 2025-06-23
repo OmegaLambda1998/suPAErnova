@@ -147,7 +147,13 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
                 if opts.savepath is None:
                     opts.savepath = self.paths.out / "plots" / str(self.model.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
-                DistributionPlotter.plot_corner(self.results.z_to_u, opts)
+                DistributionPlotter.plot_corner(
+                    self.results.z_to_u,
+                    opts,
+                    statistics="max_central",
+                    shade_alpha=0.0,
+                    plot_cloud=True,
+                )
 
         if self.analysis.plot_z_latents is not None:
             if not isinstance(self.analysis.plot_z_latents, list):
@@ -160,7 +166,13 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
                 if opts.savepath is None:
                     opts.savepath = self.paths.out / "plots" / str(self.model.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
-                DistributionPlotter.plot_corner(self.results.u_to_z, opts)
+                DistributionPlotter.plot_corner(
+                    self.results.u_to_z,
+                    opts,
+                    statistics="max_central",
+                    shade_alpha=0.0,
+                    plot_cloud=True,
+                )
 
     #
     # === NFlowModel Specific Functions ===

@@ -260,6 +260,12 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
     @override
     def _analyse(self) -> None:
         for subset in self.subsets:
+            subset_map_init_results = {}
+            subset_map_best_results = {}
+            subset_map_labels = {}
+            subset_hmc_samples = {}
+            subset_hmc_labels = {}
+
             for seed in self.seeds:
                 self.options.subset = subset
                 self.options.seed = seed
@@ -305,6 +311,9 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                     map_labels[ind] = "Δp"
                 map_init_results = np.concat(map_init_results, axis=-1)
                 map_best_results = np.concat(map_best_results, axis=-1)
+                subset_map_init_results[seed] = map_init_results
+                subset_map_best_results[seed] = map_best_results
+                subset_map_labels = map_labels
 
                 hmc_labels = {}
                 hmc_ind = 0
@@ -319,6 +328,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                     hmc_ind += 1
                 for i in range(model.map.n_u_latents):
                     hmc_labels[hmc_ind + i] = f"μ{i}"
+                subset_hmc_labels = hmc_labels
 
                 if self.analysis.plot_map_init is not None:
                     if not isinstance(self.analysis.plot_map_init, list):
@@ -338,7 +348,11 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                                 / str(seed)
                             )
                         o.savepath.mkdir(parents=True, exist_ok=True)
-                        DistributionPlotter.plot_corner(map_init_results, o)
+                        DistributionPlotter.plot_corner(
+                            map_init_results,
+                            o,
+                            statistics="max_central",
+                        )
 
                 if self.analysis.plot_map_best is not None:
                     if not isinstance(self.analysis.plot_map_best, list):
@@ -358,7 +372,11 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                                 / str(seed)
                             )
                         o.savepath.mkdir(parents=True, exist_ok=True)
-                        DistributionPlotter.plot_corner(map_best_results, o)
+                        DistributionPlotter.plot_corner(
+                            map_best_results,
+                            o,
+                            statistics="max_central",
+                        )
 
                 if self.analysis.plot_hmc is not None:
                     if not isinstance(self.analysis.plot_hmc, list):
@@ -380,7 +398,75 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                         o.savepath.mkdir(parents=True, exist_ok=True)
                         samples = results.hmc.samples
                         chains = [samples[:, i, :] for i in range(samples.shape[1])]
-                        DistributionPlotter.plot_corner(chains, o)
+                        subset_hmc_samples[seed] = np.mean(chains, axis=0)
+                        DistributionPlotter.plot_corner(
+                            chains,
+                            o,
+                            statistics="max_central",
+                        )
+
+            # === Subset Plots ===
+
+            if self.analysis.plot_map_init is not None:
+                if not isinstance(self.analysis.plot_map_init, list):
+                    self.analysis.plot_map_init = [self.analysis.plot_map_init]
+                for opts in self.analysis.plot_map_init:
+                    o = opts.model_copy()
+                    if o.labels is None:
+                        o.labels = subset_map_labels
+                    if o.name is None:
+                        o.name = "map_init"
+                    if o.savepath is None:
+                        o.savepath = (
+                            self.paths.out / "plots" / str(self.seeds[0]) / subset
+                        )
+                    o.savepath.mkdir(parents=True, exist_ok=True)
+                    DistributionPlotter.plot_corner(
+                        subset_map_init_results,
+                        o,
+                        statistics="max_central",
+                    )
+
+            if self.analysis.plot_map_best is not None:
+                if not isinstance(self.analysis.plot_map_best, list):
+                    self.analysis.plot_map_best = [self.analysis.plot_map_best]
+                for opts in self.analysis.plot_map_best:
+                    o = opts.model_copy()
+                    if o.labels is None:
+                        o.labels = subset_map_labels
+                    if o.name is None:
+                        o.name = "map_best"
+                    if o.savepath is None:
+                        o.savepath = (
+                            self.paths.out / "plots" / str(self.seeds[0]) / subset
+                        )
+                    o.savepath.mkdir(parents=True, exist_ok=True)
+                    DistributionPlotter.plot_corner(
+                        subset_map_best_results,
+                        o,
+                        statistics="max_central",
+                    )
+
+            if self.analysis.plot_hmc is not None:
+                if not isinstance(self.analysis.plot_hmc, list):
+                    self.analysis.plot_hmc = [self.analysis.plot_hmc]
+                for opts in self.analysis.plot_hmc:
+                    o = opts.model_copy()
+                    if o.labels is None:
+                        o.labels = subset_hmc_labels
+                    if o.name is None:
+                        o.name = "hmc"
+                    if o.savepath is None:
+                        o.savepath = (
+                            self.paths.out / "plots" / str(self.seeds[0]) / subset
+                        )
+                    o.mean = False
+                    o.savepath.mkdir(parents=True, exist_ok=True)
+                    DistributionPlotter.plot_corner(
+                        subset_hmc_samples,
+                        o,
+                        statistics="max_central",
+                    )
 
             if self.analysis.plot_dispersion is not None:
                 if not isinstance(self.analysis.plot_dispersion, list):
@@ -411,23 +497,9 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                                 f"{twins_path} does not exist, can not load twins data."
                             )
 
-                    min_redshift = (
-                        self.nflow.pae.min_train_redshift
-                        if subset == "train"
-                        else self.nflow.pae.min_test_redshift
-                    )
-
-                    max_redshift = (
-                        self.nflow.pae.max_train_redshift
-                        if subset == "train"
-                        else self.nflow.pae.max_test_redshift
-                    )
-
                     DispersionPlotter.plot_dispersion(
                         data,
                         hmc,
                         o,
                         twins=twins,
-                        min_redshift=min_redshift,
-                        max_redshift=max_redshift,
                     )

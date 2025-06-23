@@ -358,6 +358,14 @@ def utils() -> PaperParityUtils:
 @pytest.fixture(scope="module")
 def data_params() -> "DataParams":
     return {
+        "analysis": {
+            "plot_summary": {
+                "filter": {
+                    "redshift": {"min": 0.02, "max": 1.0},
+                    "phase": {"min": -10, "max": 40},
+                }
+            },
+        },
         "min_phase": -10,
         "max_phase": 40,
         "train_frac": 0.75,
@@ -365,10 +373,6 @@ def data_params() -> "DataParams":
         "cosmological_model": "WMAP7",
         "salt_model": "salt2",
         "seed": SEEDS[0][-1],
-        "analysis": {
-            "plot_spectra": {"filter": {"spectra_id": {"contains": "CSS110918"}}},
-            "plot_summary": {},
-        },
     }
 
 
@@ -405,7 +409,12 @@ def pae_params(
 ) -> "PAEParams":
     return {
         "analysis": {
-            "plot_residual": {},
+            "plot_residual": {
+                "filter": {
+                    "redshift": {"min": 0.02, "max": 1.0},
+                    "phase": {"min": -10, "max": 40},
+                }
+            },
             "plot_latents": {},
         },
         "fname": "paper_parity",
@@ -607,8 +616,22 @@ def posterior_params(
             "plot_map_best": {},
             "plot_hmc": {"mean": True},
             "plot_dispersion": [
-                {"subset": "train", "twins": "boone_data.dat"},
-                {"subset": "test", "twins": "boone_data.dat"},
+                {
+                    "subset": "train",
+                    "twins": "boone_data.dat",
+                    "filter": {
+                        "redshift": {"min": 0.02, "max": 1.0},
+                        "phase": {"min": -10, "max": 40},
+                    },
+                },
+                {
+                    "subset": "test",
+                    "twins": "boone_data.dat",
+                    "filter": {
+                        "redshift": {"min": 0.02, "max": 1.0},
+                        "phase": {"min": -10, "max": 40},
+                    },
+                },
             ],
         },
         "fname": "paper_parity",

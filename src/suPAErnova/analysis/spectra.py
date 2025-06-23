@@ -39,24 +39,26 @@ class SpectraPlotter(Plotter):
         "npt.NDArray[np.float32]",
         "npt.NDArray[np.float32]",
         "npt.NDArray[np.float32]",
-        "npt.NDArray[np.bool]",
+        "npt.NDArray[np.int32]",
+        "npt.NDArray[np.int32]",
+        "npt.NDArray[np.int32]",
     ]:
         wl = data.wavelength.copy()
         amplitude = data.amplitude.copy()
         sigma = data.sigma.copy()
-        mask = data.mask.copy()
+        wl_mask = data.mask.copy()
 
         if config.filter is not None:
             for key, constraints in config.filter.items():
                 value = getattr(data, key)
                 for comparison, constraint in constraints.items():
                     compare = CONSTRAINTS[comparison]
-                    mask *= compare(value, constraint).astype(np.int32)
-        mask = mask.astype(np.bool)
+                    wl_mask *= compare(value, constraint).astype(np.int32)
 
-        _n_sn, _n_spec, _n_wl = mask.shape
+        spec_mask = wl_mask.max(axis=-1, keepdims=True)
+        sn_mask = spec_mask.max(axis=-2, keepdims=True)
 
-        return wl, amplitude, sigma, mask
+        return wl, amplitude, sigma, sn_mask, spec_mask, wl_mask
 
     # TODO: per plot-type args and kwargs
     @staticmethod
@@ -72,28 +74,28 @@ class SpectraPlotter(Plotter):
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
             return
-        wl, amplitude, sigma, mask = SpectraPlotter.prep(data, config)
+        wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = SpectraPlotter.prep(
+            data, config
+        )
 
-        n_sn, n_spec, _n_wl = mask.shape
+        n_sn, n_spec, _n_wl = wl_mask.shape
 
         for sn in range(n_sn):
-            if np.any(mask[sn, :, :]):
+            if sn_mask[sn, 0, 0]:
                 for spec in range(n_spec):
-                    if np.any(mask[sn, spec, :]):
-                        ma = mask[sn, spec, :]
+                    if spec_mask[sn, spec, 0]:
+                        ma = wl_mask[sn, spec, :]
                         x = wl[sn, spec, :][ma]
                         y = amplitude[sn, spec, :][ma]
                         yerr = sigma[sn, spec, :][ma]
-                        fig, ax = Plotter.scatter(x, y, *args, fig=fig, ax=ax, **kwargs)
-                        fig, ax = Plotter.fill_between(
-                            x,
-                            y - yerr,
-                            y + yerr,
-                            *args,
-                            fig=fig,
-                            ax=ax,
-                            alpha=0.2,
-                            **kwargs,
+
+                        order = np.argsort(x)
+                        x = x[order]
+                        y = y[order]
+                        yerr = yerr[order]
+
+                        fig, ax = Plotter.errorbar(
+                            x, y, *args, fig=fig, ax=ax, yerr=yerr, **kwargs
                         )
         fig = Plotter.save(fig, savepath)
         Plotter.close(fig, ax)
@@ -112,30 +114,27 @@ class SpectraPlotter(Plotter):
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
             return
-        wl, amplitude, sigma, mask = SpectraPlotter.prep(data, config)
-        mask = np.logical_not(mask)
+        wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = SpectraPlotter.prep(
+            data, config
+        )
 
-        _n_sn, _n_spec, _n_wl = mask.shape
+        mask = np.logical_not(sn_mask * spec_mask * wl_mask)
 
-        x = np.ma.masked_array(wl, mask)[0, 0, :]
+        x = np.ma.masked_array(wl, mask).mean(axis=(0, 1))
         y = np.ma.masked_array(amplitude, mask)
         yerr = np.ma.masked_array(sigma, mask)
 
         # Mean
         y_mean = y.mean(axis=(0, 1))
         y_std = y.std(axis=(0, 1))
-        yerr_mean = yerr.mean(axis=(0, 1))
-        fig, ax = Plotter.scatter(x, y_mean, *args, fig=fig, ax=ax, **kwargs)
-        fig, ax = Plotter.fill_between(
-            x,
-            y_mean - yerr_mean,
-            y_mean + yerr_mean,
-            *args,
-            fig=fig,
-            ax=ax,
-            alpha=0.2,
-            **kwargs,
-        )
+        yerr_mean = np.sqrt(np.sum(yerr * yerr, axis=(0, 1))) / yerr.count(axis=(0, 1))
+
+        order = np.argsort(x)
+        x = x[order]
+        y_mean = y_mean[order]
+        y_std = y_std[order]
+        yerr_mean = yerr_mean[order]
+
         fig, ax = Plotter.fill_between(
             x,
             y_mean - y_std,
@@ -144,6 +143,15 @@ class SpectraPlotter(Plotter):
             fig=fig,
             ax=ax,
             alpha=0.2,
+            **kwargs,
+        )
+        fig, ax = Plotter.errorbar(
+            x,
+            y_mean,
+            *args,
+            fig=fig,
+            ax=ax,
+            yerr=yerr_mean,
             **kwargs,
         )
 
@@ -164,12 +172,13 @@ class SpectraPlotter(Plotter):
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
             return
-        wl, amplitude, sigma, mask = SpectraPlotter.prep(data, config)
-        mask = np.logical_not(mask)
+        wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = SpectraPlotter.prep(
+            data, config
+        )
 
-        _n_sn, _n_spec, _n_wl = mask.shape
+        mask = np.logical_not(sn_mask * spec_mask * wl_mask)
 
-        x = np.ma.masked_array(wl, mask)[0, 0, :]
+        x = np.ma.masked_array(wl, mask).mean(axis=(0, 1))
         y = np.ma.masked_array(amplitude, mask)
         yerr = np.ma.masked_array(sigma, mask)
         y_prime = np.ma.masked_array(amplitude_prime, mask)
@@ -182,37 +191,32 @@ class SpectraPlotter(Plotter):
             ax = fig.get_axes()
         spectra_ax, residual_ax = ax
 
-        # Mean
-        y_mean = y.mean(axis=(0, 1))
-        y_std = y.std(axis=(0, 1))
-        yerr_mean = yerr.mean(axis=(0, 1))
+        order = np.argsort(x)
+        x = x[order]
 
-        y_prime_mean = y_prime.mean(axis=(0, 1))
-        y_prime_std = y_prime.std(axis=(0, 1))
+        # Mean
+        y_mean = y.mean(axis=(0, 1))[order]
+        y_std = y.std(axis=(0, 1))[order]
+        yerr_mean = (
+            np.sqrt(np.sum(yerr * yerr, axis=(0, 1))) / yerr.count(axis=(0, 1))
+        )[order]
+
+        y_prime_mean = y_prime.mean(axis=(0, 1))[order]
+        y_prime_std = y_prime.std(axis=(0, 1))[order]
 
         y_residual = y - y_prime
-        y_residual_mean = y_residual.mean(axis=(0, 1))
-        y_residual_std = y_residual.std(axis=(0, 1))
+        y_residual_mean = y_residual.mean(axis=(0, 1))[order]
+        y_residual_std = y_residual.std(axis=(0, 1))[order]
 
         # y
-        fig, spectra_ax = Plotter.scatter(x, y_mean, fig=fig, ax=spectra_ax)
-        fig, spectra_ax = Plotter.fill_between(
-            x, y_mean - yerr_mean, y_mean + yerr_mean, fig=fig, ax=spectra_ax, alpha=0.2
-        )
         fig, spectra_ax = Plotter.fill_between(
             x, y_mean - y_std, y_mean + y_std, fig=fig, ax=spectra_ax, alpha=0.2
         )
+        fig, spectra_ax = Plotter.errorbar(
+            x, y_mean, yerr=yerr_mean, fig=fig, ax=spectra_ax
+        )
 
         # y_prime
-        fig, spectra_ax = Plotter.scatter(x, y_prime_mean, fig=fig, ax=spectra_ax)
-        fig, spectra_ax = Plotter.fill_between(
-            x,
-            y_prime_mean - yerr_mean,
-            y_prime_mean + yerr_mean,
-            fig=fig,
-            ax=spectra_ax,
-            alpha=0.2,
-        )
         fig, spectra_ax = Plotter.fill_between(
             x,
             y_prime_mean - y_prime_std,
@@ -221,17 +225,9 @@ class SpectraPlotter(Plotter):
             ax=spectra_ax,
             alpha=0.2,
         )
+        fig, spectra_ax = Plotter.scatter(x, y_prime_mean, fig=fig, ax=spectra_ax)
 
         # residual
-        fig, residual_ax = Plotter.scatter(x, y_residual_mean, fig=fig, ax=residual_ax)
-        fig, residual_ax = Plotter.fill_between(
-            x,
-            y_residual_mean - yerr_mean,
-            y_residual_mean + yerr_mean,
-            fig=fig,
-            ax=residual_ax,
-            alpha=0.2,
-        )
         fig, residual_ax = Plotter.fill_between(
             x,
             y_residual_mean - y_residual_std,
@@ -240,6 +236,11 @@ class SpectraPlotter(Plotter):
             ax=residual_ax,
             alpha=0.2,
         )
+        fig, residual_ax = Plotter.errorbar(
+            x, y_residual_mean, yerr=yerr_mean, fig=fig, ax=residual_ax
+        )
+
+        fig, residual_ax = Plotter.axhline(0, color="black", fig=fig, ax=residual_ax)
 
         fig = Plotter.save(fig, savepath)
         Plotter.close(fig, ax)

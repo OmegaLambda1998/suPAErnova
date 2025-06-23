@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 
 import numpy as np
@@ -37,21 +37,31 @@ class DistributionPlotter(Plotter):
 
     @staticmethod
     def plot_corner(
-        data: "AbstractStepResult | np.ndarray | list[AbstractStepResult] | list[np.ndarray]",
+        data: "AbstractStepResult | np.ndarray | list[AbstractStepResult] | list[np.ndarray] | dict[str, Any]",
         config: "DistributionPlot",
         *,
         fig: "Figure | None" = None,
         ax: "Axis | None" = None,
         force: bool = False,
+        **chain_kwargs: Any,
     ) -> None:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
             return
 
+        labels = None
+        if isinstance(data, dict):
+            labels = list(data.keys())
+            data = list(data.values())
+
         if not isinstance(data, list):
             data = [data]
         if config.mean:
-            chains = DistributionPlotter.prep_from_array(np.mean(data, axis=0), config)
+            chains = {
+                "mean": DistributionPlotter.prep_from_array(
+                    np.mean(data, axis=0), config
+                )
+            }
         else:
             chains = []
             for d in data:
@@ -60,6 +70,10 @@ class DistributionPlotter(Plotter):
                 else:
                     chain = DistributionPlotter.prep_from_result(d, config)
                 chains.append(chain)
-        fig, ax = Plotter.corner(chains, fig=fig, ax=ax)
+            if labels is None:
+                labels = range(len(chains))
+            chains = {labels[i]: chain for (i, chain) in enumerate(chains)}
+
+        fig, ax = Plotter.corner(chains, fig=fig, ax=ax, chain_kwargs=chain_kwargs)
         fig = Plotter.save(fig, savepath)
         Plotter.close(fig, ax)
