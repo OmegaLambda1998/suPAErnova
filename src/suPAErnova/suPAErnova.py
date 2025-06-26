@@ -19,7 +19,6 @@ from .configs.globals import GlobalConfig
 if TYPE_CHECKING:
     from pydantic import JsonValue
 
-
 def prepare_config(
     input_config: dict[str, "JsonValue"],
     *,  # Force keyword-only arguments

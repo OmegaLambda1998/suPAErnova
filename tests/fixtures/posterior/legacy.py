@@ -49,7 +49,7 @@ def legacy_posterior_step(
         / posterior_params["fname"]
         / "posterior"
         / "legacy"
-        / posterior_params["seed"]
+        / str(posterior_params["seeds"][0])
         / "posterior_step.npz"
     )
     savepath.parent.mkdir(parents=True, exist_ok=True)
@@ -83,7 +83,7 @@ def legacy_posterior_step(
         / posterior_params["fname"]
         / "pae"
         / "legacy"
-        / posterior_params["seed"]
+        / str(posterior_params["seeds"][0])
     )
     pae_model_dir = pae_out_path / "tensorflow_models"
     pae_model_dir.mkdir(parents=True, exist_ok=True)
@@ -95,7 +95,7 @@ def legacy_posterior_step(
         / posterior_params["fname"]
         / "nflow"
         / "legacy"
-        / posterior_params["seed"]
+        / str(posterior_params["seeds"][0])
     )
     nflow_model_dir = nflow_out_path / "tensorflow_models"
     nflow_model_dir.mkdir(parents=True, exist_ok=True)
@@ -105,7 +105,7 @@ def legacy_posterior_step(
         / posterior_params["fname"]
         / "posterior"
         / "legacy"
-        / posterior_params["seed"]
+        / str(posterior_params["seeds"][0])
     )
     posterior_model_dir = posterior_out_path / "tensorflow_models/"
     posterior_model_dir.mkdir(parents=True, exist_ok=True)
@@ -128,7 +128,7 @@ def legacy_posterior_step(
             "prev_train_stage": "5",
             "latent_dims": (posterior_params["n_z_latents"],),
             "kfold": posterior_params["kfold"],
-            "seed": int(posterior_params["seed"]),
+            "seed": int(posterior_params["seeds"][0]),
             "encode_dims": (*posterior_params["encode_dims"], 32),
             "out_file_tail": "",
             "posterior_file_tail": "",
@@ -181,43 +181,79 @@ def legacy_posterior_step(
 
     args = [f"--yaml_config={yaml_config}", "--config=posterior"]
     _params, results = run_posterior_analysis(args)
-    legacy_map_results = results[0]["train"]["map_results"][0]
-    legacy_hmc_results = results[0]["train"]["hmc_results"][0]
+    train_results = results[0]["train"]
+    test_results = results[0]["test"]
+    legacy_train_map_results = train_results["map_results"][0]
+    legacy_train_hmc_results = train_results["hmc_results"][0]
 
-    map_results = {
-        "chain_min": legacy_map_results["chain_min"].numpy(),
-        "converged": legacy_map_results["converged"].numpy(),
-        "num_evaluations": legacy_map_results["num_evaluations"].numpy(),
-        "negative_log_prob": legacy_map_results["negative_log_likelihood"].numpy(),
-        "init_u_delta_av": legacy_map_results["MAPu_ini"].numpy()[:, 0:1],
-        "init_u_latents": legacy_map_results["MAPu_ini"].numpy()[:, 1:],
-        "init_delta_av": legacy_map_results["MAPz_ini"].numpy()[:, 0:1],
-        "init_z_latents": legacy_map_results["MAPz_ini"].numpy()[:, 1:],
-        "init_delta_m": legacy_map_results["amplitude_ini"].numpy()[..., None],
-        "init_delta_p": legacy_map_results["dtime_ini"].numpy()[..., None],
-        "best_u_delta_av": legacy_map_results["MAPu"].numpy()[:, 0:1],
-        "best_u_latents": legacy_map_results["MAPu"].numpy()[:, 1:],
-        "best_delta_av": legacy_map_results["MAPz"].numpy()[:, 0:1],
-        "best_z_latents": legacy_map_results["MAPz"].numpy()[:, 1:],
-        "best_delta_m": legacy_map_results["amplitude"].numpy()[..., None],
-        "best_delta_p": legacy_map_results["dtime"].numpy()[..., None],
+    u_latents = train_results["u_samples"][0]
+    u_delta_av = u_latents[..., 0:1]
+    if posterior_params["nflow_physical_latents"]:
+        u_latents = u_latents[..., 1:]
+    else:
+        u_delta_av = np.zeros_like(u_delta_av)
+
+    legacy_train_hmc_results["u_delta_av"] = u_delta_av
+    legacy_train_hmc_results["u_latents"] = u_latents
+
+    if posterior_params["train_delta_m"]:
+        delta_m = train_results["train_amplitude"][0]
+    else:
+        delta_m = np.zeros_like(u_delta_av)
+    legacy_train_hmc_results["delta_m"] = delta_m
+
+    if posterior_params["train_delta_p"]:
+        delta_p = train_results["train_dtime"][0]
+    else:
+        delta_p = np.zeros_like(u_delta_av)
+    legacy_train_hmc_results["delta_p"] = delta_p
+
+    z_latents = train_results["z_samples"][0]
+    delta_av = z_latents[..., 0:1]
+    if posterior_params["nflow_physical_latents"]:
+        z_latents = z_latents[..., 1:]
+    else:
+        delta_av = np.zeros_like(delta_av)
+
+    legacy_train_hmc_results["delta_av"] = delta_av
+    legacy_train_hmc_results["z_latents"] = z_latents
+
+    train_map_results = {
+        "chain_min": legacy_train_map_results["chain_min"].numpy(),
+        "converged": legacy_train_map_results["converged"].numpy(),
+        "num_evaluations": legacy_train_map_results["num_evaluations"].numpy(),
+        "negative_log_prob": legacy_train_map_results[
+            "negative_log_likelihood"
+        ].numpy(),
+        "init_u_delta_av": legacy_train_map_results["MAPu_ini"].numpy()[:, 0:1],
+        "init_u_latents": legacy_train_map_results["MAPu_ini"].numpy()[:, 1:],
+        "init_delta_av": legacy_train_map_results["MAPz_ini"].numpy()[:, 0:1],
+        "init_z_latents": legacy_train_map_results["MAPz_ini"].numpy()[:, 1:],
+        "init_delta_m": legacy_train_map_results["amplitude_ini"].numpy()[..., None],
+        "init_delta_p": legacy_train_map_results["dtime_ini"].numpy()[..., None],
+        "best_u_delta_av": legacy_train_map_results["MAPu"].numpy()[:, 0:1],
+        "best_u_latents": legacy_train_map_results["MAPu"].numpy()[:, 1:],
+        "best_delta_av": legacy_train_map_results["MAPz"].numpy()[:, 0:1],
+        "best_z_latents": legacy_train_map_results["MAPz"].numpy()[:, 1:],
+        "best_delta_m": legacy_train_map_results["amplitude"].numpy()[..., None],
+        "best_delta_p": legacy_train_map_results["dtime"].numpy()[..., None],
     }
 
-    hmc_results = {
-        "samples": legacy_hmc_results["samples"].numpy(),
-        "step_sizes_final": legacy_hmc_results["step_sizes_final"].numpy(),
-        "is_accepted": legacy_hmc_results["is_accepted"].numpy(),
+    train_hmc_results = {
+        "samples": legacy_train_hmc_results["samples"].numpy(),
+        "step_sizes_final": legacy_train_hmc_results["step_sizes_final"].numpy(),
+        "is_accepted": legacy_train_hmc_results["is_accepted"].numpy(),
     }
 
-    posterior_step_results = {
+    train_posterior_step_results = {
         "ind": data.ind,
         "sn_name": data.sn_name,
         "spectra_id": data.spectra_id,
-        "map": map_results,
-        "hmc": hmc_results,
+        "map": train_map_results,
+        "hmc": train_hmc_results,
     }
 
-    np.savez_compressed(savepath, **posterior_step_results)
+    np.savez_compressed(savepath, **train_posterior_step_results)
     with np.load(savepath, allow_pickle=True) as io:
         return dict(io.items())
 
@@ -272,6 +308,7 @@ def legacy_posterior_result_factory(
         )
         posterior_step_results["map"] = posterior_step_results["map"].item()
         posterior_step_results["hmc"] = posterior_step_results["hmc"].item()
+
         results = PosteriorStepResult.model_validate(posterior_step_results)
 
         savepath = (
@@ -280,7 +317,7 @@ def legacy_posterior_result_factory(
             / "posterior"
             / "legacy"
             / "plots"
-            / params["seed"]
+            / str(params["seeds"][0])
         )
         savepath.mkdir(parents=True, exist_ok=True)
 

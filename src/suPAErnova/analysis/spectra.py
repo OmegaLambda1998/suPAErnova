@@ -84,7 +84,7 @@ class SpectraPlotter(Plotter):
             if sn_mask[sn, 0, 0]:
                 for spec in range(n_spec):
                     if spec_mask[sn, spec, 0]:
-                        ma = wl_mask[sn, spec, :]
+                        ma = wl_mask[sn, spec, :].astype(np.bool)
                         x = wl[sn, spec, :][ma]
                         y = amplitude[sn, spec, :][ma]
                         yerr = sigma[sn, spec, :][ma]

@@ -681,14 +681,17 @@ def snpae_posterior(
     posterior_params["kfold"], init_seed = seed
     posterior_params["seeds"] = [int(init_seed) + i for i in range(8)]
 
-    result = snpae_posterior_result_factory(
+    results = snpae_posterior_result_factory(
         data_params, pae_params, nflow_params, posterior_params
     )
-    if result.metadata is None:
-        result.metadata = {}
-    result.metadata["seed"] = nflow_params["seed"]
+    for datatype, result in results.items():
+        for s, r in result.items():
+            if r.metadata is None:
+                r.metadata = {}
+            r.metadata["seed"] = s
+            r.metadata["datatype"] = datatype
     gc.collect()
-    return result
+    return results
 
 
 @pytest.fixture(scope="module")
