@@ -69,11 +69,12 @@ class SpectraPlotter(Plotter):
         fig: "Figure | None" = None,
         ax: "Axis | None" = None,
         force: bool = False,
+        save: bool = True,
         **kwargs: "Any",
-    ) -> None:
+    ) -> tuple["Figure", "Axis"] | None:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
-            return
+            return None
         wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = SpectraPlotter.prep(
             data, config
         )
@@ -97,8 +98,11 @@ class SpectraPlotter(Plotter):
                         fig, ax = Plotter.errorbar(
                             x, y, *args, fig=fig, ax=ax, yerr=yerr, **kwargs
                         )
-        fig = Plotter.save(fig, savepath)
-        Plotter.close(fig, ax)
+        if save:
+            fig = Plotter.save(fig, savepath)
+            Plotter.close(fig, ax)
+            return None
+        return fig, ax
 
     # TODO: per plot-type args and kwargs
     @staticmethod
@@ -109,11 +113,12 @@ class SpectraPlotter(Plotter):
         fig: "Figure | None" = None,
         ax: "Axis | None" = None,
         force: bool = False,
+        save: bool = True,
         **kwargs: "Any",
-    ) -> None:
+    ) -> tuple["Figure", "Axis"] | None:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
-            return
+            return None
         wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = SpectraPlotter.prep(
             data, config
         )
@@ -155,8 +160,11 @@ class SpectraPlotter(Plotter):
             **kwargs,
         )
 
-        fig = Plotter.save(fig, savepath)
-        Plotter.close(fig, ax)
+        if save:
+            fig = Plotter.save(fig, savepath)
+            Plotter.close(fig, ax)
+            return None
+        return fig, ax
 
     @staticmethod
     def plot_residual(
@@ -167,11 +175,12 @@ class SpectraPlotter(Plotter):
         fig: "Figure | None" = None,
         ax: "Axis | None" = None,
         force: bool = False,
+        save: bool = True,
         **kwargs: "Any",
-    ) -> None:
+    ) -> tuple["Figure", "Axis"] | None:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
-            return
+            return None
         wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = SpectraPlotter.prep(
             data, config
         )
@@ -242,5 +251,8 @@ class SpectraPlotter(Plotter):
 
         fig, residual_ax = Plotter.axhline(0, color="black", fig=fig, ax=residual_ax)
 
-        fig = Plotter.save(fig, savepath)
-        Plotter.close(fig, ax)
+        if save:
+            fig = Plotter.save(fig, savepath)
+            Plotter.close(fig, ax)
+            return None
+        return fig, ax

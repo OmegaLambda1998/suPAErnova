@@ -1,18 +1,19 @@
 # Copyright 2025 Patrick Armstrong
 
 from typing import TYPE_CHECKING, ClassVar, override
+from pathlib import Path
 import importlib
 
 import numpy as np
 
 from suPAErnova.steps.backends import AbstractModel
 from suPAErnova.analysis.spectra import SpectraPlotter
+from suPAErnova.analysis.analysis import Plotter
 from suPAErnova.configs.steps.pae import PAEStage, PAEStepResult
 from suPAErnova.analysis.distribution import DistributionPlotter
 
 if TYPE_CHECKING:
     from logging import Logger
-    from pathlib import Path
     from collections.abc import Callable
 
     from numpy import typing as npt
@@ -228,7 +229,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.stage_delta_p = PAEStage.model_validate({
             "stage": z0 + self.n_z_latents + 1,
             "prev_stage": z0 + self.n_z_latents,
-            "name": "Δ𝓅",
+            "name": "Δp",
             "fname": "delta_p",
             "epochs": self.options.delta_p_epochs,
             "learning_rate": self.options.delta_p_lr,
@@ -418,7 +419,9 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                         )
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     SpectraPlotter.plot_residual(
-                        self.data.data, self.results[str(stage.stage)].output_amp, o
+                        self.data.data,
+                        self.results[str(stage.stage)].output_amp,
+                        o,
                     )
 
             if self.analysis.plot_latents is not None:
@@ -446,6 +449,67 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                         shade_alpha=0.0,
                         plot_cloud=True,
                     )
+
+        if self.analysis.plot_residual is not None:
+            if not isinstance(self.analysis.plot_residual, list):
+                self.analysis.plot_residual = [self.analysis.plot_residual]
+            for opts in self.analysis.plot_residual:
+                o = opts.model_copy()
+                if o.name is None:
+                    o.name = "residual"
+                if o.savepath is None:
+                    o.savepath = self.paths.out / "plots" / str(self.model.seed)
+                o.savepath.mkdir(parents=True, exist_ok=True)
+
+                savepath = (o.savepath or Path()) / f"{o.name}.{o.ext}"
+                if not savepath.exists():
+                    fig, ax = SpectraPlotter.plot_residual(
+                        self.data.data,
+                        self.results[str(self.run_stages[0].stage)].output_amp,
+                        o,
+                        save=False,
+                    )
+                    for stage in self.run_stages[1:]:
+                        fig, ax = SpectraPlotter.plot_residual(
+                            self.data.data,
+                            self.results[str(stage.stage)].output_amp,
+                            o,
+                            fig=fig,
+                            ax=ax,
+                            save=False,
+                        )
+
+                    fig = Plotter.save(fig, savepath)
+                    Plotter.close(fig, ax)
+
+        if self.analysis.plot_latents is not None:
+            if not isinstance(self.analysis.plot_latents, list):
+                self.analysis.plot_latents = [self.analysis.plot_latents]
+            for opts in self.analysis.plot_latents:
+                o = opts.model_copy()
+                if o.labels is None:
+                    o.labels = {
+                        stage.name: {i: labels[i] for i in range(stage.stage)}
+                        for stage in self.run_stages
+                    }
+                if o.name is None:
+                    o.name = "latents"
+                if o.savepath is None:
+                    o.savepath = self.paths.out / "plots" / str(self.model.seed)
+                o.savepath.mkdir(parents=True, exist_ok=True)
+
+                chains = {
+                    stage.name: self.results[str(stage.stage)].latents
+                    for stage in self.run_stages
+                }
+
+                DistributionPlotter.plot_corner(
+                    chains,
+                    o,
+                    statistics="max_central",
+                    shade_alpha=0.0,
+                    plot_cloud=True,
+                )
 
     #
     # === PAEModel Specific Functions ===

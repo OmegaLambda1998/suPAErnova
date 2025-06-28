@@ -381,11 +381,15 @@ def snpae_data(
     data_params: "DataParams",
     snpae_data_result_factory: "DataResultFactory",
 ) -> "DataStepResults":
-    result = snpae_data_result_factory(data_params)
-    if result.metadata is None:
-        result.metadata = {}
+    train_result, test_result = snpae_data_result_factory(data_params)
+    for result in train_result:
+        if result.metadata is None:
+            result.metadata = {}
+    for result in test_result:
+        if result.metadata is None:
+            result.metadata = {}
     gc.collect()
-    return result
+    return train_result, test_result
 
 
 @pytest.fixture(scope="module")
@@ -548,6 +552,8 @@ def nflow_params(pae_params: "PAEParams") -> "NFlowParams":
         "analysis": {
             "plot_z_latents": {},
             "plot_u_latents": {},
+            "plot_latents": {},
+            "plot_latent_steps": {},
         },
         "fname": "paper_parity",
         "n_z_latents": pae_params["n_z_latents"],

@@ -9,6 +9,7 @@ from astropy import cosmology as cosmo
 import sncosmo
 
 from suPAErnova.analysis.spectra import SpectraPlotter
+from suPAErnova.analysis.analysis import Plotter
 from suPAErnova.configs.steps.data import DataStepResult
 
 from .steps import SNPAEStep
@@ -253,7 +254,22 @@ class DataStep(SNPAEStep):
                 if opts.savepath is None:
                     opts.savepath = self.paths.out / "plots" / str(self.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
-                SpectraPlotter.plot_summary(self.data, opts)
+
+                savepath = (opts.savepath or Path()) / f"{opts.name}.{opts.ext}"
+                if savepath.exists():
+                    return
+                fig, ax = SpectraPlotter.plot_summary(self.data, opts, save=False)
+                for dt in ("train", "test"):
+                    for kfold in range(self.n_kfolds):
+                        fig, ax = SpectraPlotter.plot_summary(
+                            getattr(self, f"{dt}_data")[kfold],
+                            opts,
+                            fig=fig,
+                            ax=ax,
+                            save=False,
+                        )
+                fig = Plotter.save(fig, savepath)
+                Plotter.close(fig, ax)
 
     #
     # === DataStep Specific Functions ===

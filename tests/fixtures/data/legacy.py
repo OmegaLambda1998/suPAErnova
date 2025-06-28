@@ -96,6 +96,7 @@ def legacy_data_result_factory(
     def _legacy_data_result(data_params: "DataParams") -> "DataStepResults":
         data, params = legacy_data_step_factory(data_params)
         result = DataStepResult.model_validate(data)
+
         savepath = (
             Path(params["cache_path"])
             / params["fname"]

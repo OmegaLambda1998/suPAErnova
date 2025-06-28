@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 class DistributionPlot(AbstractPlot):
-    labels: "dict[str | int, str] | None" = None
+    labels: "dict[str | int, str | dict[str | int, str]] | None" = None
     mean: bool = False
 
 
@@ -43,11 +43,12 @@ class DistributionPlotter(Plotter):
         fig: "Figure | None" = None,
         ax: "Axis | None" = None,
         force: bool = False,
+        save: bool = True,
         **chain_kwargs: Any,
-    ) -> None:
+    ) -> tuple["Figure", "Axis"] | None:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
-            return
+            return None
 
         labels = None
         if isinstance(data, dict):
@@ -64,7 +65,10 @@ class DistributionPlotter(Plotter):
             }
         else:
             chains = []
-            for d in data:
+            config_labels = config.labels
+            for i, d in enumerate(data):
+                if labels is not None:
+                    config.labels = config_labels[labels[i]]
                 if isinstance(d, np.ndarray):
                     chain = DistributionPlotter.prep_from_array(d, config)
                 else:
@@ -75,5 +79,9 @@ class DistributionPlotter(Plotter):
             chains = {labels[i]: chain for (i, chain) in enumerate(chains)}
 
         fig, ax = Plotter.corner(chains, fig=fig, ax=ax, chain_kwargs=chain_kwargs)
-        fig = Plotter.save(fig, savepath)
-        Plotter.close(fig, ax)
+
+        if save:
+            fig = Plotter.save(fig, savepath)
+            Plotter.close(fig, ax)
+            return None
+        return fig, ax

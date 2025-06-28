@@ -126,29 +126,34 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
         self._model()
         z_labels = {}
         u_labels = {}
+        labels = {}
         ind = 0
         if self.model.physical_latents:
             z_labels[0] = "ΔAᵥ"
             u_labels[0] = "μΔAᵥ"
+            labels[0] = "z/μΔAᵥ"
             ind = 1
         for i in range(self.model.n_u_latents):
             z_labels[ind] = f"z{i}"
             u_labels[ind] = f"μ{i}"
+            labels[ind] = f"z/μ{i}"
             ind += 1
+
+        gaussian = np.random.normal(0, 1, (self.results.z_to_u.size**2, ind))
 
         if self.analysis.plot_u_latents is not None:
             if not isinstance(self.analysis.plot_u_latents, list):
                 self.analysis.plot_u_latents = [self.analysis.plot_u_latents]
             for opts in self.analysis.plot_u_latents:
                 if opts.labels is None:
-                    opts.labels = u_labels
+                    opts.labels = {"gaussian": u_labels, "u_latents": u_labels}
                 if opts.name is None:
                     opts.name = "u_latents"
                 if opts.savepath is None:
                     opts.savepath = self.paths.out / "plots" / str(self.model.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
                 DistributionPlotter.plot_corner(
-                    self.results.z_to_u,
+                    {"gaussian": gaussian, "u_latents": self.results.z_to_u},
                     opts,
                     statistics="max_central",
                     shade_alpha=0.0,
@@ -173,6 +178,66 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
                     shade_alpha=0.0,
                     plot_cloud=True,
                 )
+
+        if self.analysis.plot_latents is not None:
+            if not isinstance(self.analysis.plot_latents, list):
+                self.analysis.plot_latents = [self.analysis.plot_latents]
+            for opts in self.analysis.plot_latents:
+                if opts.labels is None:
+                    opts.labels = {
+                        "z_latents": labels,
+                        "u_latents": labels,
+                    }
+                if opts.name is None:
+                    opts.name = "latents"
+                if opts.savepath is None:
+                    opts.savepath = self.paths.out / "plots" / str(self.model.seed)
+                opts.savepath.mkdir(parents=True, exist_ok=True)
+                u_latents = self.model.z_to_u(
+                    self.results.latents, permute=True
+                ).numpy()
+                z_latents = self.model.u_to_z(u_latents, permute=True).numpy()
+                DistributionPlotter.plot_corner(
+                    {"u_latents": u_latents, "z_latents": z_latents},
+                    opts,
+                    statistics="max_central",
+                    shade_alpha=0.0,
+                    plot_cloud=True,
+                )
+
+        if self.analysis.plot_latent_steps is not None:
+            if not isinstance(self.analysis.plot_latent_steps, list):
+                self.analysis.plot_latent_steps = [self.analysis.plot_latent_steps]
+            for opts in self.analysis.plot_latent_steps:
+                num_steps = len(self.model.flow.bijector.bijectors) + 1
+
+                for step in range(num_steps):
+                    step_latents, is_shift = self.model.z_to_u_steps(
+                        self.results.latents, step, permute=True
+                    )
+                    if is_shift:
+                        continue
+                    o = opts.model_copy()
+                    if o.labels is None:
+                        o.labels = {"gaussian": labels, f"step_{step}_latents": labels}
+                    if o.name is None:
+                        o.name = f"step_{step}_latent_steps"
+                    if o.savepath is None:
+                        o.savepath = (
+                            self.paths.out / "plots" / str(self.model.seed) / "steps"
+                        )
+                    o.savepath.mkdir(parents=True, exist_ok=True)
+
+                    DistributionPlotter.plot_corner(
+                        {
+                            "gaussian": gaussian,
+                            f"step_{step}_latents": step_latents.numpy(),
+                        },
+                        o,
+                        statistics="max_central",
+                        shade_alpha=0.0,
+                        plot_cloud=True,
+                    )
 
     #
     # === NFlowModel Specific Functions ===

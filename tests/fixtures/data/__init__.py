@@ -11,5 +11,5 @@ if TYPE_CHECKING:
     DataResults = dict[str, Any] | DataStep
     DataStepFactory = Callable[[DataParams], tuple[DataResults, DataParams]]
 
-    DataStepResults = DataStepResult
+    DataStepResults = tuple[list[DataStepResult], list[DataStepResult]]
     DataResultFactory = Callable[[DataParams], DataStepResults]

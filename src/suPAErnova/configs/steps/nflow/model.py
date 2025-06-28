@@ -11,6 +11,8 @@ from suPAErnova.configs.steps.backends import AbstractModelConfig
 class NFlowStepAnalysis(AbstractStepAnalysis):
     plot_z_latents: DistributionPlot | list[DistributionPlot] | None = None
     plot_u_latents: DistributionPlot | list[DistributionPlot] | None = None
+    plot_latents: DistributionPlot | list[DistributionPlot] | None = None
+    plot_latent_steps: DistributionPlot | list[DistributionPlot] | None = None
 
 
 class NFlowModelConfig(AbstractModelConfig):
