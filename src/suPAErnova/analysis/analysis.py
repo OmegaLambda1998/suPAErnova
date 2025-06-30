@@ -162,12 +162,14 @@ class Plotter:
             ax=ax,
             xerr=xerr,
             yerr=yerr,
-            linestyle="none",
-            linewidth=1,
-            elinewidth=1,
-            marker="o",
-            markersize=1,
-            **kwargs,
+            **{
+                "linestyle": "none",
+                "linewidth": 1,
+                "elinewidth": 1,
+                "marker": "o",
+                "markersize": 1,
+                **kwargs,
+            },
         )
 
     @staticmethod

@@ -313,7 +313,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                 map_best_results = np.concat(map_best_results, axis=-1)
                 subset_map_init_results[seed] = map_init_results
                 subset_map_best_results[seed] = map_best_results
-                subset_map_labels = map_labels
+                subset_map_labels[seed] = map_labels
 
                 hmc_labels = {}
                 hmc_ind = 0
@@ -328,7 +328,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                     hmc_ind += 1
                 for i in range(model.map.n_u_latents):
                     hmc_labels[hmc_ind + i] = f"μ{i}"
-                subset_hmc_labels = hmc_labels
+                subset_hmc_labels[seed] = hmc_labels
 
                 if self.analysis.plot_map_init is not None:
                     if not isinstance(self.analysis.plot_map_init, list):
@@ -473,6 +473,8 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                     self.analysis.plot_dispersion = [self.analysis.plot_dispersion]
                 for opts in self.analysis.plot_dispersion:
                     o = opts.model_copy()
+                    if o.subset != subset:
+                        continue
                     if o.name is None:
                         o.name = "dispersion"
                     if o.savepath is None:
@@ -497,9 +499,17 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                                 f"{twins_path} does not exist, can not load twins data."
                             )
 
+                    legacy_data = None
+                    if o.legacy is not None:
+                        print(o.legacy)
+                        legacy_path = self.nflow.pae.data.data_dir / o.legacy
+                        if legacy_path.exists():
+                            legacy_data = np.load(legacy_path, allow_pickle=True).item()
+                        else:
+                            self.log.error(
+                                f"{legacy_path} does not exist, can not load legacy data."
+                            )
+
                     DispersionPlotter.plot_dispersion(
-                        data,
-                        hmc,
-                        o,
-                        twins=twins,
+                        data, hmc, o, twins=twins, legacy=legacy_data
                     )

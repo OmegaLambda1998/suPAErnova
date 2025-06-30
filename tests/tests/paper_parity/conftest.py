@@ -625,6 +625,7 @@ def posterior_params(
                 {
                     "subset": "train",
                     "twins": "boone_data.dat",
+                    "legacy": "legacy/train_data_kfold0_posterior_03Dlatent_layers256-128-32_orig.npy",
                     "filter": {
                         "redshift": {"min": 0.02, "max": 1.0},
                         "phase": {"min": -10, "max": 40},
@@ -633,6 +634,7 @@ def posterior_params(
                 {
                     "subset": "test",
                     "twins": "boone_data.dat",
+                    "legacy": "legacy/test_data_kfold0_posterior_03Dlatent_layers256-128-32_orig.npy",
                     "filter": {
                         "redshift": {"min": 0.02, "max": 1.0},
                         "phase": {"min": -10, "max": 40},

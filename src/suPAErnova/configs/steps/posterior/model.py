@@ -67,13 +67,13 @@ class PosteriorModelConfig(AbstractModelConfig):
     delta_m_min: float = -1.5
     delta_m_max: float = 1.5
     delta_m_mean: float = 0.0
-    delta_m_std: float = 1.5
+    delta_m_std: float = 0.1
 
     train_delta_p: bool
     delta_p_min: float = -1.0
     delta_p_max: float = 1.0
     delta_p_mean: float = 0.0
-    delta_p_std: float = 1.0
+    delta_p_std: float = 0.01
 
     train_bias: bool
     bias_min: float = -1.0
