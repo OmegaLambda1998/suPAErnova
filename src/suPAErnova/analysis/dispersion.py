@@ -39,6 +39,8 @@ class DispersionPlotter(Plotter):
             return
 
         x = data.redshift[:, 0, 0]
+        order = x.argsort()
+        x = x[order]
         z = (x * 3e5 + 300.0) / 3e5
         mag_err = abs(-5 * np.log10(x / z))
 
@@ -64,6 +66,12 @@ class DispersionPlotter(Plotter):
 
         weighted_err = np.sqrt(weighted_dev * weighted_dev + mag_err * mag_err)
 
+        weighted_mean = amp[0, ...]
+        weighted_err *= 0
+
+        weighted_mean = weighted_mean[order]
+        weighted_err = weighted_err[order]
+
         _wl, _amplitude, _sigma, sn_mask, _spec_mask, _wl_mask = SpectraPlotter.prep(
             data, config
         )
@@ -83,6 +91,8 @@ class DispersionPlotter(Plotter):
 
         if legacy is not None:
             l_x = legacy["redshift"]
+            l_order = l_x.argsort()
+            l_x = l_x[l_order]
             l_z = (l_x * 3e5 + 300.0) / 3e5
             l_mag_err = abs(-5 * np.log10(l_x / l_z))
 
@@ -93,7 +103,6 @@ class DispersionPlotter(Plotter):
             l_weighted_mean = np.sum(l_weight * l_amp, axis=0) / np.sum(
                 l_weight, axis=0
             )
-            l_weighted_mean = l_amp
 
             l_weighted_dev = np.sqrt(
                 (l_amp.shape[0] / (l_amp.shape[0] - 1))
@@ -105,11 +114,16 @@ class DispersionPlotter(Plotter):
                     - (l_weighted_mean * l_weighted_mean)
                 )
             )
-            l_weighted_dev = np.sqrt(l_amp * l_amp - l_weighted_mean * l_weighted_mean)
 
             l_weighted_err = np.sqrt(
                 l_weighted_dev * l_weighted_dev + l_mag_err * l_mag_err
             )
+
+            l_weighted_mean = l_amp
+            l_weighted_err *= 0
+
+            l_weighted_mean = l_weighted_mean[l_order]
+            l_weighted_err = l_weighted_err[l_order]
 
             l_sn_mask = legacy["mask_sn"]
 
@@ -122,7 +136,7 @@ class DispersionPlotter(Plotter):
                 for name in l_intersection:
                     l_ind = np.argwhere(legacy["names"] == name)[0]
                     l_df = twins[twins.name == name]
-                    l_twins_mask[l_ind] = l_df.mask_twins
+                    l_twins_mask[l_ind] = l_df.mask_twins.astype(np.int32)
 
             l_sn_mask = np.sum(
                 legacy["mask"] * l_sn_mask[:, None, None], axis=(-2, -1), keepdims=True
@@ -137,10 +151,8 @@ class DispersionPlotter(Plotter):
         # No mask
         if legacy is not None:
             l_x = legacy["redshift"]
-            l_order = l_x.argsort()
-            l_x = l_x[l_order]
-            l_y = l_weighted_mean[l_order]
-            l_yerr = l_weighted_err[l_order]
+            l_y = l_weighted_mean
+            l_yerr = l_weighted_err
             print(l_x.shape, l_y.shape, l_yerr.shape)
             print("l_n_sn", np.ones_like(l_sn_mask[:, 0, 0]).sum())
             mad_hmc = k_nmad * np.median(np.abs(l_y - np.median(l_y)))
@@ -159,10 +171,8 @@ class DispersionPlotter(Plotter):
             )
 
         x = data.redshift[:, 0, 0]
-        order = x.argsort()
-        x = x[order]
-        y = weighted_mean[:, 0][order]
-        yerr = weighted_err[:, 0][order]
+        y = weighted_mean[:, 0]
+        yerr = weighted_err[:, 0]
         print(x.shape, y.shape, yerr.shape)
         print("n_sn", np.ones_like(sn_mask[:, 0, 0]).sum())
         mad_hmc = k_nmad * np.median(np.abs(y - np.median(y)))
@@ -177,10 +187,8 @@ class DispersionPlotter(Plotter):
         if legacy is not None:
             l_mask = l_sn_mask.astype(bool)[:, 0, 0]
             l_x = legacy["redshift"][l_mask]
-            l_order = l_x.argsort()
-            l_x = l_x[l_order]
-            l_y = l_weighted_mean[l_mask][l_order]
-            l_yerr = l_weighted_err[l_mask][l_order]
+            l_y = l_weighted_mean[l_mask]
+            l_yerr = l_weighted_err[l_mask]
             print(l_x.shape, l_y.shape, l_yerr.shape, l_mask.shape)
             print("l_sn_mask", l_mask.sum())
             mad_hmc = k_nmad * np.median(np.abs(l_y - np.median(l_y)))
@@ -200,10 +208,8 @@ class DispersionPlotter(Plotter):
 
         mask = sn_mask.astype(bool)[:, 0, 0]
         x = data.redshift[mask][:, 0, 0]
-        order = x.argsort()
-        x = x[order]
-        y = weighted_mean[mask][:, 0][order]
-        yerr = weighted_err[mask][:, 0][order]
+        y = weighted_mean[mask][:, 0]
+        yerr = weighted_err[mask][:, 0]
         print(x.shape, y.shape, yerr.shape, mask.shape)
         print("sn_mask", mask.sum())
         mad_hmc = k_nmad * np.median(np.abs(y - np.median(y)))
@@ -218,10 +224,8 @@ class DispersionPlotter(Plotter):
         if legacy is not None:
             l_mask = l_twins_mask.astype(bool)
             l_x = legacy["redshift"][l_mask]
-            l_order = l_x.argsort()
-            l_x = l_x[l_order]
-            l_y = l_weighted_mean[l_mask][l_order]
-            l_yerr = l_weighted_err[l_mask][l_order]
+            l_y = l_weighted_mean[l_mask]
+            l_yerr = l_weighted_err[l_mask]
             print(l_x.shape, l_y.shape, l_yerr.shape, l_mask.shape)
             print("l_twins_mask", l_mask.sum())
             mad_hmc = k_nmad * np.median(np.abs(l_y - np.median(l_y)))
@@ -241,10 +245,8 @@ class DispersionPlotter(Plotter):
 
         mask = twins_mask.astype(bool)[:, 0, 0]
         x = data.redshift[mask][:, 0, 0]
-        order = x.argsort()
-        x = x[order]
-        y = weighted_mean[mask][:, 0][order]
-        yerr = weighted_err[mask][:, 0][order]
+        y = weighted_mean[mask][:, 0]
+        yerr = weighted_err[mask][:, 0]
         print(x.shape, y.shape, yerr.shape, mask.shape)
         print("twins_mask", mask.sum())
         mad_hmc = k_nmad * np.median(np.abs(y - np.median(y)))
@@ -260,10 +262,8 @@ class DispersionPlotter(Plotter):
         if legacy is not None:
             l_mask = (l_twins_mask * l_sn_mask[:, 0, 0]).astype(bool)
             l_x = legacy["redshift"][l_mask]
-            l_order = l_x.argsort()
-            l_x = l_x[l_order]
-            l_y = l_weighted_mean[l_mask][l_order]
-            l_yerr = l_weighted_err[l_mask][l_order]
+            l_y = l_weighted_mean[l_mask]
+            l_yerr = l_weighted_err[l_mask]
             print(l_x.shape, l_y.shape, l_yerr.shape, l_mask.shape)
             print("l_final", l_mask.sum())
             mad_hmc = k_nmad * np.median(np.abs(l_y - np.median(l_y)))
@@ -282,10 +282,8 @@ class DispersionPlotter(Plotter):
 
         mask = (twins_mask * sn_mask).astype(bool)[:, 0, 0]
         x = data.redshift[mask][:, 0, 0]
-        order = x.argsort()
-        x = x[order]
-        y = weighted_mean[mask][:, 0][order]
-        yerr = weighted_err[mask][:, 0][order]
+        y = weighted_mean[mask][:, 0]
+        yerr = weighted_err[mask][:, 0]
         print(x.shape, y.shape, yerr.shape, mask.shape)
         print("final", mask.sum())
         mad_hmc = k_nmad * np.median(np.abs(y - np.median(y)))
@@ -294,5 +292,8 @@ class DispersionPlotter(Plotter):
         print("RMS: ", wrms_hmc)
 
         fig, ax = Plotter.errorbar(x, y, yerr=yerr, fig=fig, ax=ax, color="green")
+
+        ax.set_ylim(-0.75, 0.75)
+
         fig = Plotter.save(fig, savepath)
         Plotter.close(fig, ax)

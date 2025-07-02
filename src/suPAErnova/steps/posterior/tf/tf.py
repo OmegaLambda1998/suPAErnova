@@ -742,7 +742,8 @@ class TFPosteriorModel(ks.Model):
         # Create synthetic spectra from z-latents
         synth_amp = self.pae.decoder((zs, input_phase), mask=input_mask)
 
-        if self.map.train_delta_m and not self.pae.physical_latents:
+        # XXX: Test whether this fixes things
+        if self.map.train_delta_m:  # and not self.pae.physical_latents:
             delta_m = ks.layers.RepeatVector(1)(delta_m)
             synth_amp *= delta_m
 
