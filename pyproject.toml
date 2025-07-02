@@ -3,18 +3,17 @@ authors = [
     { name = "Patrick Armstrong", email = "patrick.james.1998@gmail.com" },
 ]
 dependencies = [
-    "astropy>=7.0.1",
-    "cairocffi>=1.7.1",
-    "chainconsumer>=1.2.2",
-    "click>=8.1.8",
-    "coloredlogs>=15.0.1",
-    "matplotlib>=3.10.3",
-    "pandas>=2.2.3",
-    "pydantic>=2.11.4",
-    "sncosmo>=2.12.1",
-    "tensorflow-probability[tf]>=0.25.0",
-    "toml>=0.10.2",
-    "tqdm>=4.67.1",
+    "astropy",
+    "cairocffi",
+    "chainconsumer",
+    "click",
+    "coloredlogs",
+    "matplotlib",
+    "pandas",
+    "pydantic",
+    "sncosmo",
+    "toml",
+    "tqdm",
 ]
 description = "Add your description here"
 name = "suPAErnova"
@@ -24,28 +23,19 @@ version = "0.1.0"
 
 [project.optional-dependencies]
 legacy = ["supaernova_legacy"]
-
-tf-cpu = ["tensorflow-cpu>=2.18.1"]
-tf-cuda = []
-tf-metal = []
-tf-rocm = []
-
-tch-cpu = []
-tch-cuda = []
-tch-metal = []
-tch-rocm = []
+tf-cpu = ["tensorflow-cpu>=2.18,<2.19", "tf-keras>=2.18,<2.19", "tensorflow-probability>=0.25"]
 
 [build-system]
 build-backend = "hatchling.build"
 requires = ["hatchling"]
 
 [dependency-groups]
-dev = ["pandas-stubs>=2.2.3.250308", "types-tensorflow>=2.18.0.20250506"]
-jupyter = ["jupyter>=1.1.1"]
+dev = ["pandas-stubs", "types-tensorflow"]
+jupyter = ["jupyter"]
 tests = [
-    "pytest>=8.3.5",
-    "pytest-json-ctrf>=0.3.5",
-    "pytest-richer>=0.1.1",
+    "pytest",
+    "pytest-json-ctrf",
+    "pytest-richer",
 ]
 
 # === Tools ===
@@ -54,24 +44,15 @@ conflicts = [
     [
         { extra = "legacy" },
         { extra = "tf-cpu" },
-        { extra = "tf-cuda" },
-        { extra = "tf-metal" },
-        { extra = "tf-rocm" },
-    ],
-    [
-        { extra = "legacy" },
-        { extra = "tch-cpu" },
-        { extra = "tch-cuda" },
-        { extra = "tch-metal" },
-        { extra = "tch-rocm" },
     ],
 ]
-environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
 
 [tool.uv.sources]
-# supaernova_legacy = { git = "https://github.com/OmegaLambda1998/suPAErnova_legacy.git"}
 supaernova_legacy = { path = "../suPAErnova_legacy/"  }
-tensorflow-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4/tensorflow_rocm-2.18.1-cp312-cp312-manylinux_2_28_x86_64.whl" }
+
+# We override the tf-keras dependency metadata to avoid installing multiple version of tensorflow
+[[tool.uv.dependency-metadata]]
+name = "tf-keras"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib", "--color=yes", "--tb=short"]

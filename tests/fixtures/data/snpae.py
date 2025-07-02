@@ -76,6 +76,6 @@ def snpae_data_result_factory(
 ) -> "DataResultFactory":
     def _snpae_data_result(data_params: "DataParams") -> "DataStepResults":
         data_step_factory = snpae_data_step_factory(data_params)
-        return data_step_factory.train_data, data_step_factory.test_data
+        return data_step_factory.data
 
     return _snpae_data_result

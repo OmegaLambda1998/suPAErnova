@@ -381,15 +381,11 @@ def snpae_data(
     data_params: "DataParams",
     snpae_data_result_factory: "DataResultFactory",
 ) -> "DataStepResults":
-    train_result, test_result = snpae_data_result_factory(data_params)
-    for result in train_result:
-        if result.metadata is None:
-            result.metadata = {}
-    for result in test_result:
-        if result.metadata is None:
-            result.metadata = {}
+    result = snpae_data_result_factory(data_params)
+    if result.metadata is None:
+        result.metadata = {}
     gc.collect()
-    return train_result, test_result
+    return result
 
 
 @pytest.fixture(scope="module")

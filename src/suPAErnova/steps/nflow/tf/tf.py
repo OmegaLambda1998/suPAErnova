@@ -72,6 +72,7 @@ class TFNFlowModel(ks.Model):
         self.ckpt_path: str = (
             f"{'best' if self.save_best else 'latest'}.model.checkpoint/"
         )
+        self.log_path: str = f"{'best' if self.save_best else 'latest'}_logs/"
 
         self.activation: Callable[[tf.Tensor], tf.Tensor] = self.options.activation_fn
         self._optimiser: type[ks.optimizers.Optimizer] = self.options.optimiser_cls
@@ -287,13 +288,6 @@ class TFNFlowModel(ks.Model):
                 ),
             )
         )
-
-        # callbacks.append(
-        #     ks.callbacks.EarlyStopping(
-        #         monitor="val_loss",
-        #         patience=self.patience,
-        #     )
-        # )
 
         # === Train ===
         self._epoch = 0

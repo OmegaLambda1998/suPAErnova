@@ -485,6 +485,7 @@ class TFPAEModel(ks.Model):
         self.ckpt_path: str = (
             f"{'best' if self.save_best else 'latest'}.model.checkpoint/"
         )
+        self.log_path: str = f"{'best' if self.save_best else 'latest'}_logs/"
 
         # Data Offsets
         self.phase_offset_scale: Literal[0, -1] | float = (
