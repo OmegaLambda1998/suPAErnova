@@ -1,0 +1,226 @@
+[data]
+    name = "Data"
+    data_dir = "../../../tests/data"
+    meta = "meta.csv"
+    idr = "IDR_eTmax.txt"
+    mask = "mask_info_wmin_wmax.txt"
+    colourlaw = "colourlaws/F99_colourlaw.txt"
+    cosmological_model = "WMAP7"
+    salt_model = "salt2"
+    min_phase = -10.0
+    max_phase = 40.0
+    train_frac = 0.75
+    seed = 12345
+    [data.analysis.plot_summary]
+        ext = "svg"
+
+
+[pae]
+    name = "PAE"
+    validation_frac = 0.0
+    kfolds = [ 0,]
+    seed = 12345
+    [pae.model]
+        name = "TF"
+        backend = "tf"
+        debug = false
+        architecture = "dense"
+        encode_dims = [ 256, 128,]
+        decode_dims = [ 128, 256,]
+        physical_latents = true
+        n_z_latents = 3
+        batch_normalisation = false
+        dropout = 0.0
+        seperate_latent_training = true
+        seperate_z_latent_training = false
+        seed = 12345
+        batch_size = 57
+        save_best = false
+        min_train_redshift = 0.02
+        max_train_redshift = 1.0
+        min_test_redshift = 0.02
+        max_test_redshift = 1.0
+        min_val_redshift = 0.02
+        max_val_redshift = 1.0
+        min_redshift = 0.02
+        max_redshift = 1.0
+        min_train_phase = -10.0
+        max_train_phase = 40.0
+        min_test_phase = -10.0
+        max_test_phase = 40.0
+        min_val_phase = -10.0
+        max_val_phase = 40.0
+        min_phase = -10.0
+        max_phase = 40.0
+        phase_offset_scale = -0.02
+        amplitude_offset_scale = 1.0
+        mask_fraction = 0.1
+        loss_residual_penalty = 0.0
+        loss_delta_av_penalty = 0.0
+        loss_delta_m_penalty = 0.0
+        loss_delta_p_penalty = 0.0
+        loss_covariance_penalty = 50000.0
+        loss_decorrelate_all = true
+        loss_decorrelate_dust = true
+        loss_clip_delta = 25.0
+        delta_av_epochs = 1000
+        delta_av_lr = 0.005
+        delta_av_lr_decay_steps = 300
+        delta_av_lr_decay_rate = 0.95
+        delta_av_lr_weight_decay_rate = 0.0001
+        zs_epochs = 1000
+        zs_lr = 0.005
+        zs_lr_decay_steps = 300
+        zs_lr_decay_rate = 0.95
+        zs_lr_weight_decay_rate = 0.0001
+        delta_m_epochs = 5000
+        delta_m_lr = 0.005
+        delta_m_lr_decay_steps = 300
+        delta_m_lr_decay_rate = 0.95
+        delta_m_lr_weight_decay_rate = 0.0001
+        delta_p_epochs = 5000
+        delta_p_lr = 0.001
+        delta_p_lr_decay_steps = 300
+        delta_p_lr_decay_rate = 0.95
+        delta_p_lr_weight_decay_rate = 0.0001
+        final_epochs = 5000.0
+        final_lr = 0.001
+        final_lr_decay_steps = 300
+        final_lr_decay_rate = 0.95
+        final_lr_weight_decay_rate = 0.0001
+        validation_frac = 0
+        activation = "relu"
+        loss = "WHuber"
+        optimiser = "AdamW"
+        scheduler = "ExponentialDecay"
+        kernel_regulariser = "L2"
+        kernel_regulariser_penalty = 100
+        [pae.model.analysis]
+            [pae.model.analysis.plot_residual]
+                ext = "svg"
+            [pae.model.analysis.plot_latents]
+                ext = "svg"
+                mean = false
+            [pae.model.analysis.plot_residual.filter.redshift]
+                min = 0.02
+                max = 1.0
+            [pae.model.analysis.plot_residual.filter.phase]
+                min = -10.0
+                max = 40.0
+
+[nflow]
+    name = "NFlow"
+    validation_frac = 0.22
+    seed = 12345
+    [nflow.model]
+        name = "TFNFlowModelConfig"
+        backend = "tf"
+        debug = false
+        seed = 12345
+        batch_size = 57
+        patience = 30.0
+        save_best = false
+        epochs = 500
+        learning_rate = 0.001
+        batch_normalisation = false
+        n_hidden_units = 8
+        n_layers = 12
+        physical_latents = true
+        validation_frac = 0.22
+        activation = "relu"
+        optimiser = "Adam"
+        [nflow.model.analysis]
+            [nflow.model.analysis.plot_z_latents]
+                ext = "svg"
+                mean = false
+            [nflow.model.analysis.plot_u_latents]
+                ext = "svg"
+                mean = false
+            [nflow.model.analysis.plot_latents]
+                ext = "svg"
+                mean = false
+            [nflow.model.analysis.plot_latent_steps]
+                ext = "svg"
+                mean = false
+
+
+[posterior]
+    name = "Posterior"
+    [posterior.model]
+        name = "TFPosteriorModelConfig"
+        backend = "tf"
+        debug = false
+        seed = 12345
+        train_subset = true
+        test_subset = true
+        subset = "train"
+        batch_size = 171
+        save_best = false
+        n_chains_early = 10
+        n_chains_mid = 10
+        n_chains_final = 5
+        tolerance = 0.01
+        max_iterations = 2500
+        n_burnin = 10000
+        n_samples = 10000
+        n_leapfrog = 5
+        target_acceptance_rate = 0.651
+        random_initial_positions = false
+        u_delta_av_min = -1.0
+        u_delta_av_max = 1.0
+        u_delta_av_mean = 0.0
+        u_delta_av_std = 1.0
+        u_latents_mean = 0.0
+        u_latents_std = 1.0
+        delta_av_min = -0.5
+        delta_av_max = 0.5
+        delta_av_mean = 0.0
+        delta_av_std = 0.5
+        train_delta_m = true
+        delta_m_min = -1.5
+        delta_m_max = 1.5
+        delta_m_mean = 0.0
+        delta_m_std = 0.1
+        train_delta_p = true
+        delta_p_min = -1.0
+        delta_p_max = 1.0
+        delta_p_mean = 0.0
+        delta_p_std = 0.01
+        train_bias = false
+        bias_min = -1.0
+        bias_max = 1.0
+        bias_mean = 0.0
+        bias_std = 1.0
+        seeds = [ 12345, 12346, 12347, 12348, 12349, 12350, 12351, 12352,]
+        [posterior.model.analysis]
+            [posterior.model.analysis.plot_map_init]
+                ext = "svg"
+                mean = false
+            [posterior.model.analysis.plot_map_best]
+                ext = "svg"
+                mean = false
+            [posterior.model.analysis.plot_hmc]
+                ext = "svg"
+                mean = true
+            [[posterior.model.analysis.plot_dispersion]]
+                ext = "svg"
+                subset = "train"
+                legacy = "legacy/train_data_kfold0_posterior_03Dlatent_layers256-128-32_orig.npy"
+                twins = "boone_data.dat"
+                [posterior.model.analysis.plot_dispersion.filter.redshift]
+                    min = 0.02
+                    max = 1.0
+                [posterior.model.analysis.plot_dispersion.filter.phase]
+                    min = -10.0
+                    max = 40.0
+            [[posterior.model.analysis.plot_dispersion]]
+                ext = "svg"
+                subset = "test"
+                legacy = "legacy/test_data_kfold0_posterior_03Dlatent_layers256-128-32_orig.npy"
+                twins = "boone_data.dat"
+                [posterior.model.analysis.plot_dispersion.filter.redshift]
+                    min = 0.02
+                    max = 1.0
+                [posterior.model.analysis.plot_dispersion.filter.phase]
+                    min = -10.0
+                    max = 40.0
