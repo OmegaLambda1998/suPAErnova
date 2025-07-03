@@ -1,6 +1,7 @@
 # Example output
 /examples/**/output/
 /tests/**/output/
+/docs/examples/**/output/
 /tests/logs/
 
 # Old source code
