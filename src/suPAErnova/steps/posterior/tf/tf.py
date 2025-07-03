@@ -893,7 +893,6 @@ class TFPosteriorModel(ks.Model):
         )
         return self._loss(tf.zeros_like(log_prob), log_prob)
 
-    @tf.function
     def lbfgs(self, x):
         return tfp.math.value_and_gradient(
             self.vals_and_grads, x, auto_unpack_single_arg=False
@@ -1284,7 +1283,6 @@ class TFPosteriorModel(ks.Model):
         def update_progress() -> None:
             progress.update()
 
-        @tf.function
         def unnormalized_posterior_log_prob(pos):
             update_progress()
             return self(
@@ -1298,16 +1296,12 @@ class TFPosteriorModel(ks.Model):
                 mask=self.data.mask,
             )
 
-        @tf.function
         def trace_fn(_, pkr):
             step_size = pkr.inner_results.accepted_results.step_size
             is_accepted = pkr.inner_results.is_accepted
             return [step_size, is_accepted]
 
-        @tf.function
         def sample_chain():
-            # from https://www.tensorflow.org/probability/examples/TensorFlow_Probability_Case_Study_Covariance_Estimation
-
             # run hmc
             hmc = tfp.mcmc.HamiltonianMonteCarlo(
                 target_log_prob_fn=unnormalized_posterior_log_prob,

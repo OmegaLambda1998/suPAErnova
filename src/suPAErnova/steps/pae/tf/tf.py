@@ -1146,7 +1146,6 @@ class TFPAEModel(ks.Model):
 
             self.encoder.moving_means = moving_means
 
-    @tf.function
     def prep_data_per_epoch(self, data: "EpochInputs") -> "ModelInputs":
         (phase, d_phase, amplitude, d_amplitude, mask, sn_mask, spec_mask) = data[0]
 
