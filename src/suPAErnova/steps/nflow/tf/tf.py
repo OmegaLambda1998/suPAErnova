@@ -289,6 +289,22 @@ class TFNFlowModel(ks.Model):
             )
         )
 
+        if savepath is not None:
+            callbacks.append(
+                ks.callbacks.TensorBoard(
+                    log_dir=savepath.parent / self.log_path / savepath.stem,
+                    write_graph=False,
+                    write_images=False,
+                    write_steps_per_second=True,
+                    update_freq="epoch",
+                    profile_batch=(
+                        int(0.9 * n_batches_per_epoch * self.epochs),
+                        int(n_batches_per_epoch * self.epochs),
+                    ),
+                    embeddings_freq=0,
+                ),
+            )
+
         # === Train ===
         self._epoch = 0
         self.set_seed()

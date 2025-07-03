@@ -23,7 +23,7 @@ version = "0.1.0"
 
 [project.optional-dependencies]
 legacy = ["supaernova_legacy"]
-tf-cpu = ["tensorflow-cpu>=2.18,<2.19", "tf-keras>=2.18,<2.19", "tensorflow-probability>=0.25"]
+tf-cpu = ["tensorflow-cpu>=2.18,<2.19", "tf-keras>=2.18,<2.19", "tensorflow-probability>=0.25", "tensorboard>=2.18,<2.19", "tensorboard_plugin_profile>2.20"]
 
 [build-system]
 build-backend = "hatchling.build"

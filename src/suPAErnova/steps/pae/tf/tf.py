@@ -934,7 +934,24 @@ class TFPAEModel(ks.Model):
             )
         )
 
-        if stage.loadpath is not None:
+        callbacks.append(
+            ks.callbacks.TensorBoard(
+                log_dir=self.stage.savepath.parent
+                / self.log_path
+                / self.stage.savepath.stem,
+                write_graph=False,
+                write_images=False,
+                write_steps_per_second=True,
+                update_freq="epoch",
+                profile_batch=(
+                    int(0.9 * n_batches_per_epoch * self.stage.epochs),
+                    int(n_batches_per_epoch * self.stage.epochs),
+                ),
+                embeddings_freq=0,
+            ),
+        )
+
+        if self.stage.loadpath is not None:
             self.load_checkpoint(stage.loadpath)
         self.build_model()
 
