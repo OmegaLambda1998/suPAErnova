@@ -371,6 +371,7 @@ def data_params() -> "DataParams":
         "train_frac": 0.75,
         "fname": "paper_parity",
         "cosmological_model": "WMAP7",
+        "colourlaw": "colourlaws/F99_colourlaw.txt",
         "salt_model": "salt2",
         "seed": SEEDS[0][-1],
     }
@@ -485,7 +486,6 @@ def pae_params(
         "loss": "WHuber",
         "optimiser": "AdamW",
         "scheduler": "ExponentialDecay",
-        "colourlaw": data_path / "colourlaws" / "F99_colourlaw.txt",
         "kernel_regulariser": "L2",
         "kernel_regulariser_penalty": 100,  # Not used if kernel_regulariser is None
         # Noise

@@ -54,6 +54,7 @@ class DataStep(SNPAEStep):
         self.meta: Path
         self.idr: Path
         self.mask: Path
+        self.colourlaw: npt.NDArray[np.float64] | None
 
         # Optional
         self.cosmological_model: cosmo.FlatLambdaCDM
@@ -102,6 +103,11 @@ class DataStep(SNPAEStep):
         self.meta = self.options.meta
         self.idr = self.options.idr
         self.mask = self.options.mask
+
+        colourlaw = self.options.colourlaw
+        if colourlaw is not None:
+            _, colourlaw = np.loadtxt(colourlaw, unpack=True)
+        self.colourlaw = colourlaw
 
         # Optional
         # Get astropy.cosmology model associated with provided cosmological_model string

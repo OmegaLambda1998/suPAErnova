@@ -166,16 +166,3 @@ class PAEModelConfig(AbstractModelConfig):
     final_lr_decay_steps: PositiveInt
     final_lr_decay_rate: PositiveFloat
     final_lr_weight_decay_rate: PositiveFloat
-
-    colourlaw: Path | None
-
-    @model_validator(mode="after")
-    def validate_paths(self) -> Self:
-        if self.colourlaw is not None:
-            self.colourlaw = self.paths.resolve_path(
-                self.colourlaw, relative_path=self.paths.data
-            )
-            if not self.colourlaw.exists():
-                err = f"`colourlaw` resolved to {self.colourlaw}, which does not exist."
-                self._raise(err)
-        return self

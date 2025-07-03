@@ -8,8 +8,6 @@ from typing import (
     override,
 )
 
-import numpy as np
-
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
@@ -28,6 +26,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Callable
 
+    import numpy as np
     from numpy import typing as npt
 
     from suPAErnova.steps.pae.model import PAEModelStep
@@ -285,10 +284,7 @@ class TFPAEDecoder(ks.layers.Layer):
         )
         self.batch_normalisation: bool = options.batch_normalisation
 
-        colourlaw = options.colourlaw
-        if colourlaw is not None:
-            _, colourlaw = np.loadtxt(colourlaw, unpack=True)
-        self.colourlaw: npt.NDArray[np.float64] | None = colourlaw
+        self.colourlaw: npt.NDArray[np.float64] | None
 
         # --- Layers ---
         self.decode_spec_layer: ks.layers.Dense
@@ -475,6 +471,7 @@ class TFPAEModel(ks.Model):
         self.encoder: TFPAEEncoder = TFPAEEncoder(self.options, config.name)
         self.decoder: TFPAEDecoder = TFPAEDecoder(self.options, config.name)
         self.decoder.wl_dim = config.wl_dim
+        self.decoder.colourlaw = config.data.colourlaw
 
         # --- Training ---
         self.built: bool = False

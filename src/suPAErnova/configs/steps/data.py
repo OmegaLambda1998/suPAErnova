@@ -68,6 +68,8 @@ class DataStepConfig(StepConfig):
     train_frac: Annotated[float, Field(ge=0, le=1)]
     seed: PositiveInt
 
+    colourlaw: Path | None
+
     @model_validator(mode="after")
     def validate_paths(self) -> Self:
         self.data_dir = self.paths.resolve_path(
@@ -96,6 +98,13 @@ class DataStepConfig(StepConfig):
                 err = f"`{field}` resolved to {field_path}, which is not a {ext} file."
                 self._raise(err)
 
+        if self.colourlaw is not None:
+            self.colourlaw = self.paths.resolve_path(
+                self.colourlaw, relative_path=self.data_dir
+            )
+            if not self.colourlaw.exists():
+                err = f"`colourlaw` resolved to {self.colourlaw}, which does not exist."
+                self._raise(err)
         return self
 
     @field_validator("cosmological_model", mode="after")
