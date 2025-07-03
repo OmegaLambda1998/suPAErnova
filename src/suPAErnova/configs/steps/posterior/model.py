@@ -25,6 +25,7 @@ class PosteriorModelConfig(AbstractModelConfig):
 
     # === Required ===
     debug: bool = False
+    profile: bool = False
 
     # === Optional ===
     seed: int

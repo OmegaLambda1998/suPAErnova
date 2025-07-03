@@ -52,6 +52,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
 
         # --- Config Variabls ---
         self.debug: bool
+        self.profile: bool
         self.savepath: Path
 
         self.nflow: NFlowModel
@@ -78,6 +79,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
     @override
     def _setup(self, *, nflow: "NFlowModel") -> None:
         self.debug = self.options.debug
+        self.profile = self.options.profile
 
         self.nflow = nflow
         self.nflow.load()

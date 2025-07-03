@@ -42,6 +42,7 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
 
         # --- Config Variabls ---
         self.debug: bool
+        self.profile: bool
         self.savepath: Path
 
         self.pae: PAEModelStep
@@ -52,6 +53,7 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
     @override
     def _setup(self, *, pae: "PAEModelStep") -> None:
         self.debug = self.options.debug
+        self.profile = self.options.profile
         self.pae = pae
         self._model(force=True)
         self.savepath = self.paths.out / self.model.name

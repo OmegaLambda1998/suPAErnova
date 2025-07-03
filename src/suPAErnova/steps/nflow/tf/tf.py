@@ -57,6 +57,7 @@ class TFNFlowModel(ks.Model):
         self.seed: int = config.options.seed
 
         self.debug: bool = self.options.debug
+        self.profile: bool = self.options.profile
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
         vars(self)["pae"]: TFPAEModel = cast("TFPAEModel", config.pae.model)
         self.pae.trainable = False
@@ -289,7 +290,7 @@ class TFNFlowModel(ks.Model):
             )
         )
 
-        if savepath is not None:
+        if self.profile and savepath is not None:
             callbacks.append(
                 ks.callbacks.TensorBoard(
                     log_dir=savepath.parent / self.log_path / savepath.stem,

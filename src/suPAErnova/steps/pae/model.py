@@ -60,6 +60,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.seperate_z_latent_training: bool
 
         self.debug: bool
+        self.profile: bool
 
         # Optional
         self.min_train_redshift: float
@@ -132,6 +133,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.seperate_z_latent_training = self.options.seperate_z_latent_training
 
         self.debug = self.options.debug
+        self.profile = self.options.profile
 
         # Optional
         self.min_train_redshift = self.options.min_train_redshift
@@ -178,6 +180,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             "all_sn_mask": self.all_sn_mask,
             "all_spec_mask": self.all_spec_mask,
             "debug": self.debug,
+            "profile": self.profile,
         }
 
         self.stage_delta_av = PAEStage.model_validate({

@@ -32,6 +32,7 @@ class PAEModelConfig(AbstractModelConfig):
 
     # === Required ===
     debug: bool = False
+    profile: bool = False
 
     @model_validator(mode="after")
     def validate_bounds(self) -> Self:

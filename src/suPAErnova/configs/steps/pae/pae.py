@@ -35,6 +35,7 @@ class PAEStage(BaseModel):
 
     epochs: PositiveInt
     debug: bool
+    profile: bool
 
     learning_rate: PositiveFloat
     learning_rate_decay_steps: PositiveInt

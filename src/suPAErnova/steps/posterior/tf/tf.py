@@ -580,6 +580,7 @@ class TFPosteriorModel(ks.Model):
         self.subset: Literal["train", "test"] = config.options.subset
 
         self.debug: bool = options.debug
+        self.profile: bool = options.profile
         # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
         vars(self)["nflow"]: TFNFlowModel = config.nflow.model
         vars(self)["pae"]: TFPAEModel = self.nflow.pae

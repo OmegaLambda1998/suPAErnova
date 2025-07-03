@@ -931,22 +931,23 @@ class TFPAEModel(ks.Model):
             )
         )
 
-        callbacks.append(
-            ks.callbacks.TensorBoard(
-                log_dir=self.stage.savepath.parent
-                / self.log_path
-                / self.stage.savepath.stem,
-                write_graph=False,
-                write_images=False,
-                write_steps_per_second=True,
-                update_freq="epoch",
-                profile_batch=(
-                    int(0.9 * n_batches_per_epoch * self.stage.epochs),
-                    int(n_batches_per_epoch * self.stage.epochs),
+        if stage.profile:
+            callbacks.append(
+                ks.callbacks.TensorBoard(
+                    log_dir=self.stage.savepath.parent
+                    / self.log_path
+                    / self.stage.savepath.stem,
+                    write_graph=False,
+                    write_images=False,
+                    write_steps_per_second=True,
+                    update_freq="epoch",
+                    profile_batch=(
+                        int(0.9 * n_batches_per_epoch * self.stage.epochs),
+                        int(n_batches_per_epoch * self.stage.epochs),
+                    ),
+                    embeddings_freq=0,
                 ),
-                embeddings_freq=0,
-            ),
-        )
+            )
 
         if self.stage.loadpath is not None:
             self.load_checkpoint(stage.loadpath)
