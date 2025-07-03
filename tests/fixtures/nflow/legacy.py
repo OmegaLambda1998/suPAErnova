@@ -161,7 +161,7 @@ def legacy_nflow_step(
     nflow_step_results["sn_name"] = data.sn_name
     nflow_step_results["spectra_id"] = data.spectra_id
 
-    inds = np.squeeze(sn_mask.astype(np.bool), axis=-1)
+    inds = np.squeeze(sn_mask.astype(np.bool_), axis=-1)
 
     # SNPAE latent ordering:
     # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅 ([0, 1, 2, 3, 4, 5])

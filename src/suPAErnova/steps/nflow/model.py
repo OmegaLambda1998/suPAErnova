@@ -98,7 +98,7 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
             mask=input_mask * all_spec_mask,
         )
 
-        inds = np.squeeze(all_sn_mask.astype(np.bool), axis=(1, 2))
+        inds = np.squeeze(all_sn_mask.astype(np.bool_), axis=(1, 2))
         latents = latents[inds]
 
         z = latents[:, 0, :4]

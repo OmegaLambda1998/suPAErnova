@@ -620,7 +620,7 @@ class TFPosteriorModel(ks.Model):
             f"{'best' if self.save_best else 'latest'}.model.checkpoint/"
         )
 
-        inds = np.squeeze(self.sn_mask.astype(np.bool), axis=(1, 2))
+        inds = np.squeeze(self.sn_mask.astype(np.bool_), axis=(1, 2))
         self.recon_error, _recon_error_edges, self.recon_error_centers = (
             self.pae.recon_error((
                 tf.convert_to_tensor(self.data.time[inds], dtype=tf.float32),
@@ -1240,7 +1240,7 @@ class TFPosteriorModel(ks.Model):
 
         initial_position = self.map.position.best
 
-        mask = np.squeeze(self.sn_mask.astype(np.bool), axis=(1, 2))
+        mask = np.squeeze(self.sn_mask.astype(np.bool_), axis=(1, 2))
 
         z_latents = self.pae.encoder(
             (self.data.time, self.data.amplitude),

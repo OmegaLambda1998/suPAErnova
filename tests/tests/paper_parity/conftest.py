@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     )
 
     N = TypeVar("N", np.number)
-    B = TypeVar("B", np.bool)
+    B = TypeVar("B", np.bool_)
     T = TypeVar("T", N | B)
 
 pytestmark = pytest.mark.paper_parity
@@ -48,7 +48,7 @@ class PaperParityUtils:
         snpae_sigma: "N | npt.NDArray[N] | None" = None,
         legacy_sigma: "N | npt.NDArray[N] | None" = None,
     ) -> tuple[
-        "npt.NDArray[np.bool]",
+        "npt.NDArray[np.bool_]",
         "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
         "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
     ]:
@@ -74,7 +74,7 @@ class PaperParityUtils:
         snpae_sigma: "N | npt.NDArray[N] | None" = None,
         legacy_sigma: "N | npt.NDArray[N] | None" = None,
     ) -> tuple[
-        "npt.NDArray[np.bool]",
+        "npt.NDArray[np.bool_]",
         "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
         "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
     ]:
@@ -91,7 +91,7 @@ class PaperParityUtils:
         snpae_sigma: "N | npt.NDArray[N] | None" = None,
         legacy_sigma: "N | npt.NDArray[N] | None" = None,
     ) -> tuple[
-        "npt.NDArray[np.bool]",
+        "npt.NDArray[np.bool_]",
         "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
         "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
     ]:
@@ -115,7 +115,7 @@ class PaperParityUtils:
         snpae_sigma: "N | npt.NDArray[N] | None" = None,
         legacy_sigma: "N | npt.NDArray[N] | None" = None,
     ) -> tuple[
-        "npt.NDArray[np.bool]",
+        "npt.NDArray[np.bool_]",
         "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
         "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
     ]:
@@ -132,7 +132,7 @@ class PaperParityUtils:
         snpae_sigma: "N | npt.NDArray[N] | None" = None,
         legacy_sigma: "N | npt.NDArray[N] | None" = None,
     ) -> tuple[
-        "npt.NDArray[np.bool]",
+        "npt.NDArray[np.bool_]",
         "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
         "Callable[[npt.NDArray[N], npt.NDArray[N]], npt.NDArray[N]]",
     ]:
@@ -156,7 +156,7 @@ class PaperParityUtils:
         snpae_sigma: "B | npt.NDArray[B] | None" = None,
         legacy_sigma: "B| npt.NDArray[B] | None" = None,
     ) -> tuple[
-        "npt.NDArray[np.bool]",
+        "npt.NDArray[np.bool_]",
         "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
         "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
     ]:
@@ -172,7 +172,7 @@ class PaperParityUtils:
         snpae_sigma: "B | npt.NDArray[B] | None" = None,
         legacy_sigma: "B| npt.NDArray[B] | None" = None,
     ) -> tuple[
-        "npt.NDArray[np.bool]",
+        "npt.NDArray[np.bool_]",
         "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
         "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
     ]:
@@ -188,7 +188,7 @@ class PaperParityUtils:
         snpae_sigma: "B | npt.NDArray[B] | None" = None,
         legacy_sigma: "B| npt.NDArray[B] | None" = None,
     ) -> tuple[
-        "npt.NDArray[np.bool]",
+        "npt.NDArray[np.bool_]",
         "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
         "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
     ]:
@@ -204,7 +204,7 @@ class PaperParityUtils:
         snpae_sigma: "B | npt.NDArray[B] | None" = None,
         legacy_sigma: "B| npt.NDArray[B] | None" = None,
     ) -> tuple[
-        "npt.NDArray[np.bool]",
+        "npt.NDArray[np.bool_]",
         "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
         "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
     ]:
@@ -220,7 +220,7 @@ class PaperParityUtils:
         snpae_sigma: "B | npt.NDArray[B] | None" = None,
         legacy_sigma: "B| npt.NDArray[B] | None" = None,
     ) -> tuple[
-        "npt.NDArray[np.bool]",
+        "npt.NDArray[np.bool_]",
         "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
         "Callable[[npt.NDArray[B], npt.NDArray[B]], npt.NDArray[B]]",
     ]:
@@ -232,7 +232,7 @@ class PaperParityUtils:
     def context(
         snpae: "npt.NDArray[T]",
         legacy: "npt.NDArray[T]",
-        diff_mask: "npt.NDArray[np.bool]",
+        diff_mask: "npt.NDArray[np.bool_]",
         sum_fn: "Callable[[npt.NDArray[T], npt.NDArray[T]], npt.NDArray[T]]",
         diff_fn: "Callable[[npt.NDArray[T], npt.NDArray[T]], npt.NDArray[T]]",
         metadata: dict[str, "Any"],

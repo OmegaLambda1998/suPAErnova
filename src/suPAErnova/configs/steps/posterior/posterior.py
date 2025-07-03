@@ -55,7 +55,7 @@ class PosteriorMapStage(BaseModel):
 
 class PosteriorStepMAPResult(AbstractStepResult):
     chain_min: npt.NDArray[np.int32]
-    converged: npt.NDArray[np.bool]
+    converged: npt.NDArray[np.bool_]
     num_evaluations: int
     negative_log_prob: npt.NDArray[np.float32]
 
