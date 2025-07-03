@@ -2,7 +2,6 @@ name: suPAErnova
 dependencies:
   - astropy
   - cairocffi
-  - chainconsumer
   - click
   - coloredlogs
   - matplotlib
@@ -15,4 +14,8 @@ dependencies:
   - tf-keras>=2.18,<2.19
   - tensorflow-probability>=0.25
   - tensorboard>=2.18,<2.19
-  - tensorboard_plugin_profile>2.20
+  - pip
+  - pip:
+    - -e .
+    - chainconsumer
+    - tensorboard_plugin_profile>2.20
