@@ -906,6 +906,10 @@ class TFPAEModel(ks.Model):
         # === Setup Callbacks ===
         callbacks: list[ks.callbacks.Callback] = []
 
+        # --- Terminate on NaN ---
+        # Terminate training when a NaN loss is encountered
+        callbacks.append(ks.callbacks.TerminateOnNaN())
+
         # --- Backup & Restore ---
         # Backup checkpoints each epoch and restore if training got cancelled midway through
         if not self.force and self.stage.savepath is not None:
@@ -915,10 +919,6 @@ class TFPAEModel(ks.Model):
                 save_freq=max(1, int(0.1 * self.stage.epochs * n_batches_per_epoch)),
             )
             callbacks.append(backup_callback)
-
-        # --- Terminate on NaN ---
-        # Terminate training when a NaN loss is encountered
-        callbacks.append(ks.callbacks.TerminateOnNaN())
 
         # --- TQDM Progress Bar ---
         callbacks.append(
@@ -939,12 +939,10 @@ class TFPAEModel(ks.Model):
                     / self.stage.savepath.stem,
                     write_graph=False,
                     write_images=False,
-                    write_steps_per_second=True,
+                    write_steps_per_second=False,
                     update_freq="epoch",
-                    profile_batch=(
-                        int(0.9 * n_batches_per_epoch * self.stage.epochs),
-                        int(n_batches_per_epoch * self.stage.epochs),
-                    ),
+                    # Profile the last third
+                    # profile_batch=f"{int(0.66 * n_batches_per_epoch * self.stage.epochs)},{int(0.99 * n_batches_per_epoch * self.stage.epochs)}",
                     embeddings_freq=0,
                 ),
             )
