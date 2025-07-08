@@ -251,28 +251,28 @@ class PaperParityUtils:
 
         # Element-wise comparison
         diff_indices = np.argwhere(diff_mask)
-
-        # Summary Statistics
-        diff = diff_fn(snpae, legacy)[diff_mask]
-        abs_diff = np.abs(diff)
-        min_abs_diff = abs_diff.min()
-        max_abs_diff = abs_diff.max()
-        mean_abs_diff = abs_diff.mean()
-        std_abs_diff = abs_diff.std()
-        abs_sort_mask = np.argsort(abs_diff)[::-1]
-
-        rel_diff = 2 * diff / sum_fn(snpae, legacy)[diff_mask]
-        min_rel_diff = rel_diff.min()
-        max_rel_diff = rel_diff.max()
-        mean_rel_diff = rel_diff.mean()
-        std_rel_diff = rel_diff.std()
-        rel_sort_mask = np.argsort(rel_diff)[::-1]
-
         s += f"{len(diff_indices)} differences ({int(100 * len(diff_indices) / diff_mask.size)}%):\n"
-        s += f"Absolute Difference - min: {min_abs_diff:.2f}, max: {max_abs_diff:.2f}, mean±std: {mean_abs_diff:.2f}±{std_abs_diff:.2f}\n"
-        s += f"Relative Difference - min: {min_rel_diff:.2%}, max: {max_rel_diff:.2%}, mean±std: {mean_rel_diff:.2%}±{std_rel_diff:.2%}\n"
 
         if sort:
+            # Summary Statistics
+            diff = diff_fn(snpae, legacy)[diff_mask]
+            abs_diff = np.abs(diff)
+            min_abs_diff = abs_diff.min()
+            max_abs_diff = abs_diff.max()
+            mean_abs_diff = abs_diff.mean()
+            std_abs_diff = abs_diff.std()
+            abs_sort_mask = np.argsort(abs_diff)[::-1]
+
+            rel_diff = 2 * diff / sum_fn(snpae, legacy)[diff_mask]
+            min_rel_diff = rel_diff.min()
+            max_rel_diff = rel_diff.max()
+            mean_rel_diff = rel_diff.mean()
+            std_rel_diff = rel_diff.std()
+            rel_sort_mask = np.argsort(rel_diff)[::-1]
+
+            s += f"Absolute Difference - min: {min_abs_diff:.2f}, max: {max_abs_diff:.2f}, mean±std: {mean_abs_diff:.2f}±{std_abs_diff:.2f}\n"
+            s += f"Relative Difference - min: {min_rel_diff:.2%}, max: {max_rel_diff:.2%}, mean±std: {mean_rel_diff:.2%}±{std_rel_diff:.2%}\n"
+
             indices = (
                 list(diff_indices[abs_sort_mask][:max_diffs])
                 + list(diff_indices[rel_sort_mask][:max_diffs])
@@ -291,14 +291,17 @@ class PaperParityUtils:
             )
             data_val_sigma = None if data_sigma is None else data_sigma[tuple(idx)]
 
-            # Summary Statistics
-            val_diff = diff_fn(snpae_val, legacy_val)
-            abs_val_diff = abs(val_diff)
-            rel_val_diff = 2 * val_diff / sum_fn(snpae_val, legacy_val)
-
             s += f"  At index {[int(i) for i in tuple(idx)]}{f' ({spectra[idx[0]][idx[1]][0]})' if spectra is not None else ''}:\n"
-            s += f"    snpae = {snpae_val:.4f}{f'±{snpae_val_sigma:.4f}' if snpae_val_sigma is not None else ''}, legacy = {legacy_val:.4f}{f'±{legacy_val_sigma:.4f}' if legacy_val_sigma is not None else ''}{f', data = {data_val:.4f}{f"±{data_val_sigma:.4f}" if data_val_sigma is not None else ""}' if data_val is not None else ''}\n"
-            s += f"    abs diff = {abs_val_diff:.2f}, rel diff = {rel_val_diff:.2%}\n"
+
+            # Summary Statistics
+            if sort:
+                s += f"    snpae = {snpae_val:.4f}{f'±{snpae_val_sigma:.4f}' if snpae_val_sigma is not None else ''}, legacy = {legacy_val:.4f}{f'±{legacy_val_sigma:.4f}' if legacy_val_sigma is not None else ''}{f', data = {data_val:.4f}{f"±{data_val_sigma:.4f}" if data_val_sigma is not None else ""}' if data_val is not None else ''}\n"
+                val_diff = diff_fn(snpae_val, legacy_val)
+                abs_val_diff = abs(val_diff)
+                rel_val_diff = 2 * val_diff / sum_fn(snpae_val, legacy_val)
+                s += f"    abs diff = {abs_val_diff:.2f}, rel diff = {rel_val_diff:.2%}\n"
+            else:
+                s += f"    snpae = {snpae_val}, legacy = {legacy_val}\n"
 
         if len(diff_indices) > max_diffs:
             s += f"... and {len(diff_indices) - max_diffs} more differences.\n"
@@ -311,7 +314,7 @@ class PaperParityUtils:
         legacy: "npt.NDArray[Any]",
         *,
         max_diffs: int = 5,
-        sort: bool = True,
+        sort: bool | None = None,
         spectra: "npt.NDArray[np.str_] | None" = None,
         snpae_sigma: "npt.NDArray[Any] | None" = None,
         legacy_sigma: "npt.NDArray[Any] | None" = None,
@@ -329,6 +332,11 @@ class PaperParityUtils:
         diff_mask, sum_fn, diff_fn = compare(
             snpae, legacy, snpae_sigma=snpae_sigma, legacy_sigma=legacy_sigma
         )
+
+        if sort is None:
+            sort = np.issubdtype(snpae.dtype, np.number) and np.issubdtype(
+                legacy.dtype, np.number
+            )
 
         assert diff_mask.all(), PaperParityUtils.context(
             snpae,
@@ -358,6 +366,7 @@ def utils() -> PaperParityUtils:
 @pytest.fixture(scope="module")
 def data_params() -> "DataParams":
     return {
+        "name": "PaperParityData",
         "analysis": {
             "plot_summary": {
                 "filter": {
@@ -383,8 +392,6 @@ def snpae_data(
     snpae_data_result_factory: "DataResultFactory",
 ) -> "DataStepResults":
     result = snpae_data_result_factory(data_params)
-    if result.metadata is None:
-        result.metadata = {}
     gc.collect()
     return result
 
@@ -395,8 +402,6 @@ def legacy_data(
     legacy_data_result_factory: "DataResultFactory",
 ) -> "DataStepResults":
     result = legacy_data_result_factory(data_params)
-    if result.metadata is None:
-        result.metadata = {}
     gc.collect()
     return result
 
@@ -409,6 +414,7 @@ def pae_params(
     data_path: "Path",
 ) -> "PAEParams":
     return {
+        "name": "PaperParityPAE",
         "analysis": {
             "plot_residual": {
                 "filter": {
@@ -418,12 +424,14 @@ def pae_params(
             },
             "plot_latents": {},
         },
+        "debug": False,
         "profile": True,
         "fname": "paper_parity",
         "validation_frac": 0,
         "save_best": False,
         "batch_size": 57,  # Only correct for the SNFactory data
         "val_every": 100,
+        "patience": 0.1,
         # Epochs
         "delta_av_epochs": 1000,
         "zs_epochs": 1000,
@@ -515,10 +523,13 @@ def snpae_pae(
 ) -> "PAEStepResults":
     pae_params["kfold"], pae_params["seed"] = seed
     results = snpae_pae_result_factory(data_params, pae_params)
-    for result in results.values():
-        if result.metadata is None:
-            result.metadata = {}
-        result.metadata["seed"] = pae_params["seed"]
+    for dt, stages in results.items():
+        for stage, result in stages.items():
+            if result.metadata is None:
+                result.metadata = {}
+            result.metadata["seed"] = pae_params["seed"]
+            result.metadata["dt"] = dt
+            result.metadata["stage"] = stage
     gc.collect()
     return results
 
@@ -546,28 +557,34 @@ def legacy_pae(
 @pytest.fixture(scope="module")
 def nflow_params(pae_params: "PAEParams") -> "NFlowParams":
     return {
+        "name": "PaperParityNFlow",
         "analysis": {
             "plot_z_latents": {},
             "plot_u_latents": {},
             "plot_latents": {},
             "plot_latent_steps": {},
         },
+        "debug": False,
         "profile": True,
         "fname": "paper_parity",
         "n_z_latents": pae_params["n_z_latents"],
         "encode_dims": pae_params["encode_dims"],
         "save_best": pae_params["save_best"],
         "batch_size": pae_params["batch_size"],
-        "learning_rate": 0.001,
+        "scheduler": "ExponentialDecay",
+        "lr": 0.1 * pae_params["final_lr"],
+        "lr_decay_steps": pae_params["final_lr_decay_steps"],
+        "lr_decay_rate": pae_params["final_lr_decay_rate"],
+        "lr_weight_decay_rate": pae_params["final_lr_weight_decay_rate"],
         "physical_latents": True,
-        "n_hidden_units": 8,
-        "n_layers": 12,
-        "patience": 30,
-        "epochs": 500,
+        "n_hidden_units": 12,
+        "n_layers": 18,
+        "patience": 0.025,
+        "epochs": 5000,
         "batch_normalisation": False,
         "validation_frac": 0.22,
         "activation": "relu",
-        "optimiser": "Adam",
+        "optimiser": "AdamW",
     }
 
 
@@ -581,12 +598,14 @@ def snpae_nflow(
 ) -> "NFlowStepResults":
     pae_params["kfold"], pae_params["seed"] = seed
     nflow_params["kfold"], nflow_params["seed"] = seed
-    result = snpae_nflow_result_factory(data_params, pae_params, nflow_params)
-    if result.metadata is None:
-        result.metadata = {}
-    result.metadata["seed"] = nflow_params["seed"]
+    results = snpae_nflow_result_factory(data_params, pae_params, nflow_params)
+    for dt, result in results.items():
+        if result.metadata is None:
+            result.metadata = {}
+        result.metadata["seed"] = nflow_params["seed"]
+        result.metadata["dt"] = dt
     gc.collect()
-    return result
+    return results
 
 
 @pytest.fixture(scope="module")
@@ -615,6 +634,7 @@ def posterior_params(
     pae_params: "PAEParams", nflow_params: "NFlowParams"
 ) -> "PosteriorParams":
     return {
+        "name": "PaperParityPosterior",
         "analysis": {
             "plot_map_init": {},
             "plot_map_best": {},
@@ -640,6 +660,7 @@ def posterior_params(
                 },
             ],
         },
+        "debug": False,
         "profile": True,
         "fname": "paper_parity",
         "n_z_latents": pae_params["n_z_latents"],

@@ -68,14 +68,22 @@ class TFNFlowModel(ks.Model):
         self.built: bool = False
         self.batch_size: int = self.options.batch_size
         self.save_best: bool = self.options.save_best
-        self.patience: float = self.options.patience
+        self.patience: int = self.options.patience
         self.validation_frac: float = self.options.validation_frac
         self.ckpt_path: str = (
             f"{'best' if self.save_best else 'latest'}.model.checkpoint/"
         )
         self.log_path: str = f"{'best' if self.save_best else 'latest'}_logs/"
 
+        self.lr: float = self.options.lr
+        self.lr_decay_steps: float = self.options.lr_decay_steps
+        self.lr_decay_rate: float = self.options.lr_decay_rate
+        self.lr_weight_decay_rate: float = self.options.lr_weight_decay_rate
+
         self.activation: Callable[[tf.Tensor], tf.Tensor] = self.options.activation_fn
+        self._scheduler: type[ks.optimizers.schedules.LearningRateSchedule] = (
+            self.options.scheduler_cls
+        )
         self._optimiser: type[ks.optimizers.Optimizer] = self.options.optimiser_cls
         loss: ks.losses.Loss = self.options.loss_cls()
         loss.model = self
@@ -97,11 +105,11 @@ class TFNFlowModel(ks.Model):
                 "Can't include physical latents (ΔAᵥ) in NFlow model as it wasn't included in PAE model."
             )
 
-        self.learning_rate: float = self.options.learning_rate
         self.epochs: int = self.options.epochs
         self._epoch: int = 0
 
-        self.data: "NFlowInputs"
+        self.train_data: "NFlowInputs"
+        self.test_data: "NFlowInputs"
 
         # --- Latent Dimensions ---
         self.n_u_latents: NULatents = self.pae.n_z_latents
@@ -225,7 +233,7 @@ class TFNFlowModel(ks.Model):
         self, inputs: "NFlowInputs", step: int, *, permute: bool = False
     ) -> tuple["NFlowInputs", bool]:
         if step <= 0:
-            return tf.convert_to_tensor(inputs), False
+            return tf.convert_to_tensor(inputs, dtype=tf.float32), False
         bijectors = self.flow.bijector.bijectors
         step = max(1, step)
         shift = 0
@@ -257,7 +265,7 @@ class TFNFlowModel(ks.Model):
     ) -> ks.callbacks.History:
         self.build_model()
 
-        n_batches_per_epoch = self.data.shape[0] / self.batch_size
+        n_batches_per_epoch = self.train_data.shape[0] / self.batch_size
 
         # === Setup Callbacks ===
         callbacks: list[ks.callbacks.Callback] = []
@@ -276,6 +284,34 @@ class TFNFlowModel(ks.Model):
         # Terminate training when a NaN loss is encountered
         callbacks.append(ks.callbacks.TerminateOnNaN())
 
+        patience = self.patience
+        if isinstance(patience, float):
+            patience = int(self.epochs * patience)
+        callbacks.append(
+            ks.callbacks.EarlyStopping(
+                monitor="val_loss",
+                patience=patience,
+                mode="min",
+                start_from_epoch=patience,
+            )
+        )
+
+        if self.profile and savepath is not None:
+            callbacks.append(
+                ks.callbacks.TensorBoard(
+                    log_dir=savepath.parent / self.log_path / savepath.stem,
+                    write_graph=False,
+                    write_images=False,
+                    write_steps_per_second=False,
+                    update_freq="epoch",
+                    profile_batch=(
+                        int(n_batches_per_epoch * self.epochs * 0.1),
+                        int(n_batches_per_epoch * self.epochs * 0.1) + 10,
+                    ),
+                    embeddings_freq=0,
+                ),
+            )
+
         # --- TQDM Progress Bar ---
         callbacks.append(
             cast(
@@ -290,36 +326,22 @@ class TFNFlowModel(ks.Model):
             )
         )
 
-        if self.profile and savepath is not None:
-            callbacks.append(
-                ks.callbacks.TensorBoard(
-                    log_dir=savepath.parent / self.log_path / savepath.stem,
-                    write_graph=False,
-                    write_images=False,
-                    write_steps_per_second=True,
-                    update_freq="epoch",
-                    profile_batch=(
-                        int(0.9 * n_batches_per_epoch * self.epochs),
-                        int(n_batches_per_epoch * self.epochs),
-                    ),
-                    embeddings_freq=0,
-                ),
-            )
-
         # === Train ===
         self._epoch = 0
-        self.set_seed()
+        self.set_seed(self._epoch)
         return self.fit(
-            x=self.data,
-            y=tf.zeros_like(self.data, dtype=tf.float32),
-            validation_split=self.validation_frac,
-            batch_size=self.batch_size,
-            epochs=self.epochs,
+            x=self.train_data,
+            y=tf.zeros_like(self.train_data, dtype=tf.float32),
             initial_epoch=self._epoch,
-            # steps_per_epoch=self.data.shape[0] // self.batch_size,
-            shuffle=True,
+            epochs=self.epochs,
+            batch_size=self.batch_size,
             callbacks=callbacks,
             verbose=0,
+            validation_data=(
+                self.test_data,
+                tf.zeros_like(self.test_data, dtype=tf.float32),
+            ),
+            validation_freq=1,
         )
 
     def get_data(
@@ -337,27 +359,73 @@ class TFNFlowModel(ks.Model):
     def build_model(self) -> None:
         if not self.built:
             # === Prep Data ===
-            train_phase = tf.convert_to_tensor(self.pae.stage.train_data.time)
-            train_amplitude = tf.convert_to_tensor(self.pae.stage.train_data.amplitude)
-            train_mask = tf.convert_to_tensor(self.pae.stage.train_data.mask)
-            train_sn_mask = tf.convert_to_tensor(self.pae.stage.train_sn_mask)
-            train_spec_mask = tf.convert_to_tensor(self.pae.stage.train_spec_mask)
-            latents = self.pae.encoder(
-                (train_phase, train_amplitude),
+            train_phase = tf.convert_to_tensor(
+                self.pae.stage.train_data.time, dtype=tf.float32
+            )
+            train_amplitude = tf.convert_to_tensor(
+                self.pae.stage.train_data.amplitude, dtype=tf.float32
+            )
+            train_mask = tf.convert_to_tensor(
+                self.pae.stage.train_data.mask, dtype=tf.int32
+            )
+            train_sn_mask = tf.convert_to_tensor(
+                self.pae.stage.train_sn_mask, dtype=tf.int32
+            )
+            train_spec_mask = tf.convert_to_tensor(
+                self.pae.stage.train_spec_mask, dtype=tf.int32
+            )
+
+            train_pae_input = tf.concat((train_phase, train_amplitude), axis=-1)
+            train_latents = self.pae.encoder(
+                train_pae_input,
                 training=False,
                 mask=train_mask * train_spec_mask,
             )
-            inds = tf.squeeze(tf.cast(train_sn_mask, tf.bool), axis=(1, 2))
-            train_latents = tf.boolean_mask(latents, inds)
-            self.data = self.get_data(train_latents)
-            self.build(self.data.shape)
+            train_inds = tf.squeeze(tf.cast(train_sn_mask, tf.bool), axis=(1, 2))
+            train_latents = tf.boolean_mask(train_latents, train_inds)
+            self.train_data = self.get_data(train_latents)
 
-            optimiser = self._optimiser(
-                learning_rate=self.learning_rate,
+            test_phase = tf.convert_to_tensor(
+                self.pae.stage.test_data.time, dtype=tf.float32
             )
+            test_amplitude = tf.convert_to_tensor(
+                self.pae.stage.test_data.amplitude, dtype=tf.float32
+            )
+            test_mask = tf.convert_to_tensor(
+                self.pae.stage.test_data.mask, dtype=tf.int32
+            )
+            test_sn_mask = tf.convert_to_tensor(
+                self.pae.stage.test_sn_mask, dtype=tf.int32
+            )
+            test_spec_mask = tf.convert_to_tensor(
+                self.pae.stage.test_spec_mask, dtype=tf.int32
+            )
+
+            test_pae_input = tf.concat((test_phase, test_amplitude), axis=-1)
+            test_latents = self.pae.encoder(
+                test_pae_input,
+                training=False,
+                mask=test_mask * test_spec_mask,
+            )
+            test_inds = tf.squeeze(tf.cast(test_sn_mask, tf.bool), axis=(1, 2))
+            test_latents = tf.boolean_mask(test_latents, test_inds)
+            self.test_data = self.get_data(test_latents)
+
+            self.build(self.train_data.shape)
+
+            schedule = self._scheduler(
+                initial_learning_rate=self.lr,
+                decay_steps=self.lr_decay_steps,
+                decay_rate=self.lr_decay_rate,
+            )
+            optimiser = self._optimiser(
+                learning_rate=schedule,
+                weight_decay=self.lr_weight_decay_rate,
+            )
+
             loss = self._loss
             self.compile(optimizer=optimiser, loss=loss, run_eagerly=self.debug)
-            dummy = self(self.data, training=False)
+            dummy = self(self.train_data, training=False)
 
             self.log.debug("Trainable variables:")
             for var in self.trainable_variables:

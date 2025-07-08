@@ -109,7 +109,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.stage_final: PAEStage
         self.run_stages: list[PAEStage]
 
-        self.results: dict[str, PAEStepResult]
+        self.results: dict[str, dict[str, PAEStepResult]]
         self.analysis: tuple[PAEStepAnalysis] = self.options.analysis
 
     @override
@@ -328,69 +328,73 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.model.save_checkpoint(final_savepath)
 
         self.log.debug("Calculating PAE results")
-        data = self.all_data
-        model_results: dict[str, PAEStepResult] = {}
+        dt_results: dict[str, dict[str, PAEStepResult]] = {}
+        for dt in ["train", "test"]:
+            data = getattr(self, f"{dt}_data")
+            model_results: dict[str, PAEStepResult] = {}
+            for stage in self.run_stages:
+                self._model(force=True)
+                savepath = (
+                    self.paths.out / self.model.name / f"{stage.stage}_{stage.fname}"
+                )
+                stage.prev_stage = None
+                self.model.stage = stage
+                self.model.load_checkpoint(savepath, reset_weights=False)
 
-        for stage in self.run_stages:
-            self._model(force=True)
-            savepath = self.paths.out / self.model.name / f"{stage.stage}_{stage.fname}"
-            stage.prev_stage = None
-            self.model.stage = stage
-            self.model.load_checkpoint(savepath, reset_weights=False)
+                input_phase = data.time
+                input_amplitude = data.amplitude
+                input_d_amplitude = data.sigma
+                input_mask = data.mask
 
-            input_phase = data.time
-            input_amplitude = data.amplitude
-            input_d_amplitude = data.sigma
-            input_mask = data.mask
+                mask = (
+                    input_mask
+                    * getattr(self.model.stage, f"{dt}_sn_mask")
+                    * getattr(self.model.stage, f"{dt}_spec_mask")
+                )
 
-            mask = (
-                input_mask
-                * self.model.stage.all_sn_mask
-                * self.model.stage.all_spec_mask
-            )
+                latents, output_amplitude = self.model(
+                    (input_phase, input_amplitude), training=False, mask=mask
+                )
 
-            latents, output_amplitude = self.model(
-                (input_phase, input_amplitude), training=False, mask=mask
-            )
+                loss = self.model.compute_loss(
+                    latents,
+                    input_amplitude,
+                    output_amplitude,
+                    sample_weight=input_d_amplitude,
+                    training=False,
+                    mask=mask,
+                )
 
-            loss = self.model.compute_loss(
-                latents,
-                input_amplitude,
-                output_amplitude,
-                sample_weight=input_d_amplitude,
-                training=False,
-                mask=mask,
-            )
+                pred_loss = self.model.get_loss("loss_pred")
+                model_loss = self.model.get_loss("loss_model")
+                resid_loss = self.model.get_loss("loss_resid")
+                delta_loss = self.model.get_loss("loss_delta")
+                cov_loss = self.model.get_loss("loss_cov")
 
-            pred_loss = self.model.get_loss("loss_pred")
-            model_loss = self.model.get_loss("loss_model")
-            resid_loss = self.model.get_loss("loss_resid")
-            delta_loss = self.model.get_loss("loss_delta")
-            cov_loss = self.model.get_loss("loss_cov")
-
-            results = {
-                "stage": stage.stage,
-                "ind": data.ind,
-                "sn_name": data.sn_name,
-                "spectra_id": data.spectra_id,
-                "input_amp": data.amplitude,
-                "input_d_amp": data.sigma,
-                "input_phase": data.time,
-                "input_mask": mask,
-                "input_colourlaw": self.model.decoder.colourlaw,
-                "latents": latents.numpy()[:, 0, :],
-                "output_amp": output_amplitude.numpy(),
-                "diff_amp": np.abs(input_amplitude - output_amplitude.numpy()),
-                "loss": loss,
-                "pred_loss": pred_loss,
-                "model_loss": model_loss,
-                "resid_loss": resid_loss,
-                "delta_loss": delta_loss,
-                "cov_loss": cov_loss,
-            }
-            stage_results = PAEStepResult.model_validate(results)
-            model_results[str(stage.stage)] = stage_results
-        self.results = model_results
+                results = {
+                    "stage": stage.stage,
+                    "ind": data.ind,
+                    "sn_name": data.sn_name,
+                    "spectra_id": data.spectra_id,
+                    "input_amp": data.amplitude,
+                    "input_d_amp": data.sigma,
+                    "input_phase": data.time,
+                    "input_mask": np.array(mask),
+                    "input_colourlaw": self.model.decoder.colourlaw,
+                    "latents": latents.numpy()[:, 0, :],
+                    "output_amp": output_amplitude.numpy(),
+                    "diff_amp": np.abs(input_amplitude - output_amplitude.numpy()),
+                    "loss": loss,
+                    "pred_loss": pred_loss,
+                    "model_loss": model_loss,
+                    "resid_loss": resid_loss,
+                    "delta_loss": delta_loss,
+                    "cov_loss": cov_loss,
+                }
+                stage_results = PAEStepResult.model_validate(results)
+                model_results[str(stage.stage)] = stage_results
+            dt_results[dt] = model_results
+        self.results = dt_results
 
     @override
     def _analyse(self) -> None:
@@ -405,7 +409,59 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
             labels[ind] = f"z{i}"
             ind += 1
 
-        for stage in self.run_stages:
+        for dt in ["train", "test"]:
+            for stage in self.run_stages:
+                if self.analysis.plot_residual is not None:
+                    if not isinstance(self.analysis.plot_residual, list):
+                        self.analysis.plot_residual = [self.analysis.plot_residual]
+                    for opts in self.analysis.plot_residual:
+                        o = opts.model_copy()
+                        if o.name is None:
+                            o.name = "residual"
+                        if o.savepath is None:
+                            o.savepath = (
+                                self.paths.out
+                                / "plots"
+                                / dt
+                                / str(self.model.seed)
+                                / str(stage.stage)
+                            )
+                        o.savepath.mkdir(parents=True, exist_ok=True)
+                        SpectraPlotter.plot_residual(
+                            getattr(self, f"{dt}_data"),
+                            self.results[dt][str(stage.stage)].output_amp,
+                            o,
+                        )
+
+                if self.analysis.plot_latents is not None:
+                    if not isinstance(self.analysis.plot_latents, list):
+                        self.analysis.plot_latents = [self.analysis.plot_latents]
+                    for opts in self.analysis.plot_latents:
+                        o = opts.model_copy()
+                        if o.labels is None:
+                            o.labels = {i: labels[i] for i in range(stage.stage)}
+                        if o.name is None:
+                            o.name = "latents"
+                        if o.savepath is None:
+                            o.savepath = (
+                                self.paths.out
+                                / "plots"
+                                / dt
+                                / str(self.model.seed)
+                                / str(stage.stage)
+                            )
+                        o.savepath.mkdir(parents=True, exist_ok=True)
+                        chains = self.results[dt][str(stage.stage)].latents[
+                            :, : stage.stage
+                        ]
+                        DistributionPlotter.plot_corner(
+                            chains,
+                            o,
+                            statistics="max_central",
+                            shade_alpha=0.0,
+                            plot_cloud=True,
+                        )
+
             if self.analysis.plot_residual is not None:
                 if not isinstance(self.analysis.plot_residual, list):
                     self.analysis.plot_residual = [self.analysis.plot_residual]
@@ -415,17 +471,30 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                         o.name = "residual"
                     if o.savepath is None:
                         o.savepath = (
-                            self.paths.out
-                            / "plots"
-                            / str(self.model.seed)
-                            / str(stage.stage)
+                            self.paths.out / "plots" / dt / str(self.model.seed)
                         )
                     o.savepath.mkdir(parents=True, exist_ok=True)
-                    SpectraPlotter.plot_residual(
-                        self.data.data,
-                        self.results[str(stage.stage)].output_amp,
-                        o,
-                    )
+
+                    savepath = (o.savepath or Path()) / f"{o.name}.{o.ext}"
+                    if not savepath.exists():
+                        fig, ax = SpectraPlotter.plot_residual(
+                            getattr(self, f"{dt}_data"),
+                            self.results[dt][str(self.run_stages[0].stage)].output_amp,
+                            o,
+                            save=False,
+                        )
+                        for stage in self.run_stages[1:]:
+                            fig, ax = SpectraPlotter.plot_residual(
+                                getattr(self, f"{dt}_data"),
+                                self.results[dt][str(stage.stage)].output_amp,
+                                o,
+                                fig=fig,
+                                ax=ax,
+                                save=False,
+                            )
+
+                        fig = Plotter.save(fig, savepath)
+                        Plotter.close(fig, ax)
 
             if self.analysis.plot_latents is not None:
                 if not isinstance(self.analysis.plot_latents, list):
@@ -433,18 +502,23 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                 for opts in self.analysis.plot_latents:
                     o = opts.model_copy()
                     if o.labels is None:
-                        o.labels = {i: labels[i] for i in range(stage.stage)}
+                        o.labels = {
+                            stage.name: {i: labels[i] for i in range(stage.stage)}
+                            for stage in self.run_stages
+                        }
                     if o.name is None:
                         o.name = "latents"
                     if o.savepath is None:
                         o.savepath = (
-                            self.paths.out
-                            / "plots"
-                            / str(self.model.seed)
-                            / str(stage.stage)
+                            self.paths.out / "plots" / dt / str(self.model.seed)
                         )
                     o.savepath.mkdir(parents=True, exist_ok=True)
-                    chains = self.results[str(stage.stage)].latents[:, : stage.stage]
+
+                    chains = {
+                        stage.name: self.results[dt][str(stage.stage)].latents
+                        for stage in self.run_stages
+                    }
+
                     DistributionPlotter.plot_corner(
                         chains,
                         o,
@@ -452,67 +526,6 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                         shade_alpha=0.0,
                         plot_cloud=True,
                     )
-
-        if self.analysis.plot_residual is not None:
-            if not isinstance(self.analysis.plot_residual, list):
-                self.analysis.plot_residual = [self.analysis.plot_residual]
-            for opts in self.analysis.plot_residual:
-                o = opts.model_copy()
-                if o.name is None:
-                    o.name = "residual"
-                if o.savepath is None:
-                    o.savepath = self.paths.out / "plots" / str(self.model.seed)
-                o.savepath.mkdir(parents=True, exist_ok=True)
-
-                savepath = (o.savepath or Path()) / f"{o.name}.{o.ext}"
-                if not savepath.exists():
-                    fig, ax = SpectraPlotter.plot_residual(
-                        self.data.data,
-                        self.results[str(self.run_stages[0].stage)].output_amp,
-                        o,
-                        save=False,
-                    )
-                    for stage in self.run_stages[1:]:
-                        fig, ax = SpectraPlotter.plot_residual(
-                            self.data.data,
-                            self.results[str(stage.stage)].output_amp,
-                            o,
-                            fig=fig,
-                            ax=ax,
-                            save=False,
-                        )
-
-                    fig = Plotter.save(fig, savepath)
-                    Plotter.close(fig, ax)
-
-        if self.analysis.plot_latents is not None:
-            if not isinstance(self.analysis.plot_latents, list):
-                self.analysis.plot_latents = [self.analysis.plot_latents]
-            for opts in self.analysis.plot_latents:
-                o = opts.model_copy()
-                if o.labels is None:
-                    o.labels = {
-                        stage.name: {i: labels[i] for i in range(stage.stage)}
-                        for stage in self.run_stages
-                    }
-                if o.name is None:
-                    o.name = "latents"
-                if o.savepath is None:
-                    o.savepath = self.paths.out / "plots" / str(self.model.seed)
-                o.savepath.mkdir(parents=True, exist_ok=True)
-
-                chains = {
-                    stage.name: self.results[str(stage.stage)].latents
-                    for stage in self.run_stages
-                }
-
-                DistributionPlotter.plot_corner(
-                    chains,
-                    o,
-                    statistics="max_central",
-                    shade_alpha=0.0,
-                    plot_cloud=True,
-                )
 
     #
     # === PAEModel Specific Functions ===

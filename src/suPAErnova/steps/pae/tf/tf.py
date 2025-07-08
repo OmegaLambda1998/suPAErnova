@@ -1,6 +1,5 @@
 # Copyright 2025 Patrick Armstrong
 import os
-import random as rn
 from typing import (
     TYPE_CHECKING,
     Self,
@@ -104,9 +103,7 @@ class TFPAEEncoder(ks.layers.Layer):
 
     @override
     def build(self, input_shape: "EncoderInputsShape") -> None:
-        (_batch_dim, spec_dim, _phase_dim), (_batch_dim, _spec_dim, _wl_dim) = (
-            input_shape
-        )
+        (_batch_dim, spec_dim, _encoder_dim) = input_shape
 
         # Encode from input layer dimensions into intermediate dimensions
         self.encode_layers = [
@@ -165,8 +162,8 @@ class TFPAEEncoder(ks.layers.Layer):
     ) -> "EncoderOutputs":
         training = False if training is None else training
 
-        input_phase = inputs[0]
-        input_amp = inputs[1]
+        input_phase = inputs[..., :1]
+        input_amp = inputs[..., 1:]
         input_mask = (
             mask if mask is not None else tf.ones_like(input_amp, dtype=tf.int32)
         )
@@ -297,10 +294,7 @@ class TFPAEDecoder(ks.layers.Layer):
 
     @override
     def build(self, input_shape: "DecoderInputsShape") -> None:
-        (
-            (_batch_dim, spec_dim, _n_pae_latents),
-            (_batch_dim, _spec_dim, _phase_dim),
-        ) = input_shape
+        (_batch_dim, spec_dim, _decoder_dim) = input_shape
         # Project from input dimensions into spec_dim dimensions
         self.decode_spec_layer = ks.layers.Dense(
             spec_dim,
@@ -362,8 +356,8 @@ class TFPAEDecoder(ks.layers.Layer):
     ) -> "DecoderOutputs":
         training = False if training is None else training
 
-        input_latents = inputs[0]
-        input_phase = inputs[1]
+        input_phase = inputs[..., :1]
+        input_latents = inputs[..., 1:]
         input_mask = (
             mask
             if mask is not None
@@ -479,6 +473,7 @@ class TFPAEModel(ks.Model):
 
         self.batch_size: int = self.options.batch_size
         self.save_best: bool = self.options.save_best
+        self.patience: int | float = self.options.patience
         self.ckpt_path: str = (
             f"{'best' if self.save_best else 'latest'}.model.checkpoint/"
         )
@@ -619,11 +614,13 @@ class TFPAEModel(ks.Model):
         mask: "GenericTensor | None" = None,
     ) -> "tuple[EncoderOutputs, DecoderOutputs]":
         training = False if training is None else training
-        input_phase = inputs[0]
-
+        input_phase = inputs[..., :1]
         encoded: EncoderOutputs = self.encoder(inputs, training=training, mask=mask)
+
+        decoder_inputs = tf.concat((input_phase, encoded), axis=-1)
+
         decoded: DecoderOutputs = self.decoder(
-            (encoded, input_phase), training=training, mask=mask
+            decoder_inputs, training=training, mask=mask
         )
         return encoded, decoded
 
@@ -636,6 +633,8 @@ class TFPAEModel(ks.Model):
         mask: "GenericTensor | None" = None,
     ) -> "tuple[EncoderOutputs, DecoderOutputs]":
         training = False if training is None else training
+        if isinstance(inputs, tuple):
+            inputs = tf.concat(inputs, axis=-1)
         return super().__call__(inputs, training=training, mask=mask)
 
     @override
@@ -831,10 +830,10 @@ class TFPAEModel(ks.Model):
                 cast("EpochInputs", data)
             )
 
+        pae_input = tf.concat((phase, amplitude), axis=-1)
+
         with tf.GradientTape() as tape:
-            latents, pred_amplitude = self(
-                (phase, amplitude), training=training, mask=mask
-            )
+            latents, pred_amplitude = self(pae_input, training=training, mask=mask)
             loss = self.compute_loss(
                 x=latents,
                 y=amplitude,
@@ -869,7 +868,9 @@ class TFPAEModel(ks.Model):
         )[0]
         mask = mask * sn_mask * spec_mask
 
-        latents, pred_amplitude = self((phase, amplitude), training=training, mask=mask)
+        pae_input = tf.concat((phase, amplitude), axis=-1)
+
+        latents, pred_amplitude = self(pae_input, training=training, mask=mask)
 
         loss = self.compute_loss(
             x=latents,
@@ -894,12 +895,24 @@ class TFPAEModel(ks.Model):
     def train_model(self, stage: "PAEStage") -> None:
         self.stage = stage
 
-        self.stage.train_sn_mask = tf.convert_to_tensor(self.stage.train_sn_mask)
-        self.stage.train_spec_mask = tf.convert_to_tensor(self.stage.train_spec_mask)
-        self.stage.test_sn_mask = tf.convert_to_tensor(self.stage.test_sn_mask)
-        self.stage.test_spec_mask = tf.convert_to_tensor(self.stage.test_spec_mask)
-        self.stage.val_sn_mask = tf.convert_to_tensor(self.stage.val_sn_mask)
-        self.stage.val_spec_mask = tf.convert_to_tensor(self.stage.val_spec_mask)
+        self.stage.train_sn_mask = tf.convert_to_tensor(
+            self.stage.train_sn_mask, dtype=tf.int32
+        )
+        self.stage.train_spec_mask = tf.convert_to_tensor(
+            self.stage.train_spec_mask, dtype=tf.int32
+        )
+        self.stage.test_sn_mask = tf.convert_to_tensor(
+            self.stage.test_sn_mask, dtype=tf.int32
+        )
+        self.stage.test_spec_mask = tf.convert_to_tensor(
+            self.stage.test_spec_mask, dtype=tf.int32
+        )
+        self.stage.val_sn_mask = tf.convert_to_tensor(
+            self.stage.val_sn_mask, dtype=tf.int32
+        )
+        self.stage.val_spec_mask = tf.convert_to_tensor(
+            self.stage.val_spec_mask, dtype=tf.int32
+        )
 
         n_batches_per_epoch = self.stage.train_data.amplitude.shape[0] / self.batch_size
 
@@ -910,26 +923,35 @@ class TFPAEModel(ks.Model):
         # Terminate training when a NaN loss is encountered
         callbacks.append(ks.callbacks.TerminateOnNaN())
 
+        patience = self.patience
+        if isinstance(patience, float):
+            patience = int(self.stage.epochs * patience)
+        callbacks.append(
+            ks.callbacks.EarlyStopping(
+                monitor="val_loss",
+                patience=patience,
+                mode="min",
+                start_from_epoch=patience,
+            )
+        )
+
         # --- Backup & Restore ---
         # Backup checkpoints each epoch and restore if training got cancelled midway through
         if not self.force and self.stage.savepath is not None:
             backup_dir = self.stage.savepath / "backups"
             backup_callback = ks.callbacks.BackupAndRestore(
                 str(backup_dir),
-                save_freq=max(1, int(0.1 * self.stage.epochs * n_batches_per_epoch)),
+                save_freq=max(1, int(0.25 * self.stage.epochs * n_batches_per_epoch)),
             )
             callbacks.append(backup_callback)
 
         # --- TQDM Progress Bar ---
-        callbacks.append(
+        callbacks.append((
             cast(
                 "ks.callbacks.Callback",
-                cast(
-                    "object",
-                    TqdmCallback(epochs=self.stage.epochs, verbose=0),
-                ),
-            )
-        )
+                cast("object", TqdmCallback(epochs=self.stage.epochs, verbose=0)),
+            ),
+        ))
 
         if stage.profile:
             callbacks.append(
@@ -941,8 +963,10 @@ class TFPAEModel(ks.Model):
                     write_images=False,
                     write_steps_per_second=False,
                     update_freq="epoch",
-                    # Profile the last third
-                    # profile_batch=f"{int(0.66 * n_batches_per_epoch * self.stage.epochs)},{int(0.99 * n_batches_per_epoch * self.stage.epochs)}",
+                    profile_batch=(
+                        int(n_batches_per_epoch * self.stage.epochs * 0.1),
+                        int(n_batches_per_epoch * self.stage.epochs * 0.1) + 10,
+                    ),
                     embeddings_freq=0,
                 ),
             )
@@ -1003,9 +1027,7 @@ class TFPAEModel(ks.Model):
             callbacks=callbacks,
             verbose=0,
             validation_data=(val_data,),
-            validation_freq=max(
-                1, int(0.1 * self.stage.epochs)
-            ),  # TODO: Get val_freq > 1 working with tqdm
+            validation_freq=1,
         )
 
     def build_model(self, *, update: bool = False) -> None:
@@ -1047,14 +1069,16 @@ class TFPAEModel(ks.Model):
                     metrics=self.metrics,
                     run_eagerly=self.stage.debug,
                 )
-                self(
-                    (
-                        tf.convert_to_tensor(self.stage.train_data.time),
-                        tf.convert_to_tensor(self.stage.train_data.amplitude),
-                    ),
-                    training=False,
-                    mask=self.stage.train_data.mask,
+
+                phase = tf.convert_to_tensor(
+                    self.stage.train_data.time, dtype=tf.float32
                 )
+                amplitude = tf.convert_to_tensor(
+                    self.stage.train_data.amplitude, dtype=tf.float32
+                )
+                mask = tf.convert_to_tensor(self.stage.train_data.mask, dtype=tf.int32)
+                pae_input = tf.concat((phase, amplitude), axis=-1)
+                self(pae_input, training=False, mask=mask)
 
             self.log.debug("Trainable variables:")
             for var in self.trainable_variables:
@@ -1122,14 +1146,17 @@ class TFPAEModel(ks.Model):
             self.encoder.encode_output_layer.set_weights([weights])
         # Normalise mean of physical latents to 0 across all batches
         if self.physical_latents:
-            phase = tf.convert_to_tensor(self.stage.train_data.time)
-            amplitude = tf.convert_to_tensor(self.stage.train_data.amplitude)
+            phase = tf.convert_to_tensor(self.stage.train_data.time, dtype=tf.float32)
+            amplitude = tf.convert_to_tensor(
+                self.stage.train_data.amplitude, dtype=tf.float32
+            )
             mask = (
-                tf.convert_to_tensor(self.stage.train_data.mask)
+                tf.convert_to_tensor(self.stage.train_data.mask, dtype=tf.int32)
                 * self.stage.train_sn_mask
                 * self.stage.train_spec_mask
             )
-            encoded = self.encoder((phase, amplitude), training=False, mask=mask)
+            pae_input = tf.concat((phase, amplitude), axis=-1)
+            encoded = self.encoder(pae_input, training=False, mask=mask)
 
             latents_sum: FTensor[tuple[NPAELatents]] = tf.reduce_sum(
                 (encoded * tf.cast(self.stage.train_sn_mask, tf.float32))[:, 0, :],

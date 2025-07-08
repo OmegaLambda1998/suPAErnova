@@ -288,8 +288,9 @@ class PosteriorMap(tf.Module):
         elif stage.init_latents[0] == "z":
             if stage.init_latents == "z_data":
                 # Generate z_latents directly from data
+                pae_input = tf.concat((self.data.time, self.data.amplitude), axis=-1)
                 z_latents = self.pae.encoder(
-                    (self.data.time, self.data.amplitude),
+                    pae_input,
                     training=False,
                     mask=self.data.mask,
                 )[:, 0, :]
@@ -741,7 +742,8 @@ class TFPosteriorModel(ks.Model):
         zs = ks.layers.RepeatVector(self.spec_dim)(zs)
 
         # Create synthetic spectra from z-latents
-        synth_amp = self.pae.decoder((zs, input_phase), mask=input_mask)
+        decoder_inputs = tf.concat((input_phase, zs), axis=-1)
+        synth_amp = self.pae.decoder(decoder_inputs, mask=input_mask)
 
         # XXX: Test whether this fixes things
         if self.map.train_delta_m:  # and not self.pae.physical_latents:
@@ -1243,8 +1245,9 @@ class TFPosteriorModel(ks.Model):
 
         mask = np.squeeze(self.sn_mask.astype(np.bool_), axis=(1, 2))
 
+        pae_input = tf.concat((self.data.time, self.data.amplitude), axis=-1)
         z_latents = self.pae.encoder(
-            (self.data.time, self.data.amplitude),
+            pae_input,
             training=False,
             mask=self.data.mask,
         ).numpy()[mask][:, 0, :]

@@ -32,8 +32,12 @@ class NFlowModelConfig(AbstractModelConfig):
 
     save_best: bool
 
+    lr: PositiveFloat
+    lr_decay_steps: PositiveFloat
+    lr_decay_rate: PositiveFloat
+    lr_weight_decay_rate: PositiveFloat
+
     epochs: PositiveInt
-    learning_rate: PositiveFloat
     batch_normalisation: bool
 
     n_hidden_units: PositiveInt

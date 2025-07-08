@@ -114,7 +114,7 @@ def snpae_nflow_step_factory(
             cache_path / nflow_params["fname"] / "pae" / "snpae" / nflow_params["seed"]
         )
         for model in snpae.pae.models:
-            model.paths.out = snpae.pae.paths.out / "PAEStepConfig" / "TFPAEModelConfig"
+            model.paths.out = snpae.pae.paths.out / "PAEStepConfig" / "PaperParityPAE"
         snpae.run()
         nflowstep = snpae.nflow_step
         assert nflowstep is not None, "Error running NFlowStep"

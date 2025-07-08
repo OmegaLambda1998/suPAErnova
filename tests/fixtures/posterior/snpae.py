@@ -144,7 +144,7 @@ def snpae_posterior_step_factory(
             / str(posterior_params["seeds"][0])
         )
         for model in snpae.pae.models:
-            model.paths.out = snpae.pae.paths.out / "PAEStepConfig" / "TFPAEModelConfig"
+            model.paths.out = snpae.pae.paths.out / "PAEStepConfig" / "PaperParityPAE"
 
         assert snpae.nflow is not None, "Error setting up NFlowStep"
         snpae.nflow.paths.out = (
@@ -156,7 +156,7 @@ def snpae_posterior_step_factory(
         )
         for model in snpae.nflow.models:
             model.paths.out = (
-                snpae.nflow.paths.out / "NFlowStepConfig" / "TFNFlowModelConfig"
+                snpae.nflow.paths.out / "NFlowStepConfig" / "PaperParityNFlow"
             )
 
         snpae.run()

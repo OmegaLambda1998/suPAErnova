@@ -29,14 +29,15 @@ type ZLatentsTensor = FTensor[ZLatentsShape]
 type PAELatentsTensor = FTensor[PAELatentsShape]
 
 # --- Encoder Tensors ---
-type EncoderInputsShape = tuple[PhaseShape, AmpShape]
+type EncoderInputsShape = tuple[SNDim, SpecDim, Literal["PhaseDim + WLDim"]]
 
-type EncoderInputs = tuple[PhaseTensor, AmpTensor]
+type EncoderInputs = FTensor[*EncoderInputsShape]
 type EncoderOutputs = PAELatentsTensor
 
 # --- Decoder Tensors ---
-type DecoderInputsShape = tuple[PAELatentsShape, PhaseShape]
-type DecoderInputs = tuple[PAELatentsTensor, PhaseTensor]
+type DecoderInputsShape = tuple[SNDim, SpecDim, Literal["PhaseDim + NPAELatents"]]
+
+type DecoderInputs = FTensor[*DecoderInputsShape]
 type DecoderOutputs = AmpTensor
 
 # --- Model Tensors ---

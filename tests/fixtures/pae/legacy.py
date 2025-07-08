@@ -1,29 +1,17 @@
-import os
 from typing import TYPE_CHECKING
 
-import yaml
-import numpy as np
 import pytest
 
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ["TF_DETERMINISTIC_OPS"] = "1"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-import tensorflow as tf
-
-from suPAErnova.analysis.spectra import SpectraPlot, SpectraPlotter
-from suPAErnova.configs.steps.pae import PAEStepResult
-from suPAErnova.configs.steps.data import DataStepResult
-from suPAErnova.analysis.distribution import DistributionPlot, DistributionPlotter
+import suPAErnova
+from suPAErnova.configs.steps.pae import PAEStepConfig
+from suPAErnova.configs.steps.data import DataStepConfig
+from suPAErnova.configs.steps.pae.model import PAEModelConfig
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from _pytest.tmpdir import TempPathFactory
-
     from tests.fixtures.data import (
         DataParams,
-        DataStepFactory,
     )
 
     from . import (
@@ -35,279 +23,81 @@ if TYPE_CHECKING:
     )
 
 
-def legacy_pae_step(
-    pae_params: "PAEParams",
-    data: "DataStepResult",
-) -> "PAEResults":
-    # Used cached result if it exists.
-    savepath = (
-        pae_params["cache_path"]
-        / pae_params["fname"]
-        / "pae"
-        / "legacy"
-        / pae_params["seed"]
-        / "pae_step.npz"
-    )
-    savepath.parent.mkdir(parents=True, exist_ok=True)
-    if savepath.exists():
-        with np.load(savepath, allow_pickle=True) as io:
-            return {k: v.item() for k, v in io.items()}
-
-    # Import here to avoid dependency conflicts
-    from supaernova_legacy.models.losses import compute_loss_ae
-    from supaernova_legacy.scripts.train_ae import train_ae
-    from supaernova_legacy.utils.data_loader import (
-        get_train_mask,
-        get_train_mask_spectra,
-    )
-
-    # Except where indicated, this is running the `train_ae` script verbatim
-
-    # Variation: train_ae script modified to allow passing args as a list of strings
-    # Variation: train_ae script modified to return a dictionary of results per train stage
-    # Variation: train_ae script modified to skip training stages which have already been run
-    # Variation: Legacy code relied on the now deprecated tensorflow_addons package.
-    #            Most of the functionality now resides in tensorflow.keras
-    #            The Legacy code has been updated to reflect this
-    #            The biggest change is to the AdamW optimiser, which can no longer take a function for its weight_decay argument
-    # Variation: Legacy code used an old version of Tensorflow, and the syntax has since changed
-    #            In particular:
-    #             - `tf.tf_fn(x)` is no longer valid, so has been updated to `ks.layers.Lambda(tf.tf_fn)(x)`
-    #             - Stricter dtype checks (int32 ~= int64 ~= float32 ~= float64). Using tf.cast where needed.
-
-    data_out_path: Path = (
-        pae_params["cache_path"] / pae_params["fname"] / "data" / "legacy"
-    )
-    pae_out_path: Path = (
-        pae_params["cache_path"]
-        / pae_params["fname"]
-        / "pae"
-        / "legacy"
-        / pae_params["seed"]
-    )
-    model_dir = pae_out_path / "tensorflow_models"
-    model_dir.mkdir(parents=True, exist_ok=True)
-    param_dir = pae_out_path / "params"
-    param_dir.mkdir(parents=True, exist_ok=True)
-
-    yaml_config = pae_params["tmp_path"] / "train.yaml"
-
-    config = {
-        "pae": {
-            "PROJECT_DIR": str(pae_params["root_path"]),
-            "MODEL_DIR": str(model_dir),
-            "PARAM_DIR": str(param_dir),
-            "train_data_file": str(
-                data_out_path / "train" / f"kfold{pae_params['kfold']}.npz"
-            ),
-            "test_data_file": str(
-                data_out_path / "test" / f"kfold{pae_params['kfold']}.npz"
-            ),
-            "verbose": False,
-            "overfit": not pae_params["save_best"],
-            "epochs": pae_params["delta_av_epochs"],
-            "epochs_latent": pae_params["zs_epochs"],
-            "epochs_final": pae_params["final_epochs"],
-            "lr": pae_params["delta_av_lr"],
-            "lr_decay_steps": pae_params["delta_av_lr_decay_steps"],
-            "lr_decay_rate": pae_params["delta_av_lr_decay_rate"],
-            "lr_deltat": pae_params["delta_p_lr"],
-            "weight_decay_rate": pae_params["delta_av_lr_weight_decay_rate"],
-            "min_train_redshift": pae_params["min_train_redshift"],
-            "max_train_redshift": pae_params["max_train_redshift"],
-            "max_light_cut": (
-                pae_params["min_train_phase"],
-                pae_params["max_train_phase"],
-            ),
-            "max_light_cut_spectra": (
-                pae_params["min_train_phase"],
-                pae_params["max_train_phase"],
-            ),
-            "latent_dims": (pae_params["n_z_latents"],),
-            "seed": int(pae_params["seed"]),
-            "layer_type": pae_params["architecture"],
-            "physical_latent": pae_params["physical_latents"],
-            "val_every": pae_params["val_every"],
-            "activation": pae_params["activation"].upper(),
-            "loss_fn": pae_params["loss"].upper(),
-            "optimizer": pae_params["optimiser"].upper(),
-            "scheduler": pae_params["scheduler"].upper().replace("DECAY", ""),
-            "kernel_regularizer": pae_params["kernel_regulariser"] is not None,
-            "kernel_regularizer_val": pae_params["kernel_regulariser_penalty"],
-            "colorlaw_file": str(pae_params["colourlaw"]),
-            "colorlaw_preset": pae_params["colourlaw"] is not None,
-            "kfold": pae_params["kfold"],
-            "out_file_tail": "",
-            "savemodel": True,
-            "model_summary": False,
-            "inverse_spectra_cut": False,
-            "twins_cut": False,
-            "use_val": pae_params["validation_frac"] > 0,
-            "cond_dim": 1,
-            "data_dim": 288,  # Only correct for the SNFactory data
-            "n_timestep": 32,  # Only correct for the SNFactory data
-            "encode_dims": (*pae_params["encode_dims"], 32),
-            "decode_dims": (32, *reversed(pae_params["encode_dims"])),
-            "batch_size": pae_params["batch_size"],
-            "dropout": pae_params["dropout"] > 0,
-            "batchnorm": pae_params["batch_normalisation"],
-            "set_data_min_val": 0,
-            "train_noise": pae_params["amplitude_offset_scale"] > 0,
-            "noise_scale": pae_params["amplitude_offset_scale"],
-            "train_time_uncertainty": pae_params["phase_offset_scale"] != 0,
-            "vary_mask": pae_params["mask_fraction"] > 0,
-            "mask_vary_frac": pae_params["mask_fraction"],
-            "clip_delta": pae_params["loss_clip_delta"],
-            "iloss_amplitude_offset": pae_params["loss_residual_penalty"] > 0,
-            "lambda_amplitude_offset": pae_params["loss_residual_penalty"],
-            "use_amplitude": pae_params["use_amplitude"],
-            "iloss_amplitude_parameter": pae_params["loss_delta_m_penalty"] > 0,
-            "lambda_amplitude_parameter": pae_params["loss_delta_m_penalty"],
-            "iloss_covariance": pae_params["loss_covariance_penalty"] > 0,
-            "lambda_covariance": pae_params["loss_covariance_penalty"],
-            "decorrelate_dust": pae_params["loss_decorrelate_dust"],
-            "decorrelate_all": pae_params["loss_decorrelate_all"],
-            "train_latent_individual": pae_params["seperate_z_latent_training"],
-        }
-    }
-    with yaml_config.open("w") as io:
-        yaml.safe_dump(config, io)
-
-    args = [f"--yaml_config={yaml_config}", "--config=pae"]
-    results = train_ae(args)
-
-    pae_step_results = {}
-    for stage, (model, params) in results.items():
-        pae_step = {}
-        pae_step["stage"] = stage
-        pae_step["ind"] = data.ind
-        pae_step["sn_name"] = data.sn_name
-        pae_step["spectra_id"] = data.spectra_id
-
-        x = data.amplitude
-        cond = data.time
-        sigma = data.sigma
-        mask = data.mask
-
-        x = tf.cast(x, tf.float32)
-        cond = tf.cast(cond, tf.float32)
-        mask = tf.cast(mask, tf.float32)
-        data_mask_dict = {"redshift": data.redshift, "times_orig": data.phase}
-        sn_mask = get_train_mask(data_mask_dict, params)[:, 0:1, 0:1]
-        spec_mask = get_train_mask_spectra(data_mask_dict, params)[..., 0:1]
-
-        mask_vary = sn_mask * spec_mask
-        mask *= mask_vary
-
-        z = model.encode(x, cond, mask)
-        x_pred = model.decode(z, cond, mask)
-
-        pae_step["input_amp"] = data.amplitude
-        pae_step["input_d_amp"] = data.sigma
-        pae_step["input_phase"] = data.time
-        pae_step["input_mask"] = mask.numpy()
-        pae_step["input_colourlaw"] = model.colorlaw
-
-        # Legacy latent ordering:
-        # Δ𝓅 -> Δℳ  -> ΔAᵥ -> zs ([0, 1, 2, 3, 4, 5])
-        # Rearange to:
-        # ΔAᵥ -> zs -> Δℳ  -> Δ𝓅 ([2, 3, 4, 5, 1, 0])
-        pae_step["latents"] = z.numpy()[:, [2, 3, 4, 5, 1, 0]]
-
-        pae_step["output_amp"] = x_pred.numpy()
-        pae_step["diff_amp"] = np.abs(x.numpy() - x_pred.numpy())
-
-        _loss, (loss, pred_loss, resid_loss, delta_loss, cov_loss, model_loss) = (
-            compute_loss_ae(model, x, cond, sigma, mask)
-        )
-        pae_step["loss"] = loss
-        pae_step["pred_loss"] = pred_loss
-        pae_step["resid_loss"] = resid_loss
-        pae_step["delta_loss"] = delta_loss
-        pae_step["cov_loss"] = cov_loss
-        pae_step["model_loss"] = model_loss
-
-        pae_step_results[str(pae_step["stage"])] = pae_step
-
-    np.savez_compressed(savepath, **pae_step_results)
-    with np.load(savepath, allow_pickle=True) as io:
-        return {k: v.item() for k, v in io.items()}
-
-
 @pytest.fixture(scope="session")
-def legacy_pae_step_factory(
+def snpae_pae_step_factory(
     data_path: "Path",
     root_path: "Path",
     cache_path: "Path",
-    tmp_path_factory: "TempPathFactory",
-    legacy_data_step_factory: "DataStepFactory",
 ) -> "PAEStepFactory":
-    def _legacy_pae_step(
+    def _snpae_pae_step(
         data_params: "DataParams", pae_params: "PAEParams"
     ) -> "PAEResults":
-        pae_params["data_path"] = data_path
-        pae_params["root_path"] = root_path
-        pae_params["cache_path"] = cache_path
-        pae_params["tmp_path"] = tmp_path_factory.mktemp("config")
+        from suPAErnova.configs.steps.pae.tf import (
+            TFPAEModelConfig,  # Import here to avoid dependency conflicts
+        )
 
-        data = DataStepResult.model_validate(legacy_data_step_factory(data_params)[0])
-        return legacy_pae_step(pae_params, data), (pae_params, data)
+        config = {
+            "data": {
+                **{
+                    key: val
+                    for key, val in data_params.items()
+                    if key in DataStepConfig.model_fields
+                },
+                "data_dir": data_path,
+                "meta": "meta.csv",
+                "idr": "IDR_eTmax.txt",
+                "mask": "mask_info_wmin_wmax.txt",
+            },
+            "pae": {
+                "validation_frac": pae_params["validation_frac"],
+                "seed": pae_params["seed"],
+                "kfolds": [pae_params["kfold"]],
+                "model": {
+                    **{
+                        key: val
+                        for key, val in pae_params.items()
+                        if key
+                        in {
+                            *PAEStepConfig.model_fields.keys(),
+                            *PAEModelConfig.model_fields.keys(),
+                            *TFPAEModelConfig.model_fields.keys(),
+                        }
+                    },
+                    "backend": "tf",
+                },
+            },
+        }
+        snpae = suPAErnova.prepare_config(
+            config,
+            verbose=False,
+            base_path=root_path,
+            out_path=cache_path
+            / pae_params["fname"]
+            / "pae"
+            / "snpae"
+            / pae_params["seed"],
+        )
+        assert snpae.data is not None, "Error setting up DataStep"
+        snpae.data.paths.out = (
+            cache_path / pae_params["fname"] / "data" / "snpae" / snpae.data.name
+        )
+        snpae.run()
+        paestep = snpae.pae_step
+        assert paestep is not None, "Error running PAEStep"
+        return paestep
 
-    return _legacy_pae_step
+    return _snpae_pae_step
 
 
 @pytest.fixture(scope="session")
-def legacy_pae_result_factory(
-    legacy_pae_step_factory: "PAEStepFactory",
+def snpae_pae_result_factory(
+    snpae_pae_step_factory: "PAEStepFactory",
 ) -> "PAEResultFactory":
-    def _legacy_pae_result(
+    def _snpae_pae_result(
         data_params: "DataParams", pae_params: "PAEParams"
     ) -> "PAEStepResults":
-        pae_step_results, (params, data) = legacy_pae_step_factory(
-            data_params, pae_params
-        )
+        pae_step = snpae_pae_step_factory(data_params, pae_params).models[0]
+        pae_step._result()
+        return pae_step.results
 
-        results = {
-            stage: PAEStepResult.model_validate(pae_step)
-            for stage, pae_step in pae_step_results.items()
-        }
-
-        labels = {}
-        ind = 0
-        if params["physical_latents"]:
-            labels[0] = "ΔAᵥ"
-            ind = 1
-            labels[params["n_z_latents"] + 1] = "Δℳ"
-            labels[params["n_z_latents"] + 2] = "Δ𝓅"
-        for i in range(params["n_z_latents"]):
-            labels[ind] = f"z{i}"
-            ind += 1
-
-        for stage, result in results.items():
-            s = int(stage)
-            savepath = (
-                params["cache_path"]
-                / params["fname"]
-                / "pae"
-                / "legacy"
-                / "plots"
-                / params["seed"]
-                / stage
-            )
-            savepath.mkdir(parents=True, exist_ok=True)
-            plot_residual = SpectraPlot.model_validate({
-                "name": "residual",
-                "savepath": savepath,
-            })
-            SpectraPlotter.plot_residual(data, result.output_amp, plot_residual)
-
-            plot_latents = DistributionPlot.model_validate({
-                "name": "latents",
-                "savepath": savepath,
-                "labels": {i: labels[i] for i in range(s)},
-            })
-            DistributionPlotter.plot_corner(result.latents[:, :s], plot_latents)
-
-        return results
-
-    return _legacy_pae_result
+    return _snpae_pae_result

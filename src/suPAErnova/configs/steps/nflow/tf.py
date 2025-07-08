@@ -1,5 +1,5 @@
 import os
-from typing import cast, override
+from typing import Concatenate, cast, override
 from functools import cached_property
 from collections.abc import Callable
 
@@ -20,6 +20,10 @@ from suPAErnova.steps.nflow.tf import (
 from .model import NFlowModelConfig
 
 ActivationObject = Callable[[tf.Tensor], tf.Tensor]
+SchedulerObject = (
+    type[ks.optimizers.schedules.LearningRateSchedule]
+    | Callable[[Concatenate[int | tf.Tensor, ...]], tf.Tensor]
+)
 OptimiserObject = type[ks.optimizers.Optimizer]
 LossObject = type[ks.losses.Loss] | Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 
@@ -27,6 +31,16 @@ LossObject = type[ks.losses.Loss] | Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 def validate_activation(activation: ConfigInputObject[ActivationObject]):
     return validate_object(
         activation, dummy_obj=ks.activations.relu, mod=ks.activations
+    )
+
+
+def validate_scheduler(
+    scheduler: ConfigInputObject[SchedulerObject],
+) -> SchedulerObject:
+    return validate_object(
+        scheduler,
+        dummy_obj=ks.optimizers.schedules.LearningRateSchedule,
+        mod=ks.optimizers.schedules,
     )
 
 
@@ -79,6 +93,39 @@ class TFNFlowModelConfig(NFlowModelConfig):
             "type[ks.optimizers.Optimizer]",
             cast("object", validate_optimiser(self.optimiser)),
         )
+
+    scheduler: ConfigInputObject[SchedulerObject]
+
+    @computed_field
+    @cached_property
+    def scheduler_cls(self) -> type[ks.optimizers.schedules.LearningRateSchedule]:
+        scheduler = validate_scheduler(self.scheduler)
+        if isinstance(scheduler, type):
+            return scheduler
+
+        class CustomScheduler(ks.optimizers.schedules.LearningRateSchedule):
+            @override
+            def __init__(
+                self,
+                *,
+                initial_learning_rate: float,
+                decay_steps: int,
+                decay_rate: float,
+            ) -> None:
+                self.initial_learning_rate: float = initial_learning_rate
+                self.decay_steps: int = decay_steps
+                self.decay_rate: float = decay_rate
+
+            @override
+            def __call__(self, step: int | tf.Tensor) -> tf.Tensor:
+                return scheduler(
+                    step,
+                    initial_learning_rate=self.initial_learning_rate,
+                    decay_steps=self.decay_steps,
+                    decay_rate=self.decay_rate,
+                )
+
+        return CustomScheduler
 
     loss: ConfigInputObject[LossObject] = "NegLogLikelihood"
 

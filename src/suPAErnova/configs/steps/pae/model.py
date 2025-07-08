@@ -94,6 +94,7 @@ class PAEModelConfig(AbstractModelConfig):
     batch_size: PositiveInt
 
     save_best: bool
+    patience: float | int
 
     # --- Data ---
     min_train_redshift: float

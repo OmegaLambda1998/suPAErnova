@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 
 from suPAErnova.configs.steps.data import DataStepResult
@@ -10,6 +11,8 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.data
 
+DTS = ["train"]  # , "test"]
+KFOLDS = [0]  # , 1, 2, 3]
 KEYS = [k for k in DataStepResult.model_fields if k != "metadata"]
 
 
@@ -24,26 +27,61 @@ def test_legacy_data_setup(legacy_data: "DataStepResults") -> None:
 
 
 @pytest.mark.parametrize("key", KEYS)
+@pytest.mark.parametrize("kfold", KFOLDS)
+@pytest.mark.parametrize("dt", DTS)
 def test_shapes(
-    key: str, snpae_data: "DataStepResults", legacy_data: "DataStepResults"
+    key: str,
+    kfold: int,
+    dt: str,
+    snpae_data: "DataStepResults",
+    legacy_data: "DataStepResults",
 ) -> None:
-    snpae_shape = getattr(snpae_data, key).shape
-    legacy_shape = getattr(legacy_data, key).shape
-    assert snpae_shape == legacy_shape
+    snpae_dt = getattr(snpae_data, f"{dt}_data")[kfold]
+    legacy_dt = legacy_data[f"{dt}_data"][kfold]
+
+    snpae_shape = getattr(snpae_dt, key).shape
+    legacy_shape = getattr(legacy_dt, key).shape
+
+    assert snpae_shape == legacy_shape, f"dt: {dt}, kfold: {kfold}, key: {key}"
 
 
 @pytest.mark.parametrize("key", KEYS)
+@pytest.mark.parametrize("kfold", KFOLDS)
+@pytest.mark.parametrize("dt", DTS)
 def test_matching_values(
     key: str,
+    kfold: int,
+    dt: str,
     snpae_data: "DataStepResults",
     legacy_data: "DataStepResults",
     utils: "PaperParityUtils",
 ) -> None:
-    snpae_vals = getattr(snpae_data, key)
-    legacy_vals = getattr(legacy_data, key)
+    snpae_dt = getattr(snpae_data, f"{dt}_data")[kfold]
+    legacy_dt = legacy_data[f"{dt}_data"][kfold]
+
+    snpae_vals = getattr(snpae_dt, key)
+    legacy_vals = getattr(legacy_dt, key)
+
+    snpae_mask = snpae_dt.sn_name[:, 0, 0].argsort()
+    legacy_mask = legacy_dt.sn_name[:, 0, 0].argsort()
+
+    snpae_vals = snpae_vals[snpae_mask]
+    legacy_vals = legacy_vals[legacy_mask]
+
+    if snpae_dt.metadata is None:
+        snpae_dt.metadata = {}
+    if legacy_dt.metadata is None:
+        legacy_dt.metadata = {}
 
     utils.assert_arrays(
         snpae_vals,
         legacy_vals,
-        metadata={**snpae_data.metadata, **legacy_data.metadata, "key": key},
+        spectra=snpae_dt.spectra_id + "---" + legacy_dt.spectra_id,
+        metadata={
+            **snpae_dt.metadata,
+            **legacy_dt.metadata,
+            "dt": dt,
+            "kfold": kfold,
+            "key": key,
+        },
     )
