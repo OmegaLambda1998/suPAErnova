@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 class DispersionPlot(SpectraPlot):
     subset: Literal["train", "test"]
-    legacy: Path | None = None
+    legacy: tuple[Path, ...] | None = None
     twins: str | None = None
 
 
@@ -38,262 +38,184 @@ class DispersionPlotter(Plotter):
         if savepath.exists() and not force:
             return
 
-        x = data.redshift[:, 0, 0]
-        order = x.argsort()
-        x = x[order]
-        z = (x * 3e5 + 300.0) / 3e5
-        mag_err = abs(-5 * np.log10(x / z))
-
-        amp = np.concat(
-            [hmc.hmc.delta_m.mean(axis=0)[None, ...] for hmc in hmcs],
-            axis=0,
-        )
-        amp_std = np.concat(
-            [np.sqrt(hmc.hmc.delta_m.std(axis=0) ** 2)[None, ...] for hmc in hmcs],
-            axis=0,
-        )
-
-        weight = 1 / (amp_std * amp_std)
-        weighted_mean = np.sum(weight * amp, axis=0) / np.sum(weight, axis=0)
-
-        weighted_dev = np.sqrt(
-            (amp.shape[0] / (amp.shape[0] - 1))
-            * (
-                (np.sum(weight * amp * amp, axis=0) / np.sum(weight, axis=0))
-                - (weighted_mean * weighted_mean)
-            )
-        )
-
-        weighted_err = np.sqrt(weighted_dev * weighted_dev + mag_err * mag_err)
-
-        weighted_mean = amp[0, ...]
-        weighted_err *= 0
-
-        weighted_mean = weighted_mean[order]
-        weighted_err = weighted_err[order]
-
         _wl, _amplitude, _sigma, sn_mask, _spec_mask, _wl_mask = SpectraPlotter.prep(
             data, config
         )
 
+        sn_mask = sn_mask[:, 0, 0]
+
         twins_mask = np.ones_like(sn_mask)
         if twins is not None:
             twins_mask = np.zeros_like(sn_mask)
-            names = set(data.sn_name.flatten())
-            twins_names = set(twins.name)
-            intersection = names & twins_names
+            names = data.sn_name[:, 0, 0]
+            twins_names = twins.name
+            intersection = set(names) & set(twins_names)
             for name in intersection:
-                ind = np.argwhere(data.sn_name == name)[0][0]
+                ind = np.argwhere(names == name)[0]
                 df = twins[twins.name == name]
                 twins_mask[ind] = df.mask_twins
 
-        sn_mask = np.sum(data.mask * sn_mask, axis=(-2, -1), keepdims=True)
+        redshift = data.redshift[:, 0, 0]
+        order = np.argsort(redshift)
+        redshift = redshift[order]
+        redshift_error = (redshift * 3e5 + 300.0) / 3e5
+        magshift_error = abs(-5 * np.log10(redshift / redshift_error))
+
+        amplitudes = np.concat(
+            [np.mean(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs], axis=0
+        )[..., 0]
+        amplitude_stds = np.concat(
+            [
+                np.sqrt(np.square(np.std(hmc.hmc.delta_m, axis=0, keepdims=True)))
+                for hmc in hmcs
+            ],
+            axis=0,
+        )[..., 0]
+
+        weights = 1 / (amplitude_stds * amplitude_stds)
+        weights /= weights.sum(axis=0)
+
+        weighted_amplitudes = np.sum(weights * amplitudes, axis=0)
+        weighted_amplitudes = weighted_amplitudes[order]
+
+        weighted_variances = np.sum(
+            weights * np.square(amplitudes - np.mean(amplitudes)), axis=0
+        )
+        weighted_variances = weighted_variances[order]
+
+        weighted_stds = np.sqrt(
+            (weighted_variances * weighted_variances)
+            + (magshift_error * magshift_error)
+        )
+
+        def _plot(x, y, yerr, fig, ax, color, marker, alpha, title):
+            k = 1.4826
+
+            w_rms = np.sqrt(np.sum(y * y) / np.size(y))
+            w_mad = np.std(y) / k
+
+            print(title, x.shape, y.shape, yerr.shape)
+            print("RMS: ", w_rms)
+            print("NMAD: ", w_mad)
+
+            fig, ax = Plotter.errorbar(
+                x,
+                y,
+                yerr=yerr,
+                fig=fig,
+                ax=ax,
+                color=color,
+                marker=marker,
+                alpha=alpha,
+                label=f"{title} ({np.size(y)} SN) - RMS: {w_rms:.2f}, MAD: {w_mad:.2f}",
+            )
+
+            return fig, ax
+
+        # === No Mask ===
+        x = redshift
+        y = weighted_amplitudes
+        yerr = weighted_stds
+        fig, ax = _plot(x, y, yerr, fig, ax, "black", "o", 0.25, "No Mask")
+
+        # === SN Mask ===
+        mask = sn_mask[order].astype(bool)
+        x = redshift[mask]
+        y = weighted_amplitudes[mask]
+        yerr = weighted_stds[mask]
+        fig, ax = _plot(x, y, yerr, fig, ax, "brown", "o", 0.25, "SN Mask")
+
+        # === Twins Mask ===
+        mask = twins_mask[order].astype(bool)
+        x = redshift[mask]
+        y = weighted_amplitudes[mask]
+        yerr = weighted_stds[mask]
+        fig, ax = _plot(x, y, yerr, fig, ax, "blue", "o", 0.25, "Twins Mask")
+
+        # === Combined Mask ===
+        mask = (sn_mask[order] * twins_mask[order]).astype(bool)
+        x = redshift[mask]
+        y = weighted_amplitudes[mask]
+        yerr = weighted_stds[mask]
+        fig, ax = _plot(x, y, yerr, fig, ax, "green", "o", 1, "Final")
 
         if legacy is not None:
-            l_x = legacy["redshift"]
-            l_order = l_x.argsort()
-            l_x = l_x[l_order]
-            l_z = (l_x * 3e5 + 300.0) / 3e5
-            l_mag_err = abs(-5 * np.log10(l_x / l_z))
+            legacy_names = legacy["names"]
+            intersection = set(names) & set(legacy_names)
+            legacy_mask = np.zeros(legacy_names.shape, dtype=np.int32)
+            for name in intersection:
+                ind = np.argwhere(legacy_names == name)[0]
+                legacy_mask[ind] = 1
+            legacy_mask = legacy_mask.astype(bool)
 
-            l_amp = legacy["amplitude_mcmc"]
-            l_amp_std = np.sqrt(legacy["amplitude_mcmc_err"] ** 2.0)
+            redshift = legacy["redshift"][legacy_mask]
+            order = np.argsort(redshift)
+            redshift = redshift[order]
+            redshift_error = (redshift * 3e5 + 300.0) / 3e5
+            magshift_error = abs(-5 * np.log10(redshift / redshift_error))
 
-            l_weight = 1 / (l_amp_std * l_amp_std)
-            l_weighted_mean = np.sum(l_weight * l_amp, axis=0) / np.sum(
-                l_weight, axis=0
+            amplitudes = legacy["amplitude_mcmc"][legacy_mask][None, ...]
+            amplitude_stds = legacy["amplitude_mcmc_err"][legacy_mask][None, ...]
+
+            weights = 1 / (amplitude_stds * amplitude_stds)
+            weights /= weights.sum(axis=0)
+
+            weighted_amplitudes = np.sum(weights * amplitudes, axis=0)
+            weighted_amplitudes = amplitudes[0, ...][order]
+
+            weighted_variances = np.sum(
+                weights * np.square(amplitudes - np.mean(amplitudes)), axis=0
+            )
+            weighted_variances = weighted_variances[order]
+
+            weighted_stds = np.sqrt(
+                (weighted_variances * weighted_variances)
+                + (magshift_error * magshift_error)
             )
 
-            l_weighted_dev = np.sqrt(
-                (l_amp.shape[0] / (l_amp.shape[0] - 1))
-                * (
-                    (
-                        np.sum(l_weight * l_amp * l_amp, axis=0)
-                        / np.sum(l_weight, axis=0)
-                    )
-                    - (l_weighted_mean * l_weighted_mean)
-                )
-            )
+            redshift_mask = ((redshift > 0.02) & (redshift < 1.0)).astype(int)
+            sn_mask = redshift_mask * np.max(legacy["mask"][legacy_mask], axis=(-2, -1))
 
-            l_weighted_err = np.sqrt(
-                l_weighted_dev * l_weighted_dev + l_mag_err * l_mag_err
-            )
-
-            l_weighted_mean = l_amp
-            l_weighted_err *= 0
-
-            l_weighted_mean = l_weighted_mean[l_order]
-            l_weighted_err = l_weighted_err[l_order]
-
-            l_sn_mask = legacy["mask_sn"]
-
-            l_twins_mask = np.ones_like(l_sn_mask)
+            twins_mask = np.ones_like(sn_mask)
             if twins is not None:
-                l_twins_mask = np.zeros_like(l_sn_mask)
-                l_names = set(legacy["names"])
-                l_twins_names = set(twins.name)
-                l_intersection = l_names & l_twins_names
-                for name in l_intersection:
-                    l_ind = np.argwhere(legacy["names"] == name)[0]
-                    l_df = twins[twins.name == name]
-                    l_twins_mask[l_ind] = l_df.mask_twins.astype(np.int32)
+                twins_mask = np.zeros_like(sn_mask)
+                names = legacy["names"][legacy_mask]
+                twins_names = twins.name
+                intersection = set(names) & set(twins_names)
+                for name in intersection:
+                    ind = np.argwhere(names == name)[0]
+                    df = twins[twins.name == name]
+                    twins_mask[ind] = df.mask_twins
 
-            l_sn_mask = np.sum(
-                legacy["mask"] * l_sn_mask[:, None, None], axis=(-2, -1), keepdims=True
-            )
+            # === No Mask ===
+            x = redshift
+            y = weighted_amplitudes
+            yerr = weighted_stds
+            fig, ax = _plot(x, y, yerr, fig, ax, "black", "s", 0.25, "Legacy No Mask")
 
-            print(
-                set(data.sn_name.flatten()).symmetric_difference(set(legacy["names"]))
-            )
+            # === SN Mask ===
+            mask = sn_mask[order].astype(bool)
+            x = redshift[mask]
+            y = weighted_amplitudes[mask]
+            yerr = weighted_stds[mask]
+            fig, ax = _plot(x, y, yerr, fig, ax, "brown", "s", 0.25, "Legacy SN Mask")
 
-        k_nmad = 1.4826
+            # === Twins Mask ===
+            mask = twins_mask[order].astype(bool)
+            x = redshift[mask]
+            y = weighted_amplitudes[mask]
+            yerr = weighted_stds[mask]
+            fig, ax = _plot(x, y, yerr, fig, ax, "blue", "s", 0.25, "Legacy Twins Mask")
 
-        # No mask
-        if legacy is not None:
-            l_x = legacy["redshift"]
-            l_y = l_weighted_mean
-            l_yerr = l_weighted_err
-            print(l_x.shape, l_y.shape, l_yerr.shape)
-            print("l_n_sn", np.ones_like(l_sn_mask[:, 0, 0]).sum())
-            mad_hmc = k_nmad * np.median(np.abs(l_y - np.median(l_y)))
-            print("l_NMAD: ", mad_hmc)
-            wrms_hmc = np.std(l_y, axis=0)
-            print("l_RMS: ", wrms_hmc)
-            fig, ax = Plotter.errorbar(
-                l_x,
-                l_y,
-                yerr=l_yerr,
-                fig=fig,
-                ax=ax,
-                marker="s",
-                color="black",
-                alpha=0.25,
-            )
+            # === Combined Mask ===
+            mask = (sn_mask[order] * twins_mask[order]).astype(bool)
+            x = redshift[mask]
+            y = weighted_amplitudes[mask]
+            yerr = weighted_stds[mask]
+            fig, ax = _plot(x, y, yerr, fig, ax, "green", "s", 1, "Legacy Final")
 
-        x = data.redshift[:, 0, 0]
-        y = weighted_mean[:, 0]
-        yerr = weighted_err[:, 0]
-        print(x.shape, y.shape, yerr.shape)
-        print("n_sn", np.ones_like(sn_mask[:, 0, 0]).sum())
-        mad_hmc = k_nmad * np.median(np.abs(y - np.median(y)))
-        print("NMAD: ", mad_hmc)
-        wrms_hmc = np.std(y, axis=0)
-        print("RMS: ", wrms_hmc)
-        fig, ax = Plotter.errorbar(
-            x, y, yerr=yerr, fig=fig, ax=ax, color="black", alpha=0.25
-        )
-
-        # SN mask
-        if legacy is not None:
-            l_mask = l_sn_mask.astype(bool)[:, 0, 0]
-            l_x = legacy["redshift"][l_mask]
-            l_y = l_weighted_mean[l_mask]
-            l_yerr = l_weighted_err[l_mask]
-            print(l_x.shape, l_y.shape, l_yerr.shape, l_mask.shape)
-            print("l_sn_mask", l_mask.sum())
-            mad_hmc = k_nmad * np.median(np.abs(l_y - np.median(l_y)))
-            print("l_NMAD: ", mad_hmc)
-            wrms_hmc = np.std(l_y, axis=0)
-            print("l_RMS: ", wrms_hmc)
-            fig, ax = Plotter.errorbar(
-                l_x,
-                l_y,
-                yerr=l_yerr,
-                fig=fig,
-                ax=ax,
-                marker="s",
-                color="red",
-                alpha=0.25,
-            )
-
-        mask = sn_mask.astype(bool)[:, 0, 0]
-        x = data.redshift[mask][:, 0, 0]
-        y = weighted_mean[mask][:, 0]
-        yerr = weighted_err[mask][:, 0]
-        print(x.shape, y.shape, yerr.shape, mask.shape)
-        print("sn_mask", mask.sum())
-        mad_hmc = k_nmad * np.median(np.abs(y - np.median(y)))
-        print("NMAD: ", mad_hmc)
-        wrms_hmc = np.std(y, axis=0)
-        print("RMS: ", wrms_hmc)
-        fig, ax = Plotter.errorbar(
-            x, y, yerr=yerr, fig=fig, ax=ax, color="red", alpha=0.25
-        )
-
-        # Twins mask
-        if legacy is not None:
-            l_mask = l_twins_mask.astype(bool)
-            l_x = legacy["redshift"][l_mask]
-            l_y = l_weighted_mean[l_mask]
-            l_yerr = l_weighted_err[l_mask]
-            print(l_x.shape, l_y.shape, l_yerr.shape, l_mask.shape)
-            print("l_twins_mask", l_mask.sum())
-            mad_hmc = k_nmad * np.median(np.abs(l_y - np.median(l_y)))
-            print("l_NMAD: ", mad_hmc)
-            wrms_hmc = np.std(l_y, axis=0)
-            print("l_RMS: ", wrms_hmc)
-            fig, ax = Plotter.errorbar(
-                l_x,
-                l_y,
-                yerr=l_yerr,
-                fig=fig,
-                ax=ax,
-                marker="s",
-                color="blue",
-                alpha=0.25,
-            )
-
-        mask = twins_mask.astype(bool)[:, 0, 0]
-        x = data.redshift[mask][:, 0, 0]
-        y = weighted_mean[mask][:, 0]
-        yerr = weighted_err[mask][:, 0]
-        print(x.shape, y.shape, yerr.shape, mask.shape)
-        print("twins_mask", mask.sum())
-        mad_hmc = k_nmad * np.median(np.abs(y - np.median(y)))
-        print("NMAD: ", mad_hmc)
-        wrms_hmc = np.std(y, axis=0)
-        print("RMS: ", wrms_hmc)
-        fig, ax = Plotter.errorbar(
-            x, y, yerr=yerr, fig=fig, ax=ax, color="blue", alpha=0.25
-        )
-
-        # Final
-
-        if legacy is not None:
-            l_mask = (l_twins_mask * l_sn_mask[:, 0, 0]).astype(bool)
-            l_x = legacy["redshift"][l_mask]
-            l_y = l_weighted_mean[l_mask]
-            l_yerr = l_weighted_err[l_mask]
-            print(l_x.shape, l_y.shape, l_yerr.shape, l_mask.shape)
-            print("l_final", l_mask.sum())
-            mad_hmc = k_nmad * np.median(np.abs(l_y - np.median(l_y)))
-            print("l_NMAD: ", mad_hmc)
-            wrms_hmc = np.std(l_y, axis=0)
-            print("l_RMS: ", wrms_hmc)
-            fig, ax = Plotter.errorbar(
-                l_x,
-                l_y,
-                yerr=l_yerr,
-                fig=fig,
-                ax=ax,
-                marker="s",
-                color="green",
-            )
-
-        mask = (twins_mask * sn_mask).astype(bool)[:, 0, 0]
-        x = data.redshift[mask][:, 0, 0]
-        y = weighted_mean[mask][:, 0]
-        yerr = weighted_err[mask][:, 0]
-        print(x.shape, y.shape, yerr.shape, mask.shape)
-        print("final", mask.sum())
-        mad_hmc = k_nmad * np.median(np.abs(y - np.median(y)))
-        print("NMAD: ", mad_hmc)
-        wrms_hmc = np.std(y, axis=0)
-        print("RMS: ", wrms_hmc)
-
-        fig, ax = Plotter.errorbar(x, y, yerr=yerr, fig=fig, ax=ax, color="green")
-
+        fig, ax = Plotter.axhline(0, fig=fig, ax=ax, color="black")
         ax.set_ylim(-0.75, 0.75)
-
+        # ax.legend()
         fig = Plotter.save(fig, savepath)
         Plotter.close(fig, ax)

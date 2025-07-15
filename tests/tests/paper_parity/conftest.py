@@ -579,7 +579,7 @@ def nflow_params(pae_params: "PAEParams") -> "NFlowParams":
         "physical_latents": True,
         "n_hidden_units": 12,
         "n_layers": 18,
-        "patience": 0.025,
+        "patience": 0.02,
         "epochs": 5000,
         "batch_normalisation": False,
         "validation_frac": 0.22,
@@ -643,7 +643,10 @@ def posterior_params(
                 {
                     "subset": "train",
                     "twins": "boone_data.dat",
-                    "legacy": "legacy/train_data_kfold0_posterior_03Dlatent_layers256-128-32_orig.npy",
+                    "legacy": (
+                        "legacy/train_data_kfold0_posterior_03Dlatent_layers256-128-32_orig.npy",
+                        "legacy/test_data_kfold0_posterior_03Dlatent_layers256-128-32_orig.npy",
+                    ),
                     "filter": {
                         "redshift": {"min": 0.02, "max": 1.0},
                         "phase": {"min": -10, "max": 40},
@@ -652,7 +655,10 @@ def posterior_params(
                 {
                     "subset": "test",
                     "twins": "boone_data.dat",
-                    "legacy": "legacy/test_data_kfold0_posterior_03Dlatent_layers256-128-32_orig.npy",
+                    "legacy": (
+                        "legacy/train_data_kfold0_posterior_03Dlatent_layers256-128-32_orig.npy",
+                        "legacy/test_data_kfold0_posterior_03Dlatent_layers256-128-32_orig.npy",
+                    ),
                     "filter": {
                         "redshift": {"min": 0.02, "max": 1.0},
                         "phase": {"min": -10, "max": 40},

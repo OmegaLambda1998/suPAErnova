@@ -503,14 +503,30 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
 
                     legacy_data = None
                     if o.legacy is not None:
-                        print(o.legacy)
-                        legacy_path = self.nflow.pae.data.data_dir / o.legacy
-                        if legacy_path.exists():
-                            legacy_data = np.load(legacy_path, allow_pickle=True).item()
-                        else:
-                            self.log.error(
-                                f"{legacy_path} does not exist, can not load legacy data."
-                            )
+                        legacy_data = {}
+                        for p in o.legacy:
+                            legacy_path = self.nflow.pae.data.data_dir / p
+                            if legacy_path.exists():
+                                l_d = np.load(legacy_path, allow_pickle=True).item()
+                                for k, v in l_d.items():
+                                    if k not in legacy_data:
+                                        legacy_data[k] = v
+                                    else:
+                                        found = False
+                                        for dim in range(len(v.shape)):
+                                            if (
+                                                not found
+                                                and legacy_data[k].shape[dim]
+                                                != v.shape[dim]
+                                            ):
+                                                legacy_data[k] = np.concat(
+                                                    (legacy_data[k], v), axis=dim
+                                                )
+                                                found = True
+                            else:
+                                self.log.error(
+                                    f"{legacy_path} does not exist, can not load legacy data."
+                                )
 
                     DispersionPlotter.plot_dispersion(
                         data, hmc, o, twins=twins, legacy=legacy_data

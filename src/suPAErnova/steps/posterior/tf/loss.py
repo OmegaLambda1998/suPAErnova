@@ -5,4 +5,4 @@ if TYPE_CHECKING:
 
 
 def NegLogLikelihood(y_true, y_pred, *, model: "TFPosteriorModel"):
-    return -y_pred / 100
+    return -y_pred

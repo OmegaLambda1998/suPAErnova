@@ -12,6 +12,8 @@ import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
 if TYPE_CHECKING:
+    from typing import Self
+
     from suPAErnova.steps.pae.tf import TFPAEModel
     from suPAErnova.steps.nflow.tf import TFNFlowModel
     from suPAErnova.configs.steps.data import DataStepResult
@@ -68,6 +70,8 @@ class PosteriorMap(tf.Module):
         # === Priors ===
         self.u_delta_av_min: float = config.u_delta_av_min
         self.u_delta_av_max: float = config.u_delta_av_max
+        self.u_delta_av_start: float = config.u_delta_av_start
+        self.u_delta_av_end: float = config.u_delta_av_end
         self.u_delta_av_mean: float = config.u_delta_av_mean
         self.u_delta_av_std: float = config.u_delta_av_std
         self.u_delta_av_prior = tfd.Normal(
@@ -76,6 +80,8 @@ class PosteriorMap(tf.Module):
         if self.nflow.physical_latents:
             self.n_pos += 1
 
+        self.u_latents_min: float = config.u_latents_min
+        self.u_latents_max: float = config.u_latents_max
         self.u_latents_mean: float = config.u_latents_mean
         self.u_latents_std: float = config.u_latents_std
         self.u_latents_prior = tfd.MultivariateNormalDiag(
@@ -85,6 +91,8 @@ class PosteriorMap(tf.Module):
 
         self.delta_av_min: float = config.delta_av_min
         self.delta_av_max: float = config.delta_av_max
+        self.delta_av_start: float = config.delta_av_start
+        self.delta_av_end: float = config.delta_av_end
         self.delta_av_mean: float = config.delta_av_mean
         self.delta_av_std: float = config.delta_av_std
         self.delta_av_prior = tfd.Normal(
@@ -94,6 +102,8 @@ class PosteriorMap(tf.Module):
         self.train_delta_m: bool = config.train_delta_m
         self.delta_m_min: float = config.delta_m_min
         self.delta_m_max: float = config.delta_m_max
+        self.delta_m_start: float = config.delta_m_start
+        self.delta_m_end: float = config.delta_m_end
         self.delta_m_mean: float = config.delta_m_mean
         self.delta_m_std: float = config.delta_m_std
         self.delta_m_prior = tfd.Normal(loc=self.delta_m_mean, scale=self.delta_m_std)
@@ -103,6 +113,8 @@ class PosteriorMap(tf.Module):
         self.train_delta_p: bool = config.train_delta_p
         self.delta_p_min: float = config.delta_p_min
         self.delta_p_max: float = config.delta_p_max
+        self.delta_p_start: float = config.delta_p_start
+        self.delta_p_end: float = config.delta_p_end
         self.delta_p_mean: float = config.delta_p_mean
         self.delta_p_std: float = config.delta_p_std
         self.delta_p_prior = tfd.Normal(loc=self.delta_p_mean, scale=self.delta_p_std)
@@ -112,6 +124,8 @@ class PosteriorMap(tf.Module):
         self.train_bias: bool = config.train_bias
         self.bias_min: float = config.bias_min
         self.bias_max: float = config.bias_max
+        self.bias_start: float = config.bias_start
+        self.bias_end: float = config.bias_end
         self.bias_mean: float = config.bias_mean
         self.bias_std: float = config.bias_std
         self.bias_prior = tfd.Normal(loc=self.bias_mean, scale=self.bias_std)
@@ -232,10 +246,10 @@ class PosteriorMap(tf.Module):
                     u_delta_av = self.u_delta_av_mean * tf.ones((self.sn_dim, 1))
                 elif stage.init_u_delta_av == "scale":
                     u_delta_av_slope = (
-                        self.u_delta_av_max - self.u_delta_av_min
+                        self.u_delta_av_end - self.u_delta_av_start
                     ) / stage.n_chains
                     u_delta_av_scale = (
-                        self.u_delta_av_min
+                        self.u_delta_av_start
                         + (stage.n_chains - chain) * u_delta_av_slope
                     )
                     u_delta_av = tf.ones((self.sn_dim, 1)) * u_delta_av_scale
@@ -253,11 +267,11 @@ class PosteriorMap(tf.Module):
             if stage.init_latents == "z_data":
                 # Generate z_latents directly from data
                 pae_input = tf.concat((self.data.time, self.data.amplitude), axis=-1)
-                z_latents = self.pae.encoder(
+                z_latents = self.pae(
                     pae_input,
                     training=False,
                     mask=self.data.mask,
-                )[:, 0, :]
+                )[0][:, 0, :]
                 if self.pae.physical_latents:
                     if stage.init_delta_av == "data":
                         delta_av = z_latents[:, 0:1]
@@ -291,10 +305,10 @@ class PosteriorMap(tf.Module):
                         u_delta_av = self.u_delta_av.best
                     elif stage.init_u_delta_av == "scale":
                         u_delta_av_slope = (
-                            self.u_delta_av_max - self.u_delta_av_min
+                            self.u_delta_av_end - self.u_delta_av_start
                         ) / stage.n_chains
                         u_delta_av_scale = (
-                            self.u_delta_av_min
+                            self.u_delta_av_start
                             + (stage.n_chains - chain) * u_delta_av_slope
                         )
                         u_delta_av = tf.ones((self.sn_dim, 1)) * u_delta_av_scale
@@ -319,10 +333,10 @@ class PosteriorMap(tf.Module):
                         delta_av = self.delta_av.best
                     elif stage.init_delta_av == "scale":
                         delta_av_slope = (
-                            self.delta_av_max - self.delta_av_min
+                            self.delta_av_end - self.delta_av_start
                         ) / stage.n_chains
                         delta_av_scale = (
-                            self.delta_av_min
+                            self.delta_av_start
                             + (stage.n_chains - chain) * delta_av_slope
                         )
                         delta_av = tf.ones((self.sn_dim, 1)) * delta_av_scale
@@ -387,10 +401,10 @@ class PosteriorMap(tf.Module):
         ):
             if stage.init_delta_av == "scale":
                 delta_av_slope = (
-                    self.delta_av_max - self.delta_av_min
+                    self.delta_av_end - self.delta_av_start
                 ) / stage.n_chains
                 delta_av_scale = (
-                    self.delta_av_min + (stage.n_chains - chain) * delta_av_slope
+                    self.delta_av_start + (stage.n_chains - chain) * delta_av_slope
                 )
                 delta_av = tf.ones((self.sn_dim, 1)) * delta_av_scale
             elif stage.init_delta_av == "random":
@@ -402,8 +416,10 @@ class PosteriorMap(tf.Module):
         if stage.init_delta_m == "random":
             delta_m = self.delta_m_prior.sample((self.sn_dim, 1))
         elif stage.init_delta_m == "scale":
-            delta_m_slope = (self.delta_m_max - self.delta_m_min) / stage.n_chains
-            delta_m_scale = self.delta_m_min + (stage.n_chains - chain) * delta_m_slope
+            delta_m_slope = (self.delta_m_end - self.delta_m_start) / stage.n_chains
+            delta_m_scale = (
+                self.delta_m_start + (stage.n_chains - chain) * delta_m_slope
+            )
             delta_m = tf.zeros((self.sn_dim, 1)) + delta_m_scale
         elif stage.init_delta_m == "constant":
             delta_m = self.delta_m_mean * tf.ones((self.sn_dim, 1))
@@ -412,8 +428,10 @@ class PosteriorMap(tf.Module):
         if stage.init_delta_p == "random":
             delta_p = self.delta_p_prior.sample((self.sn_dim, 1))
         elif stage.init_delta_p == "scale":
-            delta_p_slope = (self.delta_p_max - self.delta_p_min) / stage.n_chains
-            delta_p_scale = self.delta_p_min + (stage.n_chains - chain) * delta_p_slope
+            delta_p_slope = (self.delta_p_end - self.delta_p_start) / stage.n_chains
+            delta_p_scale = (
+                self.delta_p_start + (stage.n_chains - chain) * delta_p_slope
+            )
             delta_p = tf.zeros((self.sn_dim, 1)) + delta_p_scale
         elif stage.init_delta_p == "constant":
             delta_p = self.delta_p_mean * tf.ones((self.sn_dim, 1))
@@ -423,6 +441,14 @@ class PosteriorMap(tf.Module):
             bias = self.bias_prior.sample((self.sn_dim, 1))
         elif stage.init_bias in {"scale", "constant"}:
             bias = self.bias_mean * tf.ones((self.sn_dim, 1))
+
+        delta_m = tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max)
+        delta_p = tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max)
+        bias = tf.clip_by_value(bias, self.bias_min, self.bias_max)
+        u_delta_av = tf.clip_by_value(
+            u_delta_av, self.u_delta_av_min, self.u_delta_av_max
+        )
+        u_latents = tf.clip_by_value(u_latents, self.u_latents_min, self.u_latents_max)
 
         position = []
         if self.train_delta_m:
@@ -499,23 +525,53 @@ class PosteriorMap(tf.Module):
             i += 1
         u_latents = position[:, i:]
 
+        delta_m = tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max)
+        delta_p = tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max)
+        bias = tf.clip_by_value(bias, self.bias_min, self.bias_max)
+        u_delta_av = tf.clip_by_value(
+            u_delta_av, self.u_delta_av_min, self.u_delta_av_max
+        )
+        u_latents = tf.clip_by_value(u_latents, self.u_latents_min, self.u_latents_max)
+
         return tf.concat([delta_m, delta_p, bias, u_delta_av, u_latents], axis=-1)
 
-    def prior(self, position) -> None:
+    def prior(self, position) -> tf.Tensor:
+        log_prior = tf.zeros((position.shape[0],))
+        inf_prior = -tf.ones_like(log_prior) * np.inf
+
         delta_m = position[:, 0:1]
         delta_p = position[:, 1:2]
         bias = position[:, 2:3]
         u_delta_av = position[:, 3:4]
         u_latents = position[:, 4:]
 
-        log_prior = self.u_latents_prior.log_prob(u_latents)
-        # if self.train_delta_m:
-        #     log_prior += self.delta_m_prior.log_prob(delta_m)[:, 0]
-        # if self.train_delta_p:
-        #     log_prior += self.delta_p_prior.log_prob(delta_p)[:, 0]
-        # if self.train_bias:
-        #     log_prior += self.bias_prior.log_prob(bias)[:, 0]
+        u_latents_log_prior = self.u_latents_prior.log_prob(u_latents)
+        log_prior += tf.where(
+            tf.math.is_nan(u_latents_log_prior), inf_prior, u_latents_log_prior
+        )
+
+        if self.train_delta_m:
+            delta_m_log_prior = self.delta_m_prior.log_prob(delta_m)[:, 0]
+            log_prior += tf.where(
+                tf.math.is_nan(delta_m_log_prior), inf_prior, delta_m_log_prior
+            )
+
+        if self.train_delta_p:
+            delta_p_log_prior = self.delta_p_prior.log_prob(delta_p)[:, 0]
+            log_prior += tf.where(
+                tf.math.is_nan(delta_p_log_prior), inf_prior, delta_p_log_prior
+            )
+
+        if self.train_bias:
+            bias_log_prior = self.bias_prior.log_prob(bias)[:, 0]
+            log_prior += tf.where(
+                tf.math.is_nan(bias_log_prior), inf_prior, bias_log_prior
+            )
+
         if self.nflow.physical_latents:
-            log_prior += self.u_delta_av_prior.log_prob(u_delta_av)[:, 0]
+            u_delta_av_log_prior = self.u_delta_av_prior.log_prob(u_delta_av)[:, 0]
+            log_prior += tf.where(
+                tf.math.is_nan(u_delta_av_log_prior), inf_prior, u_delta_av_log_prior
+            )
 
         return log_prior

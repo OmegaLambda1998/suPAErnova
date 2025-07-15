@@ -51,33 +51,45 @@ class PosteriorModelConfig(AbstractModelConfig):
 
     random_initial_positions: bool
 
-    u_delta_av_min: float = -1.0
-    u_delta_av_max: float = 1.0
+    u_delta_av_min: float = -10.0
+    u_delta_av_max: float = 10.0
+    u_delta_av_start: float = -1.0
+    u_delta_av_end: float = 1.0
     u_delta_av_mean: float = 0.0
     u_delta_av_std: float = 1.0
 
+    u_latents_min: float = -10.0
+    u_latents_max: float = 10.0
     u_latents_mean: float = 0.0
     u_latents_std: float = 1.0
 
-    delta_av_min: float = -0.5
-    delta_av_max: float = 0.5
+    delta_av_min: float = -5.0
+    delta_av_max: float = 5.0
+    delta_av_start: float = -0.5
+    delta_av_end: float = 0.5
     delta_av_mean: float = 0.0
     delta_av_std: float = 0.5
 
     train_delta_m: bool
-    delta_m_min: float = -1.5
-    delta_m_max: float = 1.5
+    delta_m_min: float = -15
+    delta_m_max: float = 15
+    delta_m_start: float = -1.5
+    delta_m_end: float = 1.5
     delta_m_mean: float = 0.0
     delta_m_std: float = 0.1
 
     train_delta_p: bool
-    delta_p_min: float = -1.0
-    delta_p_max: float = 1.0
+    delta_p_min: float = -10
+    delta_p_max: float = 10
+    delta_p_start: float = -1.0
+    delta_p_end: float = 1.0
     delta_p_mean: float = 0.0
     delta_p_std: float = 0.01
 
     train_bias: bool
-    bias_min: float = -1.0
-    bias_max: float = 1.0
+    bias_min: float = -10
+    bias_max: float = 10
+    bias_start: float = -1.0
+    bias_end: float = 1.0
     bias_mean: float = 0.0
     bias_std: float = 1.0

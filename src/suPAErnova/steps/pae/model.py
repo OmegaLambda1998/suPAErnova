@@ -309,23 +309,31 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                 self.model.train_model(stage)
                 self.model.save_checkpoint(savepath)
 
+        final_savepath = self.paths.out / self.model.name
+        self.log.debug(f"Saving final PAE model weights to {final_savepath}")
+        self.model.save_checkpoint(final_savepath)
+
         self._model(force=True)
 
         final_stage = self.run_stages[-1]
         final_stage.prev_stage = None
         self.model.stage = final_stage
-        final_loadpath = (
-            self.paths.out / self.model.name / f"{stage.stage}_{stage.fname}"
-        )
+        final_loadpath = self.paths.out / self.model.name
 
         self.log.debug(f"Loading final PAE model weights from {final_loadpath}")
         self.model.load_checkpoint(final_loadpath, reset_weights=False)
 
     @override
     def _result(self) -> None:
-        final_savepath = self.paths.out / self.model.name
-        self.log.debug(f"Saving final PAE model weights to {final_savepath}")
-        self.model.save_checkpoint(final_savepath)
+        self._model(force=True)
+
+        final_stage = self.run_stages[-1]
+        final_stage.prev_stage = None
+        self.model.stage = final_stage
+        final_loadpath = self.paths.out / self.model.name
+
+        self.log.debug(f"Loading final PAE model weights from {final_loadpath}")
+        self.model.load_checkpoint(final_loadpath, reset_weights=False)
 
         self.log.debug("Calculating PAE results")
         dt_results: dict[str, dict[str, PAEStepResult]] = {}

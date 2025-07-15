@@ -23,8 +23,8 @@ version = "0.1.0"
 
 [project.optional-dependencies]
 legacy = ["supaernova_legacy"]
-tf-cpu = ["tensorflow-cpu>=2.18,<2.19", "tf-keras>=2.18,<2.19", "tensorflow-probability>=0.25", "tensorboard>=2.18,<2.19", "tensorboard_plugin_profile>=2.19,<2.20"]
-tf-rocm = ["tensorflow-rocm>=2.18,<2.19", "tf-keras>=2.18,<2.19", "tensorflow-probability>=0.25", "tensorboard>=2.18,<2.19", "tensorboard_plugin_profile>=2.19,<2.20"]
+tf-cpu = ["tensorflow-cpu>=2.18.1,<2.19", "tf-keras>=2.18,<2.19", "tensorflow-probability>=0.25", "tensorboard>=2.18,<2.19", "tensorboard_plugin_profile>=2.19,<2.20"]
+tf-rocm = ["tensorflow-rocm>=2.18.1,<2.19", "tf-keras>=2.18,<2.19", "tensorflow-probability>=0.25", "tensorboard>=2.18,<2.19", "tensorboard_plugin_profile>=2.19,<2.20"]
 tf-nightly-rocm = ["tf-nightly-rocm>=2.19.0.dev,<2.20; sys_platform=='linux'", "tf-keras-nightly>=2.19.0.dev,<2.20", "tfp-nightly>=0.26.0.dev,<0.27", "tb-nightly>=2.19.0a,<2.20", "tbp-nightly>=2.20.9a,<2.21"]
 
 [build-system]

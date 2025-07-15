@@ -79,7 +79,7 @@ class TFPosteriorModel(ks.Model):
             if self.subset == "train"
             else np.array(self.pae.stage.test_spec_mask).astype(np.int32)
         )
-        self.data.mask *= self.spec_mask
+        self.data.mask *= self.sn_mask * self.spec_mask
 
         self.sn_dim = self.data.time.shape[0]
         self.spec_dim = self.data.time.shape[1]
@@ -120,17 +120,17 @@ class TFPosteriorModel(ks.Model):
         self.target_acceptance_rate: float = options.target_acceptance_rate
 
         vars(self)["hmc"]: PosteriorHMCValue = PosteriorHMCValue(
-            tf.Variable(
+            tf.Variable(  # Samples
                 [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.n_samples,
                 dtype=tf.float32,
                 shape=(self.n_samples, self.sn_dim, self.map.n_pae_latents),
             ),
-            tf.Variable(
+            tf.Variable(  # Step Sizes Final
                 [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.n_samples,
                 dtype=tf.float32,
                 shape=(self.n_samples, self.sn_dim, self.map.n_pae_latents),
             ),
-            tf.Variable(
+            tf.Variable(  # Is Accepted
                 [[False] * self.sn_dim] * self.n_samples,
                 dtype=tf.bool,
                 shape=(
@@ -138,32 +138,32 @@ class TFPosteriorModel(ks.Model):
                     self.sn_dim,
                 ),
             ),
-            tf.Variable(
+            tf.Variable(  # UDeltaAv
                 [[[0] * 1] * self.sn_dim] * self.n_samples,
                 dtype=tf.float32,
                 shape=(self.n_samples, self.sn_dim, 1),
             ),
-            tf.Variable(
+            tf.Variable(  # ULatents
                 [[[0] * self.map.n_u_latents] * self.sn_dim] * self.n_samples,
                 dtype=tf.float32,
                 shape=(self.n_samples, self.sn_dim, self.map.n_u_latents),
             ),
-            tf.Variable(
+            tf.Variable(  # DeltaAv
                 [[[0] * 1] * self.sn_dim] * self.n_samples,
                 dtype=tf.float32,
                 shape=(self.n_samples, self.sn_dim, 1),
             ),
-            tf.Variable(
+            tf.Variable(  # ZLatents
                 [[[0] * self.map.n_z_latents] * self.sn_dim] * self.n_samples,
                 dtype=tf.float32,
                 shape=(self.n_samples, self.sn_dim, self.map.n_z_latents),
             ),
-            tf.Variable(
+            tf.Variable(  # DeltaM
                 [[[0] * 1] * self.sn_dim] * self.n_samples,
                 dtype=tf.float32,
                 shape=(self.n_samples, self.sn_dim, 1),
             ),
-            tf.Variable(
+            tf.Variable(  # DeltaP
                 [[[0] * 1] * self.sn_dim] * self.n_samples,
                 dtype=tf.float32,
                 shape=(self.n_samples, self.sn_dim, 1),
@@ -189,6 +189,9 @@ class TFPosteriorModel(ks.Model):
         input_mask = (
             mask if mask is not None else tf.ones_like(input_amp, dtype=tf.int32)
         )
+
+        # Determine the prior probability early to avoid exploring non-physical parameter spaces.
+        log_prior = self.map.prior(input_position)
 
         delta_m = input_position[:, 0:1]
         delta_p = input_position[:, 1:2]
@@ -223,7 +226,6 @@ class TFPosteriorModel(ks.Model):
         decoder_inputs = tf.concat((input_phase, zs), axis=-1)
         synth_amp = self.pae.decoder(decoder_inputs, mask=input_mask)
 
-        # XXX: Test whether this fixes things
         if self.map.train_delta_m and not self.pae.physical_latents:
             delta_m = ks.layers.RepeatVector(1)(delta_m)
             synth_amp *= delta_m
@@ -232,8 +234,11 @@ class TFPosteriorModel(ks.Model):
             bias = ks.layers.RepeatVector(1)(bias)
             synth_amp += bias
 
-        delta_p = ks.layers.RepeatVector(1)(delta_p)
-        phase = input_phase + delta_p
+        phase = input_phase
+        # XXX: Test whether this fixes things
+        if self.map.train_delta_p:  # and not self.pae.physical_latents:
+            delta_p = ks.layers.RepeatVector(1)(delta_p)
+            phase += delta_p
 
         # Measured average AE reconstruction error at current times
         sigma_recon = tf.transpose(
@@ -270,8 +275,12 @@ class TFPosteriorModel(ks.Model):
         )
         log_likelihood = log_likelihood_num / log_likelihood_sum
 
-        # Determine the prior probability
-        log_prior = self.map.prior(input_position)
+        inf_likelihood = -tf.ones_like(log_likelihood) * np.inf
+        log_likelihood = tf.where(
+            tf.math.is_nan(log_likelihood),
+            inf_likelihood,
+            log_likelihood,
+        )
 
         return log_prior + log_likelihood
 
@@ -370,12 +379,20 @@ class TFPosteriorModel(ks.Model):
                         )
                         tf.summary.scalar(
                             "converged",
-                            tf.reduce_mean(tf.cast(self.map.converged, tf.int32)),
+                            tf.reduce_sum(
+                                tf.ones_like(self.map.converged, dtype=tf.int32)
+                                * tf.cast(self.map.converged, tf.int32)
+                            )
+                            / self.map.converged.shape[0],
                             step=chain,
                         )
                         tf.summary.scalar(
-                            "unimproved",
-                            1 - tf.reduce_mean(tf.cast(self.map.improved, tf.int32)),
+                            "improved",
+                            tf.reduce_sum(
+                                tf.ones_like(self.map.improved, dtype=tf.int32)
+                                * tf.cast(self.map.improved, tf.int32)
+                                / self.map.converged.shape[0],
+                            ),
                             step=chain,
                         )
                         tf.summary.scalar(
@@ -387,18 +404,18 @@ class TFPosteriorModel(ks.Model):
                             step=chain,
                         )
                         tf.summary.scalar(
-                            "min_negative_log_prob",
-                            tf.reduce_min(self.map.negative_log_prob),
+                            "min_log_prob",
+                            tf.reduce_min(-self.map.negative_log_prob),
                             step=chain,
                         )
                         tf.summary.scalar(
-                            "mean_negative_log_prob",
-                            tf.reduce_mean(self.map.negative_log_prob),
+                            "mean_log_prob",
+                            tf.reduce_mean(-self.map.negative_log_prob),
                             step=chain,
                         )
                         tf.summary.scalar(
-                            "max_negative_log_prob",
-                            tf.reduce_max(self.map.negative_log_prob),
+                            "max_log_prob",
+                            tf.reduce_max(-self.map.negative_log_prob),
                             step=chain,
                         )
                         tf.summary.histogram(
@@ -782,95 +799,66 @@ class TFPosteriorModel(ks.Model):
                     tf.Variable(delta_m),
                     tf.Variable(delta_p),
                 )
-
                 return
         self.log.debug("Running HMC")
 
         initial_position = self.map.position.best
-
-        mask = np.squeeze(self.sn_mask.astype(np.bool_), axis=(1, 2))
-
-        pae_input = tf.concat((self.data.time, self.data.amplitude), axis=-1)
-        z_latents = self.pae.encoder(
-            pae_input,
-            training=False,
-            mask=self.data.mask,
-        ).numpy()[mask][:, 0, :]
-        z_latent_std = np.std(z_latents, axis=0)
-
-        zs = z_latents[
-            :, : self.map.pae.n_z_latents + (1 if self.map.pae.physical_latents else 0)
-        ]
-        if not self.nflow.physical_latents:
-            zs = zs[:, 1:]
-
-        u_latents = self.nflow.z_to_u(zs, permute=True)
-        u_latent_std = np.std(u_latents, axis=0)
-
-        stds = []
-        ind = 0
-        if self.map.train_delta_m:
-            stds.append(z_latent_std[ind : ind + 1])
-            ind += 1
-        if self.map.train_delta_p:
-            stds.append(z_latent_std[ind : ind + 1])
-            ind += 1
-
-        ind = 0
-        if self.map.nflow.physical_latents:
-            stds.append(u_latent_std[ind : ind + 1])
-            ind += 1
-        stds.append(u_latent_std[ind:])
-        step_size = tf.zeros_like(initial_position) + tf.concat(stds, axis=-1)
-
         if self.profile and savepath is not None:
             log_dir = savepath.parent / self.log_path / savepath.stem / "hmc"
             summary_writer = tf.summary.create_file_writer(str(log_dir))
+            tf.summary.experimental.set_step(0)
+
+        stds = []
+        if self.map.train_delta_m:
+            stds.append(np.std(self.map.delta_m.best, axis=0))
+        if self.map.train_delta_p:
+            stds.append(np.std(self.map.delta_p.best, axis=0))
+        if self.map.nflow.physical_latents:
+            stds.append(np.std(self.map.u_delta_av.best, axis=0))
+        stds.append(np.std(self.map.u_latents.best, axis=0))
+        stds = tf.concat(stds, axis=-1)
+        step_size = tf.repeat(
+            tf.expand_dims(stds, axis=0), repeats=initial_position.shape[0], axis=0
+        )
 
         progress = tqdm(
             total=(2 * self.n_leapfrog) * (self.n_burnin + self.n_samples),
             leave=True,
         )
-        tf.summary.experimental.set_step(0)
 
         @tf.py_function(Tout=[])
-        def update_progress(log_prob) -> None:
+        def update_progress(pos, log_prob) -> None:
             progress.set_description(
                 "Burnin"
                 if tf.summary.experimental.get_step()
                 < self.n_burnin * (2 * self.n_leapfrog)
                 else "Run"
             )
-            progress.set_postfix({
-                "neg_log_prob": (
-                    f"{float(np.nanmin(-log_prob.numpy())):.2E}",
-                    f"{float(np.nanmean(-log_prob.numpy())):.2E}",
-                    f"{float(np.nanmax(-log_prob.numpy())):.2E}",
-                )
-            })
             progress.update()
 
             if summary_writer is not None:
                 with summary_writer.as_default():
-                    tf.summary.scalar("min_log_prob", np.nanmin(log_prob.numpy()))
-                    tf.summary.scalar("mean_log_prob", np.nanmean(log_prob.numpy()))
-                    tf.summary.scalar("max_log_prob", np.nanmax(log_prob.numpy()))
                     tf.summary.experimental.set_step(
                         tf.summary.experimental.get_step() + 1
                     )
 
-        def unnormalized_posterior_log_prob(pos):
+                    lp = log_prob.numpy()
+                    lp = lp[lp != -np.inf]
+
+                    tf.summary.scalar("min_log_prob", np.nanmin(lp))
+                    tf.summary.scalar("mean_log_prob", np.nanmean(lp))
+                    tf.summary.scalar("max_log_prob", np.nanmax(lp))
+
+        def unnormalized_posterior_log_prob(*pos):
+            input_position = self.map.get_position(*pos)
+            # tf.print("input_position", input_position.shape, input_position)
             log_prob = self(
-                (
-                    self.map.get_position(pos, best=True),
-                    self.data.time,
-                    self.data.amplitude,
-                    self.data.sigma,
-                ),
+                (input_position, self.data.time, self.data.amplitude, self.data.sigma),
                 training=False,
                 mask=self.data.mask,
             )
-            update_progress(log_prob)
+            update_progress(input_position, log_prob)
+            # tf.print("log_prob", log_prob.shape, log_prob)
             return log_prob
 
         def trace_fn(_, pkr):
@@ -890,11 +878,12 @@ class TFPosteriorModel(ks.Model):
                 inner_kernel=hmc,
                 num_adaptation_steps=int(self.n_burnin * 0.8),
                 target_accept_prob=self.target_acceptance_rate,
+                reduce_fn=tfp.math.reduce_log_harmonic_mean_exp,
             )
 
             samples, [step_sizes_final, is_accepted] = tfp.mcmc.sample_chain(
-                self.n_samples,
-                initial_position,
+                num_results=self.n_samples,
+                current_state=initial_position,
                 kernel=kernel,
                 num_burnin_steps=self.n_burnin,
                 trace_fn=trace_fn,
