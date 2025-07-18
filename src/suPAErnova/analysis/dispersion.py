@@ -61,10 +61,10 @@ class DispersionPlotter(Plotter):
         redshift_error = (redshift * 3e5 + 300.0) / 3e5
         magshift_error = abs(-5 * np.log10(redshift / redshift_error))
 
-        amplitudes = np.concat(
+        amplitudes = np.concatenate(
             [np.mean(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs], axis=0
         )[..., 0]
-        amplitude_stds = np.concat(
+        amplitude_stds = np.concatenate(
             [
                 np.sqrt(np.square(np.std(hmc.hmc.delta_m, axis=0, keepdims=True)))
                 for hmc in hmcs

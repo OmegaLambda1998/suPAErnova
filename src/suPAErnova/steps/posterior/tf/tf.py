@@ -772,7 +772,7 @@ class TFPosteriorModel(ks.Model):
                     u_delta_av = self.hmc.u_delta_av
                 u_latents = samples[..., ind:]
                 if self.map.nflow.physical_latents:
-                    us = np.concat([u_delta_av, u_latents], axis=-1)
+                    us = np.concatenate([u_delta_av, u_latents], axis=-1)
                 else:
                     us = u_latents
                 us = us.reshape(-1, self.map.n_flow_latents)
@@ -917,7 +917,7 @@ class TFPosteriorModel(ks.Model):
             u_delta_av = self.hmc.u_delta_av
         u_latents = samples[..., ind:]
         if self.map.nflow.physical_latents:
-            us = np.concat([u_delta_av, u_latents], axis=-1)
+            us = np.concatenate([u_delta_av, u_latents], axis=-1)
         else:
             us = u_latents
         us = us.reshape(-1, self.map.n_flow_latents)

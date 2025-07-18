@@ -311,8 +311,8 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                     map_labels[ind] = "Δℳ"
                     ind += 1
                     map_labels[ind] = "Δp"
-                map_init_results = np.concat(map_init_results, axis=-1)
-                map_best_results = np.concat(map_best_results, axis=-1)
+                map_init_results = np.concatenate(map_init_results, axis=-1)
+                map_best_results = np.concatenate(map_best_results, axis=-1)
                 subset_map_init_results[seed] = map_init_results
                 subset_map_best_results[seed] = map_best_results
                 subset_map_labels[seed] = map_labels
@@ -519,7 +519,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                                                 and legacy_data[k].shape[dim]
                                                 != v.shape[dim]
                                             ):
-                                                legacy_data[k] = np.concat(
+                                                legacy_data[k] = np.concatenate(
                                                     (legacy_data[k], v), axis=dim
                                                 )
                                                 found = True
