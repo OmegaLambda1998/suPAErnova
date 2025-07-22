@@ -1,5 +1,5 @@
 [project]
-name = "suPAErnova"
+name = "supaernova"
 version = "1.0.0"
 description = "A Probabilistic Autoencoder for Type Ia Supernovae Spectral Time Series"
 readme = "README.md"
@@ -48,9 +48,15 @@ tf-rocm = [
 [dependency-groups]
 dev = ["pandas-stubs", "types-tensorflow"]
 docs = [
+    "mkapi>=4.4.4",
     "mkdocs>=1.6.1",
+    "mkdocs-jupyter>=0.25.1",
+    "mkdocs-material>=9.6.15",
 ]
-jupyter = ["jupyter"]
+jupyter = [
+    "ipykernel>=6.30.0",
+    "jupyter",
+]
 tests = [
   "pytest",
   "pytest-json-ctrf",
@@ -98,7 +104,7 @@ ignore = [
   "TC008",  # Don't remove quotes from type aliases
   "F722",  # Ignore forward annotation syntax errors
 ]
-per-file-ignores = { "src/suPAErnova/configs/**.py" = [
+per-file-ignores = { "src/supaernova/configs/**.py" = [
   "TC001",  # Move first party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
   "TC002",  # Move third party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
   "TC003",  # Move standard library typing-only imports into a TYPE_CHECKING block. Breaks pydantic

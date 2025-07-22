@@ -5,9 +5,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from tests.fixtures.data import DataParams
-    from suPAErnova.steps.pae import PAEStep
-    from suPAErnova.configs.steps.pae import PAEStepResult
-    from suPAErnova.configs.steps.data import DataStepResult
+    from supaernova.steps.pae import PAEStep
+    from supaernova.configs.steps.pae import PAEStepResult
+    from supaernova.configs.steps.data import DataStepResult
 
     PAEParams = dict[str, Any]
     PAEResults = dict[str, dict[str, Any]] | PAEStep

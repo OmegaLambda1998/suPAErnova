@@ -6,8 +6,8 @@ if TYPE_CHECKING:
 
     from tests.fixtures.pae import PAEParams
     from tests.fixtures.data import DataParams
-    from suPAErnova.steps.nflow import NFlowStep
-    from suPAErnova.configs.steps.nflow import NFlowStepResult
+    from supaernova.steps.nflow import NFlowStep
+    from supaernova.configs.steps.nflow import NFlowStepResult
 
     NFlowParams = dict[str, Any]
     NFlowResults = dict[str, Any] | NFlowStep

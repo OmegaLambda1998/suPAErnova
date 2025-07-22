@@ -3,8 +3,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-import suPAErnova
-from suPAErnova.configs.steps.data import DataStepConfig, DataStepResult
+import supaernova
+from supaernova.configs.steps.data import DataStepConfig, DataStepResult
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -7,8 +7,8 @@ if TYPE_CHECKING:
     from tests.fixtures.pae import PAEParams
     from tests.fixtures.data import DataParams
     from tests.fixtures.nflow import NFlowParams
-    from suPAErnova.steps.posterior import PosteriorStep
-    from suPAErnova.configs.steps.posterior import PosteriorStepResult
+    from supaernova.steps.posterior import PosteriorStep
+    from supaernova.configs.steps.posterior import PosteriorStepResult
 
     PosteriorParams = dict[str, Any]
     PosteriorResults = dict[str, Any] | PosteriorStep

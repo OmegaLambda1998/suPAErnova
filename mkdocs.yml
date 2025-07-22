@@ -1,3 +1,63 @@
 site_name: SuPAErnova
+
+theme:
+  name: material
+  features:
+    - navigation.indexes
+
 nav:
   - Home: index.md
+  - Usage:
+    - usage/index.md
+    - Data:
+      - usage/data/index.md
+    - Probabilistic AutoEncoder:
+      - usage/pae/index.md
+    - Normalising Flow:
+      - usage/nflow/index.md
+    - Posterior Analysis:
+      - usage/posterior/index.md
+  - Examples:
+    - examples/index.md
+    - Data:
+      - examples/data/index.md
+      - examples/data/quick_start.ipynb
+      - examples/data/advanced.ipynb
+    - Probabilistic AutoEncoder:
+      - examples/pae/index.md
+      - examples/pae/quick_start.ipynb
+      - examples/pae/advanced.ipynb
+    - Normalising Flow:
+      - examples/nflow/index.md
+      - examples/nflow/quick_start.ipynb
+      - examples/nflow/advanced.ipynb
+    - Posterior Analysis:
+      - examples/posterior/index.md
+      - examples/posterior/quick_start.ipynb
+      - examples/posterior/advanced.ipynb
+  - Design:
+    - design/index.md
+    - Data:
+      - design/data/index.md
+    - Probabilistic AutoEncoder:
+      - design/pae/index.md
+    - Normalising Flow:
+      - design/nflow/index.md
+    - Posterior Analysis:
+      - design/posterior/index.md
+  - Development:
+    - development/index.md
+    - Data:
+      - development/data/index.md
+    - Probabilistic AutoEncoder:
+      - development/pae/index.md
+    - Normalising Flow:
+      - development/nflow/index.md
+    - Posterior Analysis:
+      - development/posterior/index.md
+  - API:
+    - $api/supaernova.***
+
+plugins:
+  - mkdocs-jupyter
+  - mkapi

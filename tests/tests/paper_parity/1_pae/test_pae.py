@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from suPAErnova.configs.steps.pae import PAEStepResult
+from supaernova.configs.steps.pae import PAEStepResult
 
 if TYPE_CHECKING:
     from tests.fixtures.pae import PAEStepResults

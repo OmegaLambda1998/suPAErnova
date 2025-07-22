@@ -4,8 +4,8 @@ if TYPE_CHECKING:
     from typing import Any
     from collections.abc import Callable
 
-    from suPAErnova.steps.data import DataStep
-    from suPAErnova.configs.steps.data import DataStepResult
+    from supaernova.steps.data import DataStep
+    from supaernova.configs.steps.data import DataStepResult
 
     DataParams = dict[str, Any]
     DataResults = dict[str, Any] | DataStep

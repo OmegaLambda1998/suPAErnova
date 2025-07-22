@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from suPAErnova.analysis.spectra import SpectraPlotter
+from supaernova.analysis.spectra import SpectraPlotter
 
 if TYPE_CHECKING:
     from typing import Any, TypeVar

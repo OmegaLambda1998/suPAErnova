@@ -3,8 +3,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-import suPAErnova
-from suPAErnova.configs.steps.data import DataStepConfig, DataStepResult
+import supaernova
+from supaernova.configs.steps.data import DataStepConfig, DataStepResult
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,7 +38,7 @@ def snpae_data_step_factory(
                 "mask": "mask_info_wmin_wmax.txt",
             }
         }
-        snpae = suPAErnova.prepare_config(
+        snpae = supaernova.prepare_config(
             config,
             verbose=False,
             base_path=root_path,

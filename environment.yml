@@ -1,4 +1,4 @@
-name: suPAErnova
+name: supaernova
 dependencies:
   - astropy
   - cairocffi

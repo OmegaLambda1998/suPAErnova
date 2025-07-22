@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from tests.tests.paper_parity.conftest import PaperParityUtils
-from suPAErnova.configs.steps.posterior import (
+from supaernova.configs.steps.posterior import (
     PosteriorStepResult,
     PosteriorStepHMCResult,
     PosteriorStepMAPResult,

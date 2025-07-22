@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from suPAErnova.configs.steps.nflow import NFlowStepResult
+from supaernova.configs.steps.nflow import NFlowStepResult
 
 if TYPE_CHECKING:
     from tests.fixtures.nflow import NFlowStepResults

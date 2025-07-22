@@ -2,14 +2,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import suPAErnova
-from suPAErnova.configs.steps.pae import PAEStepConfig
-from suPAErnova.configs.steps.data import DataStepConfig
-from suPAErnova.configs.steps.nflow import NFlowStepConfig
-from suPAErnova.configs.steps.pae.model import PAEModelConfig
-from suPAErnova.configs.steps.posterior import PosteriorStepConfig
-from suPAErnova.configs.steps.nflow.model import NFlowModelConfig
-from suPAErnova.configs.steps.posterior.model import PosteriorModelConfig
+import supaernova
+from supaernova.configs.steps.pae import PAEStepConfig
+from supaernova.configs.steps.data import DataStepConfig
+from supaernova.configs.steps.nflow import NFlowStepConfig
+from supaernova.configs.steps.pae.model import PAEModelConfig
+from supaernova.configs.steps.posterior import PosteriorStepConfig
+from supaernova.configs.steps.nflow.model import NFlowModelConfig
+from supaernova.configs.steps.posterior.model import PosteriorModelConfig
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -46,13 +46,13 @@ def snpae_posterior_step_factory(
         posterior_params: "PosteriorParams",
     ) -> "PosteriorResults":
         # Import here to avoid dependency conflicts
-        from suPAErnova.configs.steps.pae.tf import (
+        from supaernova.configs.steps.pae.tf import (
             TFPAEModelConfig,
         )
-        from suPAErnova.configs.steps.nflow.tf import (
+        from supaernova.configs.steps.nflow.tf import (
             TFNFlowModelConfig,
         )
-        from suPAErnova.configs.steps.posterior.tf import (
+        from supaernova.configs.steps.posterior.tf import (
             TFPosteriorModelConfig,
         )
 
@@ -120,7 +120,7 @@ def snpae_posterior_step_factory(
                 },
             },
         }
-        snpae = suPAErnova.prepare_config(
+        snpae = supaernova.prepare_config(
             config,
             verbose=False,
             base_path=root_path,

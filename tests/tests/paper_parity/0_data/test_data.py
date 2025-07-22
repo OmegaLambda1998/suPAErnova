@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from suPAErnova.configs.steps.data import DataStepResult
+from supaernova.configs.steps.data import DataStepResult
 
 if TYPE_CHECKING:
     from tests.fixtures.data import DataStepResults

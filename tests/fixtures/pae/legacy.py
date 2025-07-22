@@ -2,10 +2,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import suPAErnova
-from suPAErnova.configs.steps.pae import PAEStepConfig
-from suPAErnova.configs.steps.data import DataStepConfig
-from suPAErnova.configs.steps.pae.model import PAEModelConfig
+import supaernova
+from supaernova.configs.steps.pae import PAEStepConfig
+from supaernova.configs.steps.data import DataStepConfig
+from supaernova.configs.steps.pae.model import PAEModelConfig
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,7 +32,7 @@ def snpae_pae_step_factory(
     def _snpae_pae_step(
         data_params: "DataParams", pae_params: "PAEParams"
     ) -> "PAEResults":
-        from suPAErnova.configs.steps.pae.tf import (
+        from supaernova.configs.steps.pae.tf import (
             TFPAEModelConfig,  # Import here to avoid dependency conflicts
         )
 
@@ -67,7 +67,7 @@ def snpae_pae_step_factory(
                 },
             },
         }
-        snpae = suPAErnova.prepare_config(
+        snpae = supaernova.prepare_config(
             config,
             verbose=False,
             base_path=root_path,

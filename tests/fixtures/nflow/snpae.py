@@ -2,12 +2,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import suPAErnova
-from suPAErnova.configs.steps.pae import PAEStepConfig
-from suPAErnova.configs.steps.data import DataStepConfig
-from suPAErnova.configs.steps.nflow import NFlowStepConfig
-from suPAErnova.configs.steps.pae.model import PAEModelConfig
-from suPAErnova.configs.steps.nflow.model import NFlowModelConfig
+import supaernova
+from supaernova.configs.steps.pae import PAEStepConfig
+from supaernova.configs.steps.data import DataStepConfig
+from supaernova.configs.steps.nflow import NFlowStepConfig
+from supaernova.configs.steps.pae.model import PAEModelConfig
+from supaernova.configs.steps.nflow.model import NFlowModelConfig
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -40,10 +40,10 @@ def snpae_nflow_step_factory(
         nflow_params: "NFlowParams",
     ) -> "NFlowResults":
         # Import here to avoid dependency conflicts
-        from suPAErnova.configs.steps.pae.tf import (
+        from supaernova.configs.steps.pae.tf import (
             TFPAEModelConfig,
         )
-        from suPAErnova.configs.steps.nflow.tf import (
+        from supaernova.configs.steps.nflow.tf import (
             TFNFlowModelConfig,
         )
 
@@ -95,7 +95,7 @@ def snpae_nflow_step_factory(
                 },
             },
         }
-        snpae = suPAErnova.prepare_config(
+        snpae = supaernova.prepare_config(
             config,
             verbose=False,
             base_path=root_path,
