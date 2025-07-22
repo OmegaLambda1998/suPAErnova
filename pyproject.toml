@@ -48,14 +48,14 @@ tf-rocm = [
 [dependency-groups]
 dev = ["pandas-stubs", "types-tensorflow"]
 docs = [
-    "mkapi>=4.4.4",
-    "mkdocs>=1.6.1",
-    "mkdocs-jupyter>=0.25.1",
-    "mkdocs-material>=9.6.15",
+  "mkapi>=4.4.4",
+  "mkdocs-jupyter>=0.25.1",
+  "mkdocs-material>=9.6.15",
+  "mkdocs>=1.6.1",
 ]
 jupyter = [
-    "ipykernel>=6.30.0",
-    "jupyter",
+  "ipykernel>=6.30.0",
+  "jupyter",
 ]
 tests = [
   "pytest",
