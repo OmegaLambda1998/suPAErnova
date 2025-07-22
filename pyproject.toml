@@ -1,61 +1,62 @@
 [project]
-authors = [
-    { name = "Patrick Armstrong", email = "patrick.james.1998@gmail.com" },
-]
-dependencies = [
-    "astropy",
-    "cairocffi",
-    "chainconsumer",
-    "click",
-    "coloredlogs",
-    "matplotlib",
-    "pandas",
-    "pydantic",
-    "sncosmo",
-    "toml",
-    "tqdm",
-]
-description = "Add your description here"
 name = "suPAErnova"
+version = "1.0.0"
+description = "A Probabilistic Autoencoder for Type Ia Supernovae Spectral Time Series"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-version = "0.1.0"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Patrick Armstrong", email = "patrick.james.1998@gmail.com" },
+]
+dependencies = [
+  "astropy",
+  "cairocffi",
+  "chainconsumer",
+  "click",
+  "coloredlogs",
+  "matplotlib",
+  "pandas",
+  "pydantic",
+  "sncosmo",
+  "toml",
+  "tqdm",
+]
 
 [project.optional-dependencies]
-tf-cpu = ["tensorflow-cpu>=2.18.1,<2.19", "tf-keras>=2.18,<2.19", "tensorflow-probability>=0.25", "tensorboard>=2.18,<2.19", "tensorboard_plugin_profile>=2.19,<2.20"]
-tf-rocm = ["tensorflow-rocm>=2.18.1,<2.19", "tf-keras>=2.18,<2.19", "tensorflow-probability>=0.25", "tensorboard>=2.18,<2.19", "tensorboard_plugin_profile>=2.19,<2.20"]
-tf-nightly-rocm = ["tf-nightly-rocm>=2.19.0.dev,<2.20; sys_platform=='linux'", "tf-keras-nightly>=2.19.0.dev,<2.20", "tfp-nightly>=0.26.0.dev,<0.27", "tb-nightly>=2.19.0a,<2.20", "tbp-nightly>=2.20.9a,<2.21"]
-
-[build-system]
-build-backend = "hatchling.build"
-requires = ["hatchling"]
+tf-cpu = [
+  "tensorflow-cpu>=2.18.1,<2.19",
+  "tf-keras>=2.18,<2.19",
+  "tensorflow-probability>=0.25",
+  "tensorboard>=2.18,<2.19",
+  "tensorboard_plugin_profile>=2.19,<2.20",
+]
+tf-nightly-rocm = [
+  "tf-nightly-rocm>=2.19.0.dev,<2.20; sys_platform=='linux'",
+  "tf-keras-nightly>=2.19.0.dev,<2.20",
+  "tfp-nightly>=0.26.0.dev,<0.27",
+  "tb-nightly>=2.19.0a,<2.20",
+  "tbp-nightly>=2.20.9a,<2.21",
+]
+tf-rocm = [
+  "tensorflow-rocm>=2.18.1,<2.19",
+  "tf-keras>=2.18,<2.19",
+  "tensorflow-probability>=0.25",
+  "tensorboard>=2.18,<2.19",
+  "tensorboard_plugin_profile>=2.19,<2.20",
+]
 
 [dependency-groups]
 dev = ["pandas-stubs", "types-tensorflow"]
 jupyter = ["jupyter"]
 tests = [
-    "pytest",
-    "pytest-json-ctrf",
-    "pytest-richer",
+  "pytest",
+  "pytest-json-ctrf",
+  "pytest-richer",
 ]
 
-# === Tools ===
-[tool.uv]
-
-prerelease = "allow"
-
-environments = [
-    "sys_platform == 'linux'",
-]
-
-[tool.uv.sources]
-tensorflow-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4.1/tensorflow_rocm-2.18.1-cp312-cp312-manylinux_2_28_x86_64.whl" }
-tf-nightly-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4.1/tf_nightly_rocm-2.19.0.dev20250513-cp312-cp312-manylinux_2_28_x86_64.whl" }
-# We override the tf-keras dependency metadata to avoid installing multiple version of tensorflow
-[[tool.uv.dependency-metadata]]
-name = "tf-keras"
-[[tool.uv.dependency-metadata]]
-name = "tf-keras-nightly"
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib", "--color=yes", "--tb=short"]
@@ -65,7 +66,6 @@ testpaths = ["tests"]
 [tool.ruff]
 # Enumerate all fixed violations.
 show-fixes = true
-
 # Disable application of unsafe fixes.
 unsafe-fixes = true
 
@@ -73,49 +73,42 @@ unsafe-fixes = true
 [tool.ruff.format]
 # Enable preview style formatting
 preview = true
-
 # Enable reformatting of code snippets in docstrings.
 docstring-code-format = true
 
 [tool.ruff.lint]
 # Enable preview features
 preview = true
-
 # Show all lint rules (except preview) by default
 select = ["ALL"]
-
 # Rules to ignore
 ignore = [
-    "COM812",  # Missing trailing comma, already handled by formatter
-    "E501",    # Line too long 
-    "ERA001",  # Found commented out code
-    "G004",    # Logging statement uses f-string
-    "N999",    # Invalid module name
-    "PLR0913", # Too many arguments in function definition (_ > 5) 
-    "PLR0917", # Too many positional arguments (_/5) 
-    "ANN401",  # Allow *args: Any and **kwargs: Any
-    "UP037",   # Don't remove quotes from type annotations
-    "TC008",   # Don't remove quotes from type aliases
-    "F722",    # Ignore forward annotation syntax errors
+  "COM812",  # Missing trailing comma, already handled by formatter
+  "E501",  # Line too long
+  "ERA001",  # Found commented out code
+  "G004",  # Logging statement uses f-string
+  "N999",  # Invalid module name
+  "PLR0913",  # Too many arguments in function definition (_ > 5)
+  "PLR0917",  # Too many positional arguments (_/5)
+  "ANN401",  # Allow *args: Any and **kwargs: Any
+  "UP037",  # Don't remove quotes from type annotations
+  "TC008",  # Don't remove quotes from type aliases
+  "F722",  # Ignore forward annotation syntax errors
 ]
-
 per-file-ignores = { "src/suPAErnova/configs/**.py" = [
-    "TC001", # Move first party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
-    "TC002", # Move third party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
-    "TC003", # Move standard library typing-only imports into a TYPE_CHECKING block. Breaks pydantic
+  "TC001",  # Move first party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
+  "TC002",  # Move third party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
+  "TC003",  # Move standard library typing-only imports into a TYPE_CHECKING block. Breaks pydantic
 ], "tests/**/*.py" = [
-    "S101", # Don't warn when assert is used in tests
+  "S101",  # Don't warn when assert is used in tests
 ] }
-
-
 # Consider all rules fixable
 fixable = ["ALL"]
-
 # Except these rules
 unfixable = [
-    "F401", # unused-import, will remove unused imports
-    "F841", # unused-variable, will remove unused variables not prepended with an `_`
-    "T201", # Print statements
+  "F401",  # unused-import, will remove unused imports
+  "F841",  # unused-variable, will remove unused variables not prepended with an `_`
+  "T201",  # Print statements
 ]
 
 # --- Flake8 ---
@@ -159,3 +152,22 @@ length-sort-straight = true
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 ignore-decorators = ["typing.overload"]
+
+# === Tools ===
+[tool.uv]
+prerelease = "allow"
+environments = [
+  "sys_platform == 'linux'",
+]
+
+[tool.uv.sources]
+tensorflow-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4.1/tensorflow_rocm-2.18.1-cp312-cp312-manylinux_2_28_x86_64.whl" }
+tf-nightly-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4.1/tf_nightly_rocm-2.19.0.dev20250513-cp312-cp312-manylinux_2_28_x86_64.whl" }
+
+# We override the tf-keras dependency metadata to avoid installing multiple version of tensorflow
+[[tool.uv.dependency-metadata]]
+name = "tf-keras"
+
+[[tool.uv.dependency-metadata]]
+name = "tf-keras-nightly"
+
