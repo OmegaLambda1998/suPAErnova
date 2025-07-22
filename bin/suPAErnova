@@ -84,6 +84,11 @@ function main {
                 cmd="pytest"
                 shift
                 ;;
+            docs)
+                group="docs"
+                cmd="mkdocs"
+                shift
+                ;;
             jupyter)
                 group="jupyter"
                 cmd="jupyter notebook"

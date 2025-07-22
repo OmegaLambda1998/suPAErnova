@@ -47,6 +47,9 @@ tf-rocm = [
 
 [dependency-groups]
 dev = ["pandas-stubs", "types-tensorflow"]
+docs = [
+    "mkdocs>=1.6.1",
+]
 jupyter = ["jupyter"]
 tests = [
   "pytest",
