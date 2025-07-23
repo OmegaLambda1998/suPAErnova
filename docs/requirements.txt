@@ -1,4 +1,0 @@
-mkapi>=4.4.4
-mkdocs-jupyter>=0.25.1
-mkdocs-material>=9.6.15
-mkdocs>=1.6.1
