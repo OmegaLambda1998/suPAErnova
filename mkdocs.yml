@@ -59,5 +59,6 @@ nav:
     - $api/supaernova.***
 
 plugins:
-  - mkdocs-jupyter
+  - mkdocs-jupyter:
+      execute: true
   - mkapi
