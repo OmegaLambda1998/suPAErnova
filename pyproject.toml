@@ -30,20 +30,6 @@ tf-cpu = [
   "tensorboard>=2.18,<2.19",
   "tensorboard_plugin_profile>=2.19,<2.20",
 ]
-tf-nightly-rocm = [
-  "tf-nightly-rocm>=2.19.0.dev,<2.20; sys_platform=='linux'",
-  "tf-keras-nightly>=2.19.0.dev,<2.20",
-  "tfp-nightly>=0.26.0.dev,<0.27",
-  "tb-nightly>=2.19.0a,<2.20",
-  "tbp-nightly>=2.20.9a,<2.21",
-]
-tf-rocm = [
-  "tensorflow-rocm>=2.18.1,<2.19",
-  "tf-keras>=2.18,<2.19",
-  "tensorflow-probability>=0.25",
-  "tensorboard>=2.18,<2.19",
-  "tensorboard_plugin_profile>=2.19,<2.20",
-]
 
 [dependency-groups]
 dev = ["pandas-stubs", "types-tensorflow"]
@@ -168,10 +154,6 @@ prerelease = "allow"
 environments = [
   "sys_platform == 'linux'",
 ]
-
-[tool.uv.sources]
-tensorflow-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4.1/tensorflow_rocm-2.18.1-cp312-cp312-manylinux_2_28_x86_64.whl" }
-tf-nightly-rocm = { url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-6.4.1/tf_nightly_rocm-2.19.0.dev20250513-cp312-cp312-manylinux_2_28_x86_64.whl" }
 
 # We override the tf-keras dependency metadata to avoid installing multiple version of tensorflow
 [[tool.uv.dependency-metadata]]
