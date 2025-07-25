@@ -118,19 +118,20 @@ class DispersionPlotter(Plotter):
         yerr = weighted_stds
         fig, ax = _plot(x, y, yerr, fig, ax, "black", "o", 0.25, "No Mask")
 
-        # === SN Mask ===
-        mask = sn_mask[order].astype(bool)
-        x = redshift[mask]
-        y = weighted_amplitudes[mask]
-        yerr = weighted_stds[mask]
-        fig, ax = _plot(x, y, yerr, fig, ax, "brown", "o", 0.25, "SN Mask")
+        if twins is not None:
+            # === SN Mask ===
+            mask = sn_mask[order].astype(bool)
+            x = redshift[mask]
+            y = weighted_amplitudes[mask]
+            yerr = weighted_stds[mask]
+            fig, ax = _plot(x, y, yerr, fig, ax, "brown", "o", 0.25, "SN Mask")
 
-        # === Twins Mask ===
-        mask = twins_mask[order].astype(bool)
-        x = redshift[mask]
-        y = weighted_amplitudes[mask]
-        yerr = weighted_stds[mask]
-        fig, ax = _plot(x, y, yerr, fig, ax, "blue", "o", 0.25, "Twins Mask")
+            # === Twins Mask ===
+            mask = twins_mask[order].astype(bool)
+            x = redshift[mask]
+            y = weighted_amplitudes[mask]
+            yerr = weighted_stds[mask]
+            fig, ax = _plot(x, y, yerr, fig, ax, "blue", "o", 0.25, "Twins Mask")
 
         # === Combined Mask ===
         mask = (sn_mask[order] * twins_mask[order]).astype(bool)
