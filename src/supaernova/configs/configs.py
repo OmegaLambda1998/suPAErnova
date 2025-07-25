@@ -6,7 +6,14 @@ from pathlib import Path
 from collections.abc import Callable
 
 import toml
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    model_validator,
+    FilePath,
+    JsonValue,
+    ValidationError,
+)
 
 from supaernova.logging import setup_logging
 
@@ -39,9 +46,21 @@ def callback[Instance: Any, Returns](
     return wrapper
 
 
+def deepmerge(d1, d2):
+    out = d1.copy()
+    for k, v in d2.items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = deepmerge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
 class SNPAEConfig(BaseModel):
     model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # pyright: ignore[reportIncompatibleVariableOverride]
     name: str
+
+    extends: FilePath | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -52,8 +71,8 @@ class SNPAEConfig(BaseModel):
 
     @model_validator(mode="after")
     def set_name(self) -> Self:
-        if self.__class__.__name__ not in self.name:
-            self.name = f"{self.__class__.__name__} - {self.name}"
+        # if self.__class__.__name__ not in self.name:
+        #     self.name = f"{self.__class__.__name__} - {self.name}"
         self.__class__.name = self.name
         return self
 
@@ -138,3 +157,47 @@ class SNPAEConfig(BaseModel):
                 val = SNPAEConfig.normalise_input(v)
             rtn[k.lower()] = val
         return rtn
+
+    @staticmethod
+    def extend_input(
+        input_config: dict[str, Any],
+        *,  # Force keyword-only arguments
+        base_path: Path | None = None,
+        key: str | None = None,
+    ) -> dict[str, Any]:
+        base_path = base_path or input_config.get("paths", {}).get("base") or Path.cwd()
+        if "extends" in input_config:
+            extends_path = PathConfig.resolve_path(
+                Path(input_config["extends"]), relative_path=base_path
+            )
+            if not extends_path.exists():
+                err = f"Extension Path: {extends_path} does not exist."
+                raise ValidationError(err)
+            if extends_path.suffix != ".toml":
+                err = f"Extension Path: {extends_path} is not a `.toml` file."
+                raise ValidationError(err)
+            extension = toml.load(extends_path)
+            extends_base_path = (
+                extension.get("paths", {}).get("base") or extends_path.parent
+            )
+            if key is not None:
+                extension = extension.get(key, {})
+            for k, v in extension.items():
+                if isinstance(v, dict):
+                    extension[k] = SNPAEConfig.extend_input(
+                        v,
+                        base_path=extends_base_path,
+                        key=k,
+                    )
+            input_config = deepmerge(extension, input_config)
+            input_config["extends"] = extends_path
+        if "external" in input_config:
+            input_config["external"] = base_path / input_config["external"]
+        for k, v in input_config.items():
+            if isinstance(v, dict):
+                input_config[k] = SNPAEConfig.extend_input(
+                    v,
+                    base_path=base_path,
+                    key=k,
+                )
+        return input_config

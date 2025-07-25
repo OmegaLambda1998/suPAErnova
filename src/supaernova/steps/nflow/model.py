@@ -159,9 +159,7 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
                     if o.name is None:
                         o.name = "u_latents"
                     if o.savepath is None:
-                        o.savepath = (
-                            self.paths.out / "plots" / dt / str(self.model.seed)
-                        )
+                        o.savepath = self.paths.plots / dt / str(self.model.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     DistributionPlotter.plot_corner(
                         {"gaussian": gaussian, "u_latents": results.z_to_u},
@@ -181,9 +179,7 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
                     if o.name is None:
                         o.name = "z_latents"
                     if o.savepath is None:
-                        o.savepath = (
-                            self.paths.out / "plots" / dt / str(self.model.seed)
-                        )
+                        o.savepath = self.paths.plots / dt / str(self.model.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     DistributionPlotter.plot_corner(
                         results.u_to_z,
@@ -206,9 +202,7 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
                     if o.name is None:
                         o.name = "latents"
                     if o.savepath is None:
-                        o.savepath = (
-                            self.paths.out / "plots" / dt / str(self.model.seed)
-                        )
+                        o.savepath = self.paths.plots / dt / str(self.model.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     u_latents = self.model.z_to_u(results.latents, permute=True).numpy()
                     z_latents = self.model.u_to_z(u_latents, permute=True).numpy()
@@ -242,11 +236,7 @@ class NFlowModelStep[Backend: str](AbstractModel[Backend]):
                             o.name = f"step_{step}_latent_steps"
                         if o.savepath is None:
                             o.savepath = (
-                                self.paths.out
-                                / "plots"
-                                / dt
-                                / str(self.model.seed)
-                                / "steps"
+                                self.paths.plots / dt / str(self.model.seed) / "steps"
                             )
                         o.savepath.mkdir(parents=True, exist_ok=True)
 

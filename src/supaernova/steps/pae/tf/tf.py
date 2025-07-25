@@ -443,7 +443,7 @@ class TFPAEModel(ks.Model):
     ) -> None:
         ks.backend.clear_session()
 
-        super().__init__(*args, name=f"{config.name.split()[-1]}PAEModel", **kwargs)
+        super().__init__(*args, name=config.name.split()[-1], **kwargs)
         # --- Config ---
         global PAEMODELSTEP
         PAEMODELSTEP = config

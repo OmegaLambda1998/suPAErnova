@@ -111,8 +111,5 @@ class PosteriorStepConfig[Backend: str](
     # --- Previous Steps ---
     nflow: NFlowStep[Any] | None = None
 
-    # --- Optional ---
-    seeds: list[int] = [12345]
-
 
 PosteriorStepConfig.register_step()

@@ -46,7 +46,7 @@ class TFNFlowModel(ks.Model):
         **kwargs: "Any",
     ) -> None:
         ks.backend.clear_session()
-        super().__init__(*args, name=f"{config.name.split()[-1]}NFlowModel", **kwargs)
+        super().__init__(*args, name=config.name.split()[-1], **kwargs)
         # --- Config ---
         global NFLOWMODELSTEP
         NFLOWMODELSTEP = config

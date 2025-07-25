@@ -93,8 +93,8 @@ class TFPAEModelConfig(PAEModelConfig):
     def activation_fn(self) -> ActivationObject:
         return validate_activation(self.activation)
 
-    kernel_regulariser: ConfigInputObject[RegulariserObject] | None
-    kernel_regulariser_penalty: PositiveFloat
+    kernel_regulariser: ConfigInputObject[RegulariserObject] | None = None
+    kernel_regulariser_penalty: PositiveFloat | None = None
 
     @computed_field
     @cached_property

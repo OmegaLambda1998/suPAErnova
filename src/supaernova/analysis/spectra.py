@@ -16,8 +16,12 @@ if TYPE_CHECKING:
 
 
 class SpectraPlot(AbstractPlot):
+    mask: bool = True
     filter: (
-        dict[str, dict["Literal['min', 'max', 'equals', 'contains']", str | float]]
+        dict[
+            str,
+            dict["Literal['min', 'max', 'equals', 'contains']", str | float],
+        ]
         | None
     ) = None
 
@@ -47,6 +51,8 @@ class SpectraPlotter(Plotter):
         amplitude = data.amplitude.copy()
         sigma = data.sigma.copy()
         wl_mask = data.mask.copy()
+        if not config.mask:
+            wl_mask = np.ones_like(wl_mask)
 
         if config.filter is not None:
             for key, constraints in config.filter.items():

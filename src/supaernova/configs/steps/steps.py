@@ -7,7 +7,7 @@ from inspect import signature
 from pathlib import Path
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, DirectoryPath
 
 from supaernova.configs import SNPAEConfig
 from supaernova.configs.paths import PathConfig
@@ -103,6 +103,8 @@ class StepConfig(SNPAEConfig):
     required_steps: ClassVar[list[str]] = []
     id: ClassVar[str]
 
+    external: DirectoryPath | None = None
+
     @classmethod
     def register_step(cls) -> None:
         cls.steps[cls.id] = cls
@@ -114,14 +116,27 @@ class StepConfig(SNPAEConfig):
         input_config: dict[str, Any],
     ) -> "StepConfig":
         step_config = deepcopy(input_config)
-        step_config["paths"].out = PathConfig.resolve_path(
-            step_config["paths"].out / step_config.get("name", cls.__name__),
+        if step_config["paths"].out.parent.name != "outputs":
+            step_config["paths"].out = PathConfig.resolve_path(
+                step_config["paths"].out
+                / "outputs"
+                / step_config.get("name", cls.__name__),
+                relative_path=step_config["paths"].base,
+                mkdir=True,
+            )
+        step_config["paths"].plots = PathConfig.resolve_path(
+            step_config["paths"].plots / step_config.get("name", cls.__name__),
             relative_path=step_config["paths"].base,
             mkdir=True,
         )
         step_config["paths"].log = PathConfig.resolve_path(
-            step_config["paths"].out / "logs",
+            step_config["paths"].log / step_config.get("name", cls.__name__),
             relative_path=step_config["paths"].base,
             mkdir=True,
         )
+        if step_config.get("external") is not None:
+            step_config["paths"].out = PathConfig.resolve_path(
+                Path(step_config["external"]), relative_path=step_config["paths"].base
+            )
+            step_config["external"] = step_config["paths"].out
         return super().from_config(step_config)

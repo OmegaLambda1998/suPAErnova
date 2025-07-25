@@ -1,6 +1,6 @@
-from typing import ClassVar
+from typing import ClassVar, Annotated
 
-from pydantic import PositiveInt, PositiveFloat
+from pydantic import Field, PositiveInt, PositiveFloat
 
 from supaernova.configs.steps.pae import PAEStepConfig
 from supaernova.configs.steps.steps import AbstractStepAnalysis
@@ -19,27 +19,28 @@ class NFlowModelConfig(AbstractModelConfig):
     # --- Class Variables ---
     id: ClassVar[str] = "nflow_model"
     required_steps: ClassVar[list[str]] = [PAEStepConfig.id]
-    analysis: NFlowStepAnalysis
+    analysis: NFlowStepAnalysis = NFlowStepAnalysis.model_validate({})
 
     # === Required ===
     debug: bool = False
     profile: bool = False
 
     # === Optional ===
-    seed: int
+    seed: int = 12345
     batch_size: PositiveInt
-    patience: PositiveFloat
+    patience: PositiveFloat = 0.02
+    validation_frac: Annotated[float, Field(ge=0, le=1)] = 0
 
-    save_best: bool
+    save_best: bool = False
 
-    lr: PositiveFloat
-    lr_decay_steps: PositiveFloat
-    lr_decay_rate: PositiveFloat
-    lr_weight_decay_rate: PositiveFloat
+    lr: PositiveFloat = 0.0001
+    lr_decay_steps: PositiveFloat = 300
+    lr_decay_rate: PositiveFloat = 0.95
+    lr_weight_decay_rate: PositiveFloat = 0.0001
 
-    epochs: PositiveInt
-    batch_normalisation: bool
+    epochs: PositiveInt = 5000
+    batch_normalisation: bool = False
 
-    n_hidden_units: PositiveInt
-    n_layers: PositiveInt
+    n_hidden_units: PositiveInt = 12
+    n_layers: PositiveInt = 18
     physical_latents: bool

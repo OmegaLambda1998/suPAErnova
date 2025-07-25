@@ -247,7 +247,7 @@ class DataStep(SNPAEStep):
                 if opts.name is None:
                     opts.name = "spectra"
                 if opts.savepath is None:
-                    opts.savepath = self.paths.out / "plots" / str(self.seed)
+                    opts.savepath = self.paths.plots / str(self.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
                 SpectraPlotter.plot_spectra(self.data, opts)
 
@@ -258,7 +258,7 @@ class DataStep(SNPAEStep):
                 if opts.name is None:
                     opts.name = "summary"
                 if opts.savepath is None:
-                    opts.savepath = self.paths.out / "plots" / str(self.seed)
+                    opts.savepath = self.paths.plots / str(self.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
 
                 savepath = (opts.savepath or Path()) / f"{opts.name}.{opts.ext}"

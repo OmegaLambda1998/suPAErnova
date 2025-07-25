@@ -35,7 +35,6 @@ class PAEStep[Backend: str](AbstractModelStep[Backend, PAEModelStep[Backend]]):
 
         # --- Previous Step Variables ---
         self.data: DataStep
-        self.validation_frac: PositiveFloat
 
         # --- Setup Variables ---
         self.train_data: list[DataStepResult]
@@ -45,16 +44,12 @@ class PAEStep[Backend: str](AbstractModelStep[Backend, PAEModelStep[Backend]]):
         self.n_models: int
         self.n_kfolds: int
 
-        self.seed: int = self.options.seed
-        self.rng: np.random.Generator = np.random.default_rng(self.seed)
-
     @override
     def _setup(self, *, data: "DataStep") -> None:
         super()._setup()
 
         # --- Previous Step Variables ---
         self.data = data
-        self.validation_frac = self.options.validation_frac
 
         # --- Models ---
         self.n_kfolds = self.data.n_kfolds
@@ -70,25 +65,10 @@ class PAEStep[Backend: str](AbstractModelStep[Backend, PAEModelStep[Backend]]):
         train_data = self.data.train_data
         test_data = self.data.test_data
         all_data = self.data.data
-        if self.validation_frac > 0:
-            ind_split = int(self.data.sn_dim * self.validation_frac)
-            val_data = [
-                DataStepResult.model_validate({
-                    k: v[-ind_split:] for k, v in d.model_dump().items()
-                })
-                for d in train_data
-            ]
-            train_data = [
-                DataStepResult.model_validate({
-                    k: v[:-ind_split] for k, v in d.model_dump().items()
-                })
-                for d in train_data
-            ]
-        else:
-            val_data = test_data
+        val_data = test_data
 
         if self.options.kfolds is None:
-            self.kfolds = list(range(len(self.n_kfolds)))
+            self.kfolds = list(range(self.n_kfolds))
             # `(list * ((desired_length // actual_length) + 1))[:desired_length]`
             # Repeat `list` `(desired_length // actual_length) + 1` times, then take the first `desired_length` items
             self.train_data = (train_data * ((self.n_models // self.n_kfolds) + 1))[

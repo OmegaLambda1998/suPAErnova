@@ -5,6 +5,7 @@ from pathlib import Path
 import traceback
 import contextlib
 
+import toml
 from pydantic import ValidationError
 from tqdm.contrib.logging import logging_redirect_tqdm
 
@@ -27,9 +28,13 @@ def prepare_config(
     force: bool = False,
     base_path: Path | None = None,
     out_path: Path | None = None,
+    plots_path: Path | None = None,
 ) -> InputConfig:
     # Normalise input_config
     user_config = SNPAEConfig.normalise_input(input_config)
+
+    # Extend user_config
+    user_config = SNPAEConfig.extend_input(user_config, base_path=base_path)
 
     # Setup global config
     user_config["config"] = GlobalConfig.from_config(
@@ -38,28 +43,35 @@ def prepare_config(
         force=force,
     )
 
-    # Setup  paths config
+    # Setup paths config
     base_path = PathConfig.resolve_path(
-        base_path,
+        base_path or user_config["paths"].get("base"),
         default_path=Path.cwd(),
         relative_path=Path.cwd(),
     )
     out_path = PathConfig.resolve_path(
-        out_path,
+        out_path or user_config["paths"].get("out"),
         default_path=base_path / "output",
         relative_path=base_path,
         mkdir=True,
     )
+    plots_path = PathConfig.resolve_path(
+        plots_path or user_config["paths"].get("plots"),
+        default_path=out_path / "plots",
+        relative_path=out_path,
+        mkdir=True,
+    )
     log_path = PathConfig.resolve_path(
-        out_path / "logs",
+        user_config["paths"].get("logs") or out_path / "logs",
         default_path=out_path / "logs",
         relative_path=base_path,
         mkdir=True,
     )
     user_config["paths"] = PathConfig.from_config(
-        cast("dict[str, JsonValue]", user_config.get("paths", {})),
+        {},
         base_path=base_path,
         out_path=out_path,
+        plots_path=plots_path,
         log_path=log_path,
     )
 

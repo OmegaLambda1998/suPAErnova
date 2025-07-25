@@ -28,28 +28,28 @@ class PosteriorModelConfig(AbstractModelConfig):
     profile: bool = False
 
     # === Optional ===
-    seed: int
+    seed: int = 12345
+    iterations: int = 1
     train_subset: bool = True
     test_subset: bool = True
     subset: Literal["train", "test"] = "train"
-    batch_size: PositiveInt
-    analysis: PosteriorStepAnalysis
+    analysis: PosteriorStepAnalysis = PosteriorStepAnalysis.model_validate({})
 
-    save_best: bool
+    save_best: bool = False
 
     n_chains_early: int
     n_chains_mid: int
     n_chains_final: int
 
-    tolerance: PositiveFloat
-    max_iterations: PositiveInt
+    tolerance: PositiveFloat = 0.01
+    max_iterations: PositiveInt = 2500
 
     n_burnin: PositiveInt
     n_samples: PositiveInt
-    n_leapfrog: PositiveInt
-    target_acceptance_rate: PositiveFloat
+    n_leapfrog: PositiveInt = 5
+    target_acceptance_rate: PositiveFloat = 0.651
 
-    random_initial_positions: bool
+    random_initial_positions: bool = False
 
     u_delta_av_min: float = -10.0
     u_delta_av_max: float = 10.0

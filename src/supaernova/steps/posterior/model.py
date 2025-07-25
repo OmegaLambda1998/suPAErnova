@@ -60,7 +60,8 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
         self.subsets = (["train"] if self.options.train_subset else []) + (
             ["test"] if self.options.test_subset else []
         )
-        self.seeds: list[int] = self.options.seeds
+        self.seed: int = self.options.seed
+        self.seeds: list[int] = [self.seed + i for i in range(self.options.iterations)]
         self.results: dict[str, dict[int, PosteriorStepResult]]
         self.models: dict[str, dict[int, PosteriorModel]]
         self.analysis: PosteriorStepAnalysis = self.options.analysis
@@ -343,8 +344,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                             o.name = "map_init"
                         if o.savepath is None:
                             o.savepath = (
-                                self.paths.out
-                                / "plots"
+                                self.paths.plots
                                 / str(self.seeds[0])
                                 / subset
                                 / str(seed)
@@ -367,8 +367,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                             o.name = "map_best"
                         if o.savepath is None:
                             o.savepath = (
-                                self.paths.out
-                                / "plots"
+                                self.paths.plots
                                 / str(self.seeds[0])
                                 / subset
                                 / str(seed)
@@ -391,8 +390,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                             o.name = "hmc"
                         if o.savepath is None:
                             o.savepath = (
-                                self.paths.out
-                                / "plots"
+                                self.paths.plots
                                 / str(self.seeds[0])
                                 / subset
                                 / str(seed)
@@ -419,9 +417,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                     if o.name is None:
                         o.name = "map_init"
                     if o.savepath is None:
-                        o.savepath = (
-                            self.paths.out / "plots" / str(self.seeds[0]) / subset
-                        )
+                        o.savepath = self.paths.plots / str(self.seeds[0]) / subset
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     DistributionPlotter.plot_corner(
                         subset_map_init_results,
@@ -439,9 +435,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                     if o.name is None:
                         o.name = "map_best"
                     if o.savepath is None:
-                        o.savepath = (
-                            self.paths.out / "plots" / str(self.seeds[0]) / subset
-                        )
+                        o.savepath = self.paths.plots / str(self.seeds[0]) / subset
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     DistributionPlotter.plot_corner(
                         subset_map_best_results,
@@ -459,9 +453,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                     if o.name is None:
                         o.name = "hmc"
                     if o.savepath is None:
-                        o.savepath = (
-                            self.paths.out / "plots" / str(self.seeds[0]) / subset
-                        )
+                        o.savepath = self.paths.plots / str(self.seeds[0]) / subset
                     o.mean = False
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     DistributionPlotter.plot_corner(
@@ -480,9 +472,7 @@ class PosteriorModelStep[Backend: str](AbstractModel[Backend]):
                     if o.name is None:
                         o.name = "dispersion"
                     if o.savepath is None:
-                        o.savepath = (
-                            self.paths.out / "plots" / str(self.seeds[0]) / subset
-                        )
+                        o.savepath = self.paths.plots / str(self.seeds[0]) / subset
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     data = (
                         self.nflow.pae.model.stage.train_data

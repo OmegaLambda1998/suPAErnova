@@ -59,6 +59,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
         self.seperate_latent_training: bool
         self.seperate_z_latent_training: bool
 
+        self.validation_frac: float
         self.debug: bool
         self.profile: bool
 
@@ -124,6 +125,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
     ) -> None:
         # --- Config Variables ---
         # Required
+        self.validation_frac = self.options.validation_frac
         self.physical_latents = self.options.physical_latents
         self.n_physical_latents = 3 if self.options.physical_latents else 0
         self.n_z_latents = self.options.n_z_latents
@@ -156,10 +158,26 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
 
         # --- Previous Step Variables ---
         self.data = data
+
+        if self.validation_frac > 0:
+            ind_split = int(self.data.sn_dim * self.validation_frac)
+            val_data = [
+                DataStepResult.model_validate({
+                    k: v[-ind_split:] for k, v in d.model_dump().items()
+                })
+                for d in train_data
+            ]
+            train_data = [
+                DataStepResult.model_validate({
+                    k: v[:-ind_split] for k, v in d.model_dump().items()
+                })
+                for d in train_data
+            ]
         self.train_data = train_data
         self.test_data = test_data
         self.val_data = val_data
         self.all_data = all_data
+
         self.setup_data_masks()
 
         self.spec_dim = self.data.spec_dim
@@ -428,8 +446,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                             o.name = "residual"
                         if o.savepath is None:
                             o.savepath = (
-                                self.paths.out
-                                / "plots"
+                                self.paths.plots
                                 / dt
                                 / str(self.model.seed)
                                 / str(stage.stage)
@@ -452,8 +469,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                             o.name = "latents"
                         if o.savepath is None:
                             o.savepath = (
-                                self.paths.out
-                                / "plots"
+                                self.paths.plots
                                 / dt
                                 / str(self.model.seed)
                                 / str(stage.stage)
@@ -478,9 +494,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                     if o.name is None:
                         o.name = "residual"
                     if o.savepath is None:
-                        o.savepath = (
-                            self.paths.out / "plots" / dt / str(self.model.seed)
-                        )
+                        o.savepath = self.paths.plots / dt / str(self.model.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
 
                     savepath = (o.savepath or Path()) / f"{o.name}.{o.ext}"
@@ -517,9 +531,7 @@ class PAEModelStep[Backend: str](AbstractModel[Backend]):
                     if o.name is None:
                         o.name = "latents"
                     if o.savepath is None:
-                        o.savepath = (
-                            self.paths.out / "plots" / dt / str(self.model.seed)
-                        )
+                        o.savepath = self.paths.plots / dt / str(self.model.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
 
                     chains = {

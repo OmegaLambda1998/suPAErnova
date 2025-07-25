@@ -43,11 +43,11 @@ class DispersionPlotter(Plotter):
         )
 
         sn_mask = sn_mask[:, 0, 0]
+        names = data.sn_name[:, 0, 0]
 
         twins_mask = np.ones_like(sn_mask)
         if twins is not None:
             twins_mask = np.zeros_like(sn_mask)
-            names = data.sn_name[:, 0, 0]
             twins_names = twins.name
             intersection = set(names) & set(twins_names)
             for name in intersection:

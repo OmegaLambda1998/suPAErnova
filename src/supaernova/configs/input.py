@@ -2,7 +2,7 @@
 
 from typing import Self
 
-from pydantic import computed_field, model_validator
+from pydantic import FilePath, computed_field, model_validator
 
 from supaernova.steps import SNPAEStep
 from supaernova.steps.pae import PAEStep

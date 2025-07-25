@@ -40,10 +40,6 @@ class NFlowStepConfig[Backend: str](AbstractModelStepConfig[Backend, NFlowModelC
 
     # --- Previous Steps ---
     pae: PAEStep[Any] | None = None
-    validation_frac: Annotated[float, Field(ge=0, le=1)] = 0
-
-    # --- Optional ---
-    seed: int = 12345
 
 
 NFlowStepConfig.register_step()

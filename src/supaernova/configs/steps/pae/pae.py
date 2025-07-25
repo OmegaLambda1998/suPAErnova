@@ -94,11 +94,7 @@ class PAEStepConfig[Backend: str](AbstractModelStepConfig[Backend, PAEModelConfi
 
     # --- Previous Steps ---
     data: DataStep | None = None
-    validation_frac: Annotated[float, Field(ge=0, le=1)]
     kfolds: list[NonNegativeInt] | None = None
-
-    # --- Optional ---
-    seed: int
 
 
 PAEStepConfig.register_step()

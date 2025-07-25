@@ -43,9 +43,7 @@ class TFPosteriorModel(ks.Model):
     ) -> None:
         ks.backend.clear_session()
 
-        super().__init__(
-            *args, name=f"{config.name.split()[-1]}PosteriorModel", **kwargs
-        )
+        super().__init__(*args, name=config.name.split()[-1], **kwargs)
         # --- Config ---
         global POSTERIORMODELSTEP
         POSTERIORMODELSTEP = config
@@ -92,7 +90,6 @@ class TFPosteriorModel(ks.Model):
         self.max_iterations = options.max_iterations
 
         # --- Training ---
-        self.batch_size: int = options.batch_size
         self.save_best: bool = options.save_best
         self.ckpt_path: str = (
             f"{'best' if self.save_best else 'latest'}.model.checkpoint/"
@@ -803,10 +800,11 @@ class TFPosteriorModel(ks.Model):
         self.log.debug("Running HMC")
 
         initial_position = self.map.position.best
+        tf.summary.experimental.set_step(0)
+        summary_writer = None
         if self.profile and savepath is not None:
             log_dir = savepath.parent / self.log_path / savepath.stem / "hmc"
             summary_writer = tf.summary.create_file_writer(str(log_dir))
-            tf.summary.experimental.set_step(0)
 
         stds = []
         if self.map.train_delta_m:
@@ -831,20 +829,16 @@ class TFPosteriorModel(ks.Model):
             progress.set_description(
                 "Burnin"
                 if tf.summary.experimental.get_step()
-                < self.n_burnin * (2 * self.n_leapfrog)
+                < 2 * self.n_burnin * self.n_leapfrog
                 else "Run"
             )
             progress.update()
 
+            tf.summary.experimental.set_step(tf.summary.experimental.get_step() + 1)
             if summary_writer is not None:
                 with summary_writer.as_default():
-                    tf.summary.experimental.set_step(
-                        tf.summary.experimental.get_step() + 1
-                    )
-
                     lp = log_prob.numpy()
                     lp = lp[lp != -np.inf]
-
                     tf.summary.scalar("min_log_prob", np.nanmin(lp))
                     tf.summary.scalar("mean_log_prob", np.nanmean(lp))
                     tf.summary.scalar("max_log_prob", np.nanmax(lp))
