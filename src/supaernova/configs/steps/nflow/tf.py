@@ -1,37 +1,37 @@
 import os
-from typing import Concatenate, cast, override
-from functools import cached_property
-from collections.abc import Callable
-
-from pydantic import computed_field
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+from typing import Concatenate, cast, override
+from functools import cached_property
+from collections.abc import Callable
+
+from pydantic import computed_field
 import tensorflow as tf
 from tensorflow import keras as ks
 
-from supaernova.configs.steps import ConfigInputObject, validate_object
+from supaernova.utils import ConfigInputObject, validate_object
 from supaernova.steps.nflow.tf import (
     loss as snpae_losses,
 )
 
-from .model import NFlowModelConfig
+from .nflow import NFlowConfig
 
 ActivationObject = Callable[[tf.Tensor], tf.Tensor]
-SchedulerObject = (
-    type[ks.optimizers.schedules.LearningRateSchedule]
-    | Callable[[Concatenate[int | tf.Tensor, ...]], tf.Tensor]
-)
-OptimiserObject = type[ks.optimizers.Optimizer]
-LossObject = type[ks.losses.Loss] | Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 
 
 def validate_activation(activation: ConfigInputObject[ActivationObject]):
     return validate_object(
         activation, dummy_obj=ks.activations.relu, mod=ks.activations
     )
+
+
+SchedulerObject = (
+    type[ks.optimizers.schedules.LearningRateSchedule]
+    | Callable[[Concatenate[int | tf.Tensor, ...]], tf.Tensor]
+)
 
 
 def validate_scheduler(
@@ -44,12 +44,18 @@ def validate_scheduler(
     )
 
 
+OptimiserObject = type[ks.optimizers.Optimizer]
+
+
 def validate_optimiser(
     optimiser: ConfigInputObject[OptimiserObject],
 ):
     return validate_object(
         optimiser, dummy_obj=ks.optimizers.Optimizer, mod=ks.optimizers
     )
+
+
+LossObject = type[ks.losses.Loss] | Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 
 
 def validate_loss(loss: ConfigInputObject[LossObject]):
@@ -76,7 +82,11 @@ def get_loss(
     return CustomLoss
 
 
-class TFNFlowModelConfig(NFlowModelConfig):
+class TFNFlowConfig(NFlowConfig):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
     activation: ConfigInputObject[ActivationObject]
 
     @computed_field
@@ -127,6 +137,7 @@ class TFNFlowModelConfig(NFlowModelConfig):
 
         return CustomScheduler
 
+    # --- Optional ---
     loss: ConfigInputObject[LossObject] = "NegLogLikelihood"
 
     @computed_field
@@ -140,3 +151,12 @@ class TFNFlowModelConfig(NFlowModelConfig):
             loss = loss()
 
         return get_loss(loss)
+
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===

@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Callable
 
+    from supaernova.steps.pae import PAE
+    from supaernova.steps.data import Data
     from supaernova.steps.pae.tf import S, FTensor, TFPAEModel, TensorCompatible
     from supaernova.steps.nflow.model import NFlowModelStep
     from supaernova.typing.backends.tf import GenericTensor
@@ -58,15 +60,16 @@ class TFNFlowModel(ks.Model):
 
         self.debug: bool = self.options.debug
         self.profile: bool = self.options.profile
+        self.data_step: Data = config.data_step
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
-        vars(self)["pae"]: TFPAEModel = cast("TFPAEModel", config.pae.model)
+        vars(self)["pae"]: TFPAEModel = cast("TFPAEModel", config.pae_step.model)
         self.pae.trainable = False
         self.pae.encoder.trainable = False
         self.pae.decoder.trainable = False
 
         # --- Training ---
         self.built: bool = False
-        self.batch_size: int = self.options.batch_size
+        self.batch_size: int = config.batch_size
         self.save_best: bool = self.options.save_best
         self.patience: int = self.options.patience
         self.validation_frac: float = self.options.validation_frac

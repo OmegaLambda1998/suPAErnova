@@ -1,5 +1,3 @@
-import os
-import random as rn
 from typing import TYPE_CHECKING, ClassVar, cast, override
 from pathlib import Path
 
@@ -8,23 +6,21 @@ import pandas as pd
 from astropy import cosmology as cosmo
 import sncosmo
 
+from supaernova.steps import Step
+from supaernova.utils import resolve_path
+from supaernova.steps.variants import Variant
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis.analysis import Plotter
-from supaernova.configs.steps.data import DataStepResult
-
-from .steps import SNPAEStep
+from supaernova.configs.steps.data import DataStepResult, DataStepAnalysis
 
 if TYPE_CHECKING:
     from typing import Any
-    from logging import Logger
     from collections.abc import Iterable, Sequence
 
     from numpy import typing as npt
 
-    from supaernova.configs.paths import PathConfig
-    from supaernova.configs.globals import GlobalConfig
     from supaernova.typing.dimensions import SNDim, WLDim, SpecDim
-    from supaernova.configs.steps.data import DataStepConfig, DataStepAnalysis
+    from supaernova.configs.steps.data import DataStepConfig
 
     SNeDataFrame = pd.DataFrame
 
@@ -32,84 +28,75 @@ WL_MASK_MIN = 3298.68
 WL_MASK_MAX = 9701.23
 
 
-class DataStep(SNPAEStep):
-    # Class Variables
-    id: ClassVar[str] = "data"
-
+class Data(Step):
     def __init__(self, config: "DataStepConfig") -> None:
-        # --- Superclass Variables ---
-        self.options: DataStepConfig
-        self.config: GlobalConfig
-        self.paths: PathConfig
-        self.log: Logger
-        self.force: bool
-        self.verbose: bool
         super().__init__(config)
 
-        # --- Previous Step Variables ---
+        # === Previous Step Variables ===
 
-        # --- Config Variables ---
-        # Required
-        self.data_dir: Path
-        self.meta: Path
-        self.idr: Path
-        self.mask: Path
+        # === Config Variables ===
+        # --- Required ---
+        self.data_dir: Path = self.options.data_dir
+        self.meta: Path = self.options.meta
+        self.idr: Path = self.options.idr
+        self.mask: Path = self.options.mask
         self.colourlaw: npt.NDArray[np.float64] | None
+        self.train_frac: float = self.options.train_frac
 
-        # Optional
+        # --- Optional ---
         self.cosmological_model: cosmo.FlatLambdaCDM
         self.salt_model: sncosmo.SALT2Source | sncosmo.SALT3Source
-        self.min_phase: float
-        self.max_phase: float
-        self.train_frac: float
-        self.seed: int
+        self.min_phase: float = self.options.min_phase
+        self.max_phase: float = self.options.max_phase
+        self.min_redshift: float = self.options.min_redshift
+        self.max_redshift: float = self.options.max_redshift
+        self.min_wavelength: float = self.options.min_wavelength
+        self.max_wavelength: float = self.options.max_wavelength
+        self.seed: int = self.options.seed
 
-        # --- Setup Variables ---
-        # Output paths
+        # === Setup Variables ===
+        # Output Paths
         self.out_data: Path
         self.out_sne: Path
         self.out_train: Path
         self.out_test: Path
 
-        # Train / Test split
+        # Train / Test Split
         self.test_frac: float
         self.n_kfolds: int
 
-        # --- Run Variables ---
+        # === Run Variables ===
         self.wavelength: npt.NDArray[np.float32]
         self.nspectra_per_sn: npt.NDArray[np.int32]
 
-        # Output objects
-        self.sne: SNeDataFrame
-        self.data: DataStepResult
-        self.train_data: list[DataStepResult]
-        self.test_data: list[DataStepResult]
+        # === Result Variables ===
+        self.results: DataStepResult
+        self.sne: SNeDataFrame  # Created in self.load_sne
+        self.data: DataStepResult  # Created in self.prepare_data_arrays
+        self.train_data: list[DataStepResult]  # Created in self.split_train_test
+        self.test_data: list[DataStepResult]  # Created in self.split_train_test
 
         # Data Dimensions
-        self.sn_dim: SNDim
-        self.spec_dim: SpecDim
-        self.wl_dim: WLDim
+        self.sn_dim: SNDim  # Created in self.get_dims
+        self.nspectra_per_sn: npt.NDArray[int]  # Created in self.get_dims
+        self.spec_dim: SpecDim  # Created in self.get_dims
+        self.wl_dim: WLDim  # Created in self.get_dims
 
-        # --- Analysis Variables ---
-        self.analysis: tuple[DataStepAnalysis] = self.options.analysis
+        # === Analysis Variables ===
+        self.analysis: DataStepAnalysis = self.options.analysis or DataStepAnalysis()
 
     @override
     def _setup(self) -> None:
-        # --- Previous Step Variables ---
+        # === Previous Step Variables ===
 
-        # --- Config Variables ---
-        # Required
-        self.data_dir = self.options.data_dir
-        self.meta = self.options.meta
-        self.idr = self.options.idr
-        self.mask = self.options.mask
-
+        # === Config Variables ===
+        # --- Required ---
         colourlaw = self.options.colourlaw
         if colourlaw is not None:
             _, colourlaw = np.loadtxt(colourlaw, unpack=True)
         self.colourlaw = colourlaw
 
-        # Optional
+        # --- Optional ---
         # Get astropy.cosmology model associated with provided cosmological_model string
         self.cosmological_model = getattr(cosmo, self.options.cosmological_model)
 
@@ -124,20 +111,16 @@ class DataStep(SNPAEStep):
         else:
             self.salt_model = sncosmo.get_source(salt_model)
 
-        self.min_phase = self.options.min_phase
-        self.max_phase = self.options.max_phase
-        self.train_frac = self.options.train_frac
-        self.seed = self.options.seed
-
-        # Output paths
-        self.out_data = self.paths.out / "data.npz"
-        self.out_sne = self.paths.out / "sne.pkl"
-        self.out_train = self.paths.out / "train"
+        # === Config Variables ===
+        # Output Paths
+        self.out_data = self.paths.results / "data.npz"
+        self.out_sne = self.paths.results / "sne.pkl"
+        self.out_train = self.paths.results / "train"
         self.out_train.mkdir(parents=True, exist_ok=True)
-        self.out_test = self.paths.out / "test"
+        self.out_test = self.paths.results / "test"
         self.out_test.mkdir(parents=True, exist_ok=True)
 
-        # Train / Test split
+        # Train / Test Split
         self.test_frac = 1 - self.train_frac
         self.n_kfolds = int(1 / self.test_frac)
 
@@ -189,6 +172,7 @@ class DataStep(SNPAEStep):
         with np.load(self.out_data, allow_pickle=True) as io:
             data = dict(io.items())
         self.data = DataStepResult.model_validate(data)
+        self.results = self.data
 
         # Load in training and testing data
         self.log.debug(f"Loading training data arrays from {self.out_train}")
@@ -209,7 +193,6 @@ class DataStep(SNPAEStep):
 
     @override
     def _run(self) -> None:
-        # Create self.sne
         self.load_sne()
         self.calculate_salt_flux()
         self.get_dims()
@@ -218,25 +201,33 @@ class DataStep(SNPAEStep):
 
     @override
     def _result(self) -> None:
-        self.log.debug(f"Saving SNe DataFrame to {self.out_sne}")
-        self.sne.to_pickle(self.out_sne)
+        if self.force or not self.out_sne.exists():
+            self.log.debug(f"Saving SNe DataFrame to {self.out_sne}")
+            self.sne.to_pickle(self.out_sne)
 
-        self.log.debug(f"Saving data arrays to {self.out_data}")
-        np.savez_compressed(self.out_data, **self.data.model_dump(exclude={"metadata"}))
+        if self.force or not self.out_data.exists():
+            self.log.debug(f"Saving data arrays to {self.out_data}")
+            np.savez_compressed(
+                self.out_data, **self.data.model_dump(exclude={"metadata", "name"})
+            )
 
-        self.log.debug(f"Saving training data arrays to {self.out_train}")
         for i, train_data in enumerate(self.train_data):
-            np.savez_compressed(
-                self.out_train / f"kfold_{i:d}.npz",
-                **train_data.model_dump(exclude={"metadata"}),
-            )
+            out_train = self.out_train / f"kfold_{i:d}.npz"
+            if self.force or not out_train.exists():
+                self.log.debug(f"Saving {i}th training data array to {out_train}")
+                np.savez_compressed(
+                    out_train,
+                    **train_data.model_dump(exclude={"metadata", "name"}),
+                )
 
-        self.log.debug(f"Saving testing data arrays to {self.out_test}")
         for i, test_data in enumerate(self.test_data):
-            np.savez_compressed(
-                self.out_test / f"kfold_{i:d}.npz",
-                **test_data.model_dump(exclude={"metadata"}),
-            )
+            out_test = self.out_test / f"kfold_{i:d}.npz"
+            if self.force or not out_test.exists():
+                self.log.debug(f"Saving {i}th testing data array to {out_test}")
+                np.savez_compressed(
+                    out_test,
+                    **test_data.model_dump(exclude={"metadata", "name"}),
+                )
 
     @override
     def _analyse(self) -> None:
@@ -246,6 +237,7 @@ class DataStep(SNPAEStep):
             for opts in self.analysis.plot_spectra:
                 if opts.name is None:
                     opts.name = "spectra"
+                self.log.debug(f"Plotting {opts.name}")
                 if opts.savepath is None:
                     opts.savepath = self.paths.plots / str(self.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
@@ -257,13 +249,13 @@ class DataStep(SNPAEStep):
             for opts in self.analysis.plot_summary:
                 if opts.name is None:
                     opts.name = "summary"
+                self.log.debug(f"Plotting {opts.name}")
                 if opts.savepath is None:
                     opts.savepath = self.paths.plots / str(self.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
-
                 savepath = (opts.savepath or Path()) / f"{opts.name}.{opts.ext}"
                 if savepath.exists():
-                    return
+                    continue
                 fig, ax = SpectraPlotter.plot_summary(self.data, opts, save=False)
                 for dt in ("train", "test"):
                     for kfold in range(self.n_kfolds):
@@ -288,7 +280,7 @@ class DataStep(SNPAEStep):
             "sn": str,
             "phase": float,
             "z": float,
-            "MB": float,
+            "mB": float,
             "x0": float,
             "x1": float,
             "c": float,
@@ -298,9 +290,7 @@ class DataStep(SNPAEStep):
         sne_data = pd.read_csv(self.meta, header=0, dtype=sne_dtypes)
         # Update paths relative to self.meta
         sne_data.path = sne_data.path.apply(
-            lambda path: str(
-                self.paths.resolve_path(Path(path), relative_path=self.meta.parent)
-            )
+            lambda path: str(resolve_path(Path(path), relative_path=self.meta.parent))
         )
 
         self.log.debug(f"Loading data from `idr` file: {self.idr}")
@@ -381,7 +371,7 @@ class DataStep(SNPAEStep):
 
         # Final structure is 1 row per SN with columns:
         #   sn:           str       = SN Name
-        #   MB:           float     = Redshift-dependant absolute magnitude of a ``standard'' SN Ia
+        #   mB:           float     = Redshift-dependant absolute magnitude of a ``standard'' SN Ia
         #   x0:           float     = SALT $x_{0}$ parameter, with the SN apparent magnitude $m_{b}=\log_{10}(x0)$
         #   x1:           float     = SALT $x_{1}$ stretch parameter
         #   c:            float     = SALT $\mathcal{C}$ colour parameter
@@ -514,7 +504,7 @@ class DataStep(SNPAEStep):
             "x0": "x0",
             "x1": "x1",
             "c": "c",
-            "MB": "MB",
+            "mB": "MB",
             "hubble_residual": "hubble_resid",
         }
 
@@ -651,8 +641,10 @@ class DataStep(SNPAEStep):
         #   time = 1 -> phase = max_phase
         time_mask = data["phase"] > -100
         data["time"] = data["phase"].copy()
-        data["time"][time_mask] = (data["time"][time_mask] - self.min_phase) / (
-            self.max_phase - self.min_phase
+        min_phase = max(self.min_phase, data["time"][time_mask].min())
+        max_phase = min(self.max_phase, data["time"][time_mask].max())
+        data["time"][time_mask] = (data["time"][time_mask] - min_phase) / (
+            max_phase - min_phase
         )
         data["time"][~time_mask] = -1
 
@@ -669,6 +661,7 @@ class DataStep(SNPAEStep):
         data["mask"] = data["mask"].astype(np.int32)
 
         self.data = DataStepResult.model_validate(data)
+        self.results = self.data
 
     def split_train_test(self) -> None:
         self.set_seed()
@@ -693,14 +686,14 @@ class DataStep(SNPAEStep):
                 DataStepResult.model_validate({
                     key: val[inds_train, :, :] if val.ndim == 3 else val[inds_train, :]
                     for key, val in self.data.model_dump().items()
-                    if val is not None
+                    if isinstance(val, np.ndarray)
                 })
             )
             self.test_data.append(
                 DataStepResult.model_validate({
                     key: val[inds_test, :, :] if val.ndim == 3 else val[inds_test, :]
                     for key, val in self.data.model_dump().items()
-                    if val is not None
+                    if isinstance(val, np.ndarray)
                 })
             )
         n_train_sn = self.train_data[0].amplitude.shape[0]
@@ -710,4 +703,8 @@ class DataStep(SNPAEStep):
         )
 
 
-DataStep.register_step()
+class DataStep(Variant):
+    id: ClassVar[str] = "data"
+
+
+DataStep.register_step(Data)

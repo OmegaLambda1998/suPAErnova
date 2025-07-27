@@ -5,8 +5,8 @@ from pathlib import Path
 import toml
 import click
 
+from .utils import resolve_path
 from .supaernova import main
-from .configs.paths import PathConfig
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -28,6 +28,24 @@ if TYPE_CHECKING:
     type=click.Path(exists=False, path_type=Path),
     default=None,
 )
+@click.option(
+    "-r",
+    "--result_path",
+    type=click.Path(exists=False, path_type=Path),
+    default=None,
+)
+@click.option(
+    "-p",
+    "--plot_path",
+    type=click.Path(exists=False, path_type=Path),
+    default=None,
+)
+@click.option(
+    "-l",
+    "--log_path",
+    type=click.Path(exists=False, path_type=Path),
+    default=None,
+)
 def cli(
     input_path: Path,
     *,  # Force keyword-only arguments
@@ -35,11 +53,14 @@ def cli(
     force: bool = False,
     base_path: Path | None = None,
     out_path: Path | None = None,
+    result_path: Path | None = None,
+    plot_path: Path | None = None,
+    log_path: Path | None = None,
 ) -> None:
     input_config: dict[str, JsonValue] = toml.load(input_path)
 
     # Set base_path to input_path.parent if none provided
-    base_path = PathConfig.resolve_path(
+    base_path = resolve_path(
         base_path,
         default_path=input_path.parent,
         relative_path=Path.cwd(),
@@ -51,6 +72,9 @@ def cli(
         force=force,
         base_path=base_path,
         out_path=out_path,
+        result_path=result_path,
+        plot_path=plot_path,
+        log_path=log_path,
     )
 
 

@@ -1,17 +1,17 @@
 # Copyright 2025 Patrick Armstrong
 import sys
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from pathlib import Path
 import traceback
 import contextlib
 
-import toml
 from pydantic import ValidationError
 from tqdm.contrib.logging import logging_redirect_tqdm
 
-from .steps import SNPAEStep
-from .configs import SNPAEConfig
+from .steps import Step
+from .utils import resolve_path
 from .logging import setup_logging
+from .configs.run import RunConfig
 from .configs.input import InputConfig
 from .configs.paths import PathConfig
 from .configs.steps import StepConfig
@@ -22,70 +22,73 @@ if TYPE_CHECKING:
 
 
 def prepare_config(
-    input_config: dict[str, "JsonValue"],
+    config: dict[str, "JsonValue"],
     *,  # Force keyword-only arguments
     verbose: bool = False,
     force: bool = False,
     base_path: Path | None = None,
     out_path: Path | None = None,
-    plots_path: Path | None = None,
-) -> InputConfig:
-    # Normalise input_config
-    user_config = SNPAEConfig.normalise_input(input_config)
-
-    # Extend user_config
-    user_config = SNPAEConfig.extend_input(user_config, base_path=base_path)
+    result_path: Path | None = None,
+    plot_path: Path | None = None,
+    log_path: Path | None = None,
+) -> "RunConfig":
+    config = InputConfig._extend_config(config, base_path=base_path)
 
     # Setup global config
-    user_config["config"] = GlobalConfig.from_config(
-        cast("dict[str, JsonValue]", user_config.get("config", {})),
-        verbose=verbose,
-        force=force,
+    config["config"] = GlobalConfig(
+        verbose=config.get("config", {}).get("verbose", verbose),
+        force=config.get("config", {}).get("force", force),
     )
 
     # Setup paths config
-    base_path = PathConfig.resolve_path(
-        base_path or user_config["paths"].get("base"),
+    base_path = resolve_path(
+        base_path or config.get("paths", {}).get("base"),
         default_path=Path.cwd(),
         relative_path=Path.cwd(),
     )
-    out_path = PathConfig.resolve_path(
-        out_path or user_config["paths"].get("out"),
+    out_path = resolve_path(
+        out_path or config.get("paths", {}).get("out"),
         default_path=base_path / "output",
         relative_path=base_path,
         mkdir=True,
     )
-    plots_path = PathConfig.resolve_path(
-        plots_path or user_config["paths"].get("plots"),
+    result_path = resolve_path(
+        result_path or config.get("paths", {}).get("results"),
+        default_path=out_path / "results",
+        relative_path=out_path,
+        mkdir=True,
+    )
+    plot_path = resolve_path(
+        plot_path or config.get("paths", {}).get("plot"),
         default_path=out_path / "plots",
         relative_path=out_path,
         mkdir=True,
     )
-    log_path = PathConfig.resolve_path(
-        user_config["paths"].get("logs") or out_path / "logs",
+    log_path = resolve_path(
+        log_path or config.get("paths", {}).get("log"),
         default_path=out_path / "logs",
-        relative_path=base_path,
+        relative_path=out_path,
         mkdir=True,
     )
-    user_config["paths"] = PathConfig.from_config(
-        {},
-        base_path=base_path,
-        out_path=out_path,
-        plots_path=plots_path,
-        log_path=log_path,
+    config["paths"] = PathConfig(
+        base=base_path,
+        out=out_path,
+        results=result_path,
+        plots=plot_path,
+        log=log_path,
     )
 
     # Propagate global and paths to steps
-    SNPAEStep.register_steps()
+    Step.register_steps()
     for step, step_config in StepConfig.steps.items():
-        if step in user_config:
-            user_config[step] = step_config.from_config({
-                "config": user_config["config"],
-                "paths": user_config["paths"],
-                **user_config[step],
-            })
+        if step in config:
+            config[step] = step_config(
+                config=config["config"],
+                paths=config["paths"],
+                **config[step],
+            )
 
-    return InputConfig.from_config(user_config)
+    return RunConfig(**config)
 
 
 def main(
@@ -95,6 +98,9 @@ def main(
     force: bool = False,
     base_path: Path | None = None,
     out_path: Path | None = None,
+    result_path: Path | None = None,
+    plot_path: Path | None = None,
+    log_path: Path | None = None,
 ) -> None:
     log = setup_logging(__name__, verbose=verbose)
     log.info("Started SuPAErnova")
@@ -111,6 +117,9 @@ def main(
                 force=force,
                 base_path=base_path,
                 out_path=out_path,
+                result_path=result_path,
+                plot_path=plot_path,
+                log_path=log_path,
             )
             config.run()
     except ValidationError as e:

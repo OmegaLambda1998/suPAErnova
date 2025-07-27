@@ -1,14 +1,14 @@
 # Copyright 2025 Patrick Armstrong
 import os
-from typing import TYPE_CHECKING, override
-
-from tqdm import tqdm
-import numpy as np
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+from typing import TYPE_CHECKING, override
+
+from tqdm import tqdm
+import numpy as np
 import tensorflow as tf
 from tensorflow import keras as ks
 import tensorflow_probability as tfp
@@ -57,7 +57,7 @@ class TFPosteriorModel(ks.Model):
         self.debug: bool = options.debug
         self.profile: bool = options.profile
         # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
-        vars(self)["nflow"]: TFNFlowModel = config.nflow.model
+        vars(self)["nflow"]: TFNFlowModel = config.nflow_step.model
         vars(self)["pae"]: TFPAEModel = self.nflow.pae
         self.nflow.trainable = False
         self.nflow.flow.trainable = False

@@ -1,83 +1,108 @@
 # Copyright 2025 Patrick Armstrong
+from typing import Any
+from logging import Logger
+from pathlib import Path
 
-from typing import Self
+import toml
+from pydantic import FilePath, DirectoryPath
 
-from pydantic import FilePath, computed_field, model_validator
+from supaernova.utils import deepmerge, resolve_path
+from supaernova.logging import setup_logging
 
-from supaernova.steps import SNPAEStep
-from supaernova.steps.pae import PAEStep
-from supaernova.steps.data import DataStep
-from supaernova.steps.nflow import NFlowStep
-from supaernova.steps.posterior import PosteriorStep
-
-from .steps import StepConfig
-from .configs import SNPAEConfig
-from .steps.pae import PAEStepConfig
-from .steps.data import DataStepConfig
-from .steps.nflow import NFlowStepConfig
-from .steps.backends import Backend
-from .steps.posterior import PosteriorStepConfig
+from .base import BaseConfig
+from .paths import PathConfig
+from .globals import GlobalConfig
 
 
-class InputConfig(SNPAEConfig):
-    data: DataStepConfig | None = None
-    pae: PAEStepConfig[Backend] | None = None
-    nflow: NFlowStepConfig[Backend] | None = None
-    posterior: PosteriorStepConfig[Backend] | None = None
+class InputConfig(BaseConfig):
+    # === Class Variables ===
+    # === Class Methods ===
+    @classmethod
+    def _default_config(cls, **input_config: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "log": setup_logging(
+                input_config.get("name", cls.__name__),
+                log_path=input_config["paths"].log,
+                verbose=input_config["config"].verbose,
+            ),
+        }
 
-    data_step: DataStep | None = None
-    pae_step: PAEStep[Backend] | None = None
-    nflow_step: NFlowStep[Backend] | None = None
-    posterior_step: PosteriorStep[Backend] | None = None
+    @classmethod
+    def _extend_config(
+        cls,
+        input_config: dict[str, Any],
+        base_path: Path | None = None,
+        key: str | None = None,
+    ) -> dict[str, Any]:
+        base_path = base_path or input_config.get("paths", {}).get("base")
+        if "extends" in input_config and input_config["extends"] is not None:
+            extends_path = resolve_path(
+                input_config["extends"], relative_path=base_path
+            )
+            if not extends_path.exists():
+                err = f"Extension Path: {extends_path} does not exist."
+                cls._raise(err)
+            if extends_path.suffix != ".toml":
+                err = f"Extension Path: {extends_path} is not a `.toml` file."
+                cls._raise(err)
+            extension = toml.load(extends_path)
+            extends_base_path = (
+                extension.get("paths", {}).get("base") or extends_path.parent
+            )
+            if key is not None:
+                extension = extension.get(key, {})
+            for k, v in extension.items():
+                if isinstance(v, dict):
+                    extension[k] = cls._extend_config(
+                        v,
+                        base_path=extends_base_path,
+                        key=k,
+                    )
+            input_config = deepmerge(extension, input_config)
+            input_config["extends"] = extends_path
+        if (
+            "external" in input_config
+            and not Path(input_config["external"]).is_absolute()
+        ):
+            input_config["external"] = base_path / input_config["external"]
+        for k, v in input_config.items():
+            if isinstance(v, dict):
+                input_config[k] = cls._extend_config(
+                    v,
+                    base_path=base_path,
+                    key=k,
+                )
+        return input_config
 
-    @computed_field
-    @property
-    def step_configs(self) -> list[StepConfig]:
-        return [
-            step_config
-            for step_config in [
-                self.data,
-                self.pae,
-                self.nflow,
-                self.posterior,
-            ]
-            if step_config is not None
-        ]
+    # === Field Variables ===
+    # --- Required ---
+    config: GlobalConfig
+    paths: PathConfig
+    log: Logger
+    # --- Optional ---
+    extends: FilePath | None = None
+    external: DirectoryPath | None = None
 
-    @computed_field
-    @property
-    def steps(self) -> list[SNPAEStep]:
-        return [SNPAEStep.steps[step.id](step) for step in self.step_configs]
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
 
-    @model_validator(mode="after")
-    def validate_steps(self) -> Self:
-        if len(self.step_configs) == 0:
-            err = f"No steps have been defined! Please specify at least one of {list(SNPAEStep.steps.keys())}"
-            self._raise(err)
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
 
-        for step_config in self.step_configs:
-            for required_step in step_config.required_steps:
-                if getattr(self, required_step) is None:
-                    err = f"{step_config.id} requires that {required_step} is run first, but {required_step} has not been defined!"
-                    self._raise(err)
-        return self
+    # === Instance Methods ===
+    def __init__(self, **input_config) -> None:
+        config = self._extend_config(input_config)
+        super().__init__(**config)
+        self.save()
 
-    def require(self, step_name: str) -> SNPAEStep:
-        step = getattr(self, step_name + "_step")
-        if step is None:
-            err = f"{step_name} has not yet run"
-            self._raise(err)
-        return step
+    def save(self) -> None:
+        save_file = self.paths.log / f"{self.name}.toml"
+        with save_file.open(
+            "w",
+            encoding="utf-8",
+        ) as io:
+            toml.dump(self.model_dump(exclude={"log"}), io)
 
-    def run(self) -> None:
-        for step in self.steps:
-            args = []
-            kwargs = {
-                required_step: self.require(required_step)
-                for required_step in step.options.required_steps
-            }
-            step.setup(*args, **kwargs)
-            step.run(*args, **kwargs)
-            step.result(*args, **kwargs)
-            step.analyse(*args, **kwargs)
-            setattr(self, step.id + "_step", step)
+    # === Static Methods ===

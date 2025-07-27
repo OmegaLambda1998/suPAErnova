@@ -7,14 +7,14 @@ from collections.abc import Callable
 
 import numpy as np
 from numpy import typing as npt
-from pydantic import BaseModel, NonNegativeInt, model_validator
+from pydantic import Field, PositiveInt, PositiveFloat, NonNegativeInt, model_validator
 
-from supaernova.steps.nflow import NFlowStep
-from supaernova.configs.steps.model import AbstractModelStepConfig
+from supaernova.configs.base import BaseConfig
+from supaernova.configs.steps import StepResult, StepAnalysis
+from supaernova.analysis.dispersion import DispersionPlot
 from supaernova.configs.steps.nflow import NFlowStepConfig
-from supaernova.configs.steps.steps import AbstractStepResult
-
-from .model import PosteriorModelConfig
+from supaernova.configs.steps.models import ModelConfig, BackendConfig
+from supaernova.analysis.distribution import DistributionPlot
 
 type InitPreset = Literal["initial", "current", "best"]
 type InitULatents = Literal["u_random", "u_constant"]
@@ -23,13 +23,16 @@ type InitLatents = InitPreset | InitULatents | InitZLatents
 type InitParams = InitPreset | Literal["random", "data", "constant", "scale"]
 
 
-class PosteriorMapStage(BaseModel):
+class PosteriorMAPStage(BaseConfig):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
     stage: NonNegativeInt
     name: str
     fname: str
     savepath: Path | None = None
     loadpath: Path | None = None
-
     n_chains: int
     init: bool = False
     init_u_delta_av: InitParams
@@ -39,6 +42,8 @@ class PosteriorMapStage(BaseModel):
     init_delta_p: InitParams
     init_bias: InitParams
 
+    # === Model Validators ===
+    # --- Before ---
     @model_validator(mode="before")
     @classmethod
     def init_values(cls, data: Any) -> Any:
@@ -52,64 +57,199 @@ class PosteriorMapStage(BaseModel):
             data["init_bias"] = init_all
         return data
 
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
 
-class PosteriorStepMAPResult(AbstractStepResult):
+
+class PosteriorStepMAPResult(StepResult):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
     chain_min: npt.NDArray[np.int32]
-    converged: npt.NDArray[np.bool_]
+    converged: npt.NDArray[bool]
     num_evaluations: int
     negative_log_prob: npt.NDArray[np.float32]
-
     init_u_delta_av: npt.NDArray[np.float32]
     init_u_latents: npt.NDArray[np.float32]
     init_delta_av: npt.NDArray[np.float32]
     init_delta_m: npt.NDArray[np.float32]
     init_delta_p: npt.NDArray[np.float32]
     init_z_latents: npt.NDArray[np.float32]
-
     best_u_delta_av: npt.NDArray[np.float32]
     best_u_latents: npt.NDArray[np.float32]
     best_delta_av: npt.NDArray[np.float32]
     best_delta_m: npt.NDArray[np.float32]
     best_delta_p: npt.NDArray[np.float32]
     best_z_latents: npt.NDArray[np.float32]
+    # --- Optional ---
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
 
 
-class PosteriorStepHMCResult(AbstractStepResult):
+class PosteriorStepHMCResult(StepResult):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
     samples: npt.NDArray[np.float32]
     step_sizes_final: npt.NDArray[np.float32]
     is_accepted: npt.NDArray[np.float32]
-
     u_delta_av: npt.NDArray[np.float32]
     u_latents: npt.NDArray[np.float32]
     delta_av: npt.NDArray[np.float32]
     z_latents: npt.NDArray[np.float32]
     delta_m: npt.NDArray[np.float32]
     delta_p: npt.NDArray[np.float32]
+    # --- Optional ---
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
 
 
-class PosteriorStepResult(AbstractStepResult):
+class PosteriorStepResult(StepResult):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
     ind: npt.NDArray[np.int32]
-    sn_name: npt.NDArray[np.str_]
-    spectra_id: npt.NDArray[np.str_]
-
+    sn_name: npt.NDArray[str]
+    spectra_id: npt.NDArray[str]
     map: PosteriorStepMAPResult
     hmc: PosteriorStepHMCResult
+    # --- Optional ---
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
 
 
-class PosteriorStepConfig[Backend: str](
-    AbstractModelStepConfig[Backend, PosteriorModelConfig]
-):
-    # --- Class Variables ---
-    model_backend: ClassVar[dict[str, Callable[[], type[PosteriorModelConfig]]]] = {
-        "TensorFlow": lambda: (
-            importlib.import_module(".tf", __package__)
-        ).TFPosteriorModelConfig,
-    }
+class PosteriorStepAnalysis(StepAnalysis):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
+    # --- Optional ---
+    plot_map_init: DistributionPlot | list[DistributionPlot] | None = None
+    plot_map_best: DistributionPlot | list[DistributionPlot] | None = None
+    plot_hmc: DistributionPlot | list[DistributionPlot] | None = None
+    plot_dispersion: DispersionPlot | list[DispersionPlot] | None = None
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
+
+
+class PosteriorConfig(BackendConfig):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
+    iterations: int
+    n_chains_early: int
+    n_chains_mid: int
+    n_chains_final: int
+    n_burnin: PositiveInt
+    n_samples: PositiveInt
+    n_leapfrog: PositiveInt
+    train_delta_m: bool
+    train_delta_p: bool
+    train_bias: bool
+    # --- Optional ---
+    analysis: PosteriorStepAnalysis | None = None
+    nflow: str | int = 0
+    debug: bool = False
+    profile: bool = False
+    train_subset: bool = True
+    test_subset: bool = True
+    subset: Literal["train", "test"] = "train"
+    save_best: bool = False
+    tolerance: PositiveFloat = 0.01
+    max_iterations: PositiveInt = 2500
+    target_acceptance_rate: PositiveFloat = 0.651
+    random_initial_positions: bool = False
+    u_delta_av_min: float = -10.0
+    u_delta_av_max: float = 10.0
+    u_delta_av_start: float = -1.0
+    u_delta_av_end: float = 1.0
+    u_delta_av_mean: float = 0.0
+    u_delta_av_std: float = 1.0
+    u_latents_min: float = -10.0
+    u_latents_max: float = 10.0
+    u_latents_mean: float = 0.0
+    u_latents_std: float = 1.0
+    delta_av_min: float = -5.0
+    delta_av_max: float = 5.0
+    delta_av_start: float = -0.5
+    delta_av_end: float = 0.5
+    delta_av_mean: float = 0.0
+    delta_av_std: float = 0.5
+    delta_m_min: float = -15
+    delta_m_max: float = 15
+    delta_m_start: float = -1.5
+    delta_m_end: float = 1.5
+    delta_m_mean: float = 0.0
+    delta_m_std: float = 0.1
+    delta_p_min: float = -10
+    delta_p_max: float = 10
+    delta_p_start: float = -1.0
+    delta_p_end: float = 1.0
+    delta_p_mean: float = 0.0
+    delta_p_std: float = 0.01
+    bias_min: float = -10
+    bias_max: float = 10
+    bias_start: float = -1.0
+    bias_end: float = 1.0
+    bias_mean: float = 0.0
+    bias_std: float = 1.0
+
+
+class PosteriorStepConfig(ModelConfig):
+    # === Class Variables ===
     id: ClassVar[str] = "posterior"
     required_steps: ClassVar[list[str]] = [NFlowStepConfig.id]
+    model_backend: ClassVar[dict[str, Callable[[], type[PosteriorConfig]]]] = {
+        "TensorFlow": lambda: importlib.import_module(
+            ".tf", __package__
+        ).TFPosteriorConfig
+    }
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
+    base: PosteriorConfig
+    # --- Optional ---
+    variants: list[PosteriorConfig] | None = Field(None, validation_alias="variant")
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
 
-    # --- Previous Steps ---
-    nflow: NFlowStep[Any] | None = None
 
-
-PosteriorStepConfig.register_step()
+PosteriorStepConfig.register_step(PosteriorConfig)

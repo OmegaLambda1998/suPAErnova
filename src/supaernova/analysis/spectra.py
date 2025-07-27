@@ -77,10 +77,10 @@ class SpectraPlotter(Plotter):
         force: bool = False,
         save: bool = True,
         **kwargs: "Any",
-    ) -> tuple["Figure", "Axis"] | None:
+    ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
-            return None
+            return None, None
         wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = SpectraPlotter.prep(
             data, config
         )
@@ -107,7 +107,7 @@ class SpectraPlotter(Plotter):
         if save:
             fig = Plotter.save(fig, savepath)
             Plotter.close(fig, ax)
-            return None
+            return None, None
         return fig, ax
 
     # TODO: per plot-type args and kwargs
@@ -121,10 +121,10 @@ class SpectraPlotter(Plotter):
         force: bool = False,
         save: bool = True,
         **kwargs: "Any",
-    ) -> tuple["Figure", "Axis"] | None:
+    ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
-            return None
+            return None, None
         wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = SpectraPlotter.prep(
             data, config
         )
@@ -169,7 +169,7 @@ class SpectraPlotter(Plotter):
         if save:
             fig = Plotter.save(fig, savepath)
             Plotter.close(fig, ax)
-            return None
+            return None, None
         return fig, ax
 
     @staticmethod

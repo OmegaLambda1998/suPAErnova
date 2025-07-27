@@ -1,5 +1,11 @@
 # Copyright 2025 Patrick Armstrong
 import os
+
+os.environ["TF_USE_LEGACY_KERAS"] = "1"
+os.environ["KERAS_BACKEND"] = "tensorflow"
+os.environ["TF_DETERMINISTIC_OPS"] = "1"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
 from typing import (
     TYPE_CHECKING,
     Self,
@@ -7,10 +13,6 @@ from typing import (
     override,
 )
 
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ["TF_DETERMINISTIC_OPS"] = "1"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import tensorflow as tf
 from tensorflow import keras as ks
 from tqdm.keras import TqdmCallback
@@ -465,13 +467,13 @@ class TFPAEModel(ks.Model):
         self.encoder: TFPAEEncoder = TFPAEEncoder(self.options, config.name)
         self.decoder: TFPAEDecoder = TFPAEDecoder(self.options, config.name)
         self.decoder.wl_dim = config.wl_dim
-        self.decoder.colourlaw = config.data.colourlaw
+        self.decoder.colourlaw = config.data_step.colourlaw
 
         # --- Training ---
         self.built: bool = False
         self._epoch: tf.Variable = tf.Variable(0, name="epoch", trainable=False)
 
-        self.batch_size: int = self.options.batch_size
+        self.batch_size: int = config.batch_size
         self.save_best: bool = self.options.save_best
         self.patience: int | float = self.options.patience
         self.ckpt_path: str = (
@@ -1006,14 +1008,14 @@ class TFPAEModel(ks.Model):
             self.stage.val_spec_mask,
         )
 
-        all_data = (
-            self.stage.all_data.time,
-            self.stage.all_data.dphase,
-            self.stage.all_data.amplitude,
-            self.stage.all_data.sigma,
-            self.stage.all_data.mask,
-            self.stage.all_sn_mask,
-            self.stage.all_spec_mask,
+        data = (
+            self.stage.data.time,
+            self.stage.data.dphase,
+            self.stage.data.amplitude,
+            self.stage.data.sigma,
+            self.stage.data.mask,
+            self.stage.sn_mask,
+            self.stage.spec_mask,
         )
 
         # === Train ===

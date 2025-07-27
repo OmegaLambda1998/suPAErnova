@@ -2,29 +2,32 @@
 import os
 from abc import abstractmethod
 import random as rn
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from pathlib import Path
 import pkgutil
 import importlib
 
 import numpy as np
 
-from supaernova.configs import callback
+from supaernova.configs.callbacks import callback
 
 if TYPE_CHECKING:
     from typing import Any
     from logging import Logger
+    from collections.abc import Callable
 
     from supaernova.configs.paths import PathConfig
     from supaernova.configs.steps import StepConfig
     from supaernova.configs.globals import GlobalConfig
+    from supaernova.configs.steps.variants import VariantConfig
 
 
-class SNPAEStep:
-    # Class Variables
-    steps: ClassVar[dict[str, type["SNPAEStep"]]] = {}
+class Step:
+    # === Class Variables ===
+    steps: ClassVar[dict[str, type["Step"]]] = {}
     id: ClassVar[str]
 
+    # === Class Methods ===
     @classmethod
     def register_step(cls) -> None:
         cls.steps[cls.id] = cls
@@ -35,11 +38,11 @@ class SNPAEStep:
             __name__.split(".")[:-1]
         )  # Remove the last duplicated part
         for _, module, is_pkg in pkgutil.iter_modules([str(Path(__file__).parent)]):
-            if is_pkg:
+            if is_pkg and module not in {"nflow", "posterior"}:
                 importlib.import_module(f"{base_name}.{module}")
 
-    def __init__(self, config: "StepConfig") -> None:
-        # Class Variables
+    # === Instance Methods ===
+    def __init__(self, config: "VariantConfig") -> None:
         self.__class__.id = config.__class__.id
         self.name: str = (
             config.name
@@ -47,13 +50,15 @@ class SNPAEStep:
             else self.__class__.__name__
         ).replace("Config", "")
 
-        # Init Variables
-        self.options: StepConfig = config
+        self.options: VariantConfig = config
         self.config: GlobalConfig = config.config
         self.paths: PathConfig = config.paths
         self.log: Logger = config.log
         self.force: bool = self.config.force
         self.verbose: bool = self.config.verbose
+        self.callbacks: dict[str, str | dict[str, Callable[[Any], None]]] = (
+            config.callbacks
+        )
 
         self.seed: int = 0
         self.set_seed()
@@ -154,3 +159,5 @@ class SNPAEStep:
         os.environ["PYTHONHASHSEED"] = str(seed)
         np.random.seed(seed)
         rn.seed(seed)
+
+    # === Static Methods ===

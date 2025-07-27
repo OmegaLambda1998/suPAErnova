@@ -1,23 +1,24 @@
 import os
-from typing import cast, override
-from functools import cached_property
-from collections.abc import Callable
-
-from pydantic import computed_field
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
+from typing import cast, override
+from functools import cached_property
+from collections.abc import Callable
+
+from pydantic import computed_field
 import tensorflow as tf
 from tensorflow import keras as ks
 
-from supaernova.configs.steps import ConfigInputObject, validate_object
+from supaernova.utils import ConfigInputObject, validate_object
 from supaernova.steps.posterior.tf import (
     loss as snpae_losses,
 )
 
-from .model import PosteriorModelConfig
+from .posterior import PosteriorConfig
 
 LossObject = type[ks.losses.Loss] | Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 
@@ -46,7 +47,12 @@ def get_loss(
     return CustomLoss
 
 
-class TFPosteriorModelConfig(PosteriorModelConfig):
+class TFPosteriorConfig(PosteriorConfig):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
+    # --- Optional ---
     loss: ConfigInputObject[LossObject] = "NegLogLikelihood"
 
     @computed_field
@@ -60,3 +66,13 @@ class TFPosteriorModelConfig(PosteriorModelConfig):
             loss = loss()
 
         return get_loss(loss)
+
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
+    # --- Training ---

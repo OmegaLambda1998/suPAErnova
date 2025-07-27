@@ -1,36 +1,33 @@
 import os
-from typing import Any, Concatenate, cast, override
-from functools import cached_property
-from collections.abc import Callable
-
-from pydantic import PositiveFloat, computed_field
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
+from typing import Any, Concatenate, cast, override
+from functools import cached_property
+from collections.abc import Callable
+
+from pydantic import PositiveFloat, computed_field
 import tensorflow as tf
 from tensorflow import keras as ks
 
+from supaernova.utils import ConfigInputObject, validate_object
 from supaernova.steps.pae.tf import (
     loss as snpae_losses,
 )
-from supaernova.configs.steps import ConfigInputObject, validate_object
 
-from .model import PAEModelConfig
+from .pae import PAEConfig
 
 ActivationObject = Callable[[tf.Tensor], tf.Tensor]
-RegulariserObject = type[ks.regularizers.Regularizer] | Callable[[tf.Tensor], tf.Tensor]
-SchedulerObject = (
-    type[ks.optimizers.schedules.LearningRateSchedule]
-    | Callable[[Concatenate[int | tf.Tensor, ...]], tf.Tensor]
-)
-OptimiserObject = type[ks.optimizers.Optimizer]
-LossObject = type[ks.losses.Loss] | Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 
 
 def validate_activation(activation: ConfigInputObject[ActivationObject]):
     return validate_object(activation, dummy_obj=tf.nn.relu, mod=tf.nn)
+
+
+RegulariserObject = type[ks.regularizers.Regularizer] | Callable[[tf.Tensor], tf.Tensor]
 
 
 def validate_kernel_regulariser(
@@ -39,6 +36,12 @@ def validate_kernel_regulariser(
     return validate_object(
         kernel_regulariser, dummy_obj=ks.regularizers.Regularizer, mod=ks.regularizers
     )
+
+
+SchedulerObject = (
+    type[ks.optimizers.schedules.LearningRateSchedule]
+    | Callable[[Concatenate[int | tf.Tensor, ...]], tf.Tensor]
+)
 
 
 def validate_scheduler(
@@ -51,12 +54,18 @@ def validate_scheduler(
     )
 
 
+OptimiserObject = type[ks.optimizers.Optimizer]
+
+
 def validate_optimiser(
     optimiser: ConfigInputObject[OptimiserObject],
 ):
     return validate_object(
         optimiser, dummy_obj=ks.optimizers.Optimizer, mod=ks.optimizers
     )
+
+
+LossObject = type[ks.losses.Loss] | Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
 
 
 def validate_loss(
@@ -84,37 +93,17 @@ def get_loss(
     return CustomLoss
 
 
-class TFPAEModelConfig(PAEModelConfig):
-    # --- Training ---
+class TFPAEConfig(PAEConfig):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
     activation: ConfigInputObject[ActivationObject]
 
     @computed_field
     @cached_property
     def activation_fn(self) -> ActivationObject:
         return validate_activation(self.activation)
-
-    kernel_regulariser: ConfigInputObject[RegulariserObject] | None = None
-    kernel_regulariser_penalty: PositiveFloat | None = None
-
-    @computed_field
-    @cached_property
-    def kernel_regulariser_cls(self) -> type[ks.regularizers.Regularizer] | None:
-        if self.kernel_regulariser is None:
-            return None
-        regulariser = validate_kernel_regulariser(self.kernel_regulariser)
-        if isinstance(regulariser, type):
-            return regulariser
-
-        class CustomRegulariser(ks.regularizers.Regularizer):
-            @override
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                super().__init__(*args, **kwargs)
-
-            @override
-            def __call__(self, x: tf.Tensor) -> tf.Tensor:
-                return regulariser(x)
-
-        return CustomRegulariser
 
     scheduler: ConfigInputObject[SchedulerObject]
 
@@ -170,3 +159,37 @@ class TFPAEModelConfig(PAEModelConfig):
             loss = loss()
 
         return get_loss(loss)
+
+    # --- Optional ---
+    kernel_regulariser: ConfigInputObject[RegulariserObject] | None = None
+    kernel_regulariser_penalty: PositiveFloat | None = None
+
+    @computed_field
+    @cached_property
+    def kernel_regulariser_cls(self) -> type[ks.regularizers.Regularizer] | None:
+        if self.kernel_regulariser is None:
+            return None
+        regulariser = validate_kernel_regulariser(self.kernel_regulariser)
+        if isinstance(regulariser, type):
+            return regulariser
+
+        class CustomRegulariser(ks.regularizers.Regularizer):
+            @override
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+
+            @override
+            def __call__(self, x: tf.Tensor) -> tf.Tensor:
+                return regulariser(x)
+
+        return CustomRegulariser
+
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
+    # --- Training ---
