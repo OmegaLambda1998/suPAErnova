@@ -38,6 +38,7 @@ class Posterior(Step):
         self.nflow_step: NFlow
         self.pae_step: PAE
         self.data_step: Data
+        self.kfold = self.options.kfold
 
         # === Config Variables ===
         # --- Required ---
@@ -126,11 +127,11 @@ class Posterior(Step):
         )
 
     @override
-    def _setup(self, *, nflow: "NFlow") -> None:
+    def _setup(self, *, data: "Data", pae: "PAE", nflow: "NFlow") -> None:
         # === Previous Step Variables ===
         self.nflow_step = nflow
-        self.pae_step = self.nflow_step.pae_step
-        self.data_step = self.pae_step.data_step
+        self.pae_step = pae
+        self.data_step = data
 
         # --- Stages ---
         self.map_stage_init = PosteriorMAPStage.model_validate({
@@ -248,7 +249,6 @@ class Posterior(Step):
 
     @override
     def _result(self) -> None:
-        data = self.data_step.data
         results = {}
         for subset in self.subsets:
             results[subset] = {}
@@ -256,6 +256,7 @@ class Posterior(Step):
                 self.options.subset = subset
                 self.options.seed = seed
                 model = self.models[subset][seed]
+                data = getattr(self.data_step, f"{subset}_data")
 
                 map_results = {
                     "chain_min": model.map.chain_min.numpy(),
@@ -321,7 +322,7 @@ class Posterior(Step):
                 map_best_results = []
                 map_labels = {}
                 ind = 0
-                if model.map.nflow.physical_latents:
+                if self.nflow_step.physical_latents:
                     map_init_results.append(results.map.init_u_delta_av)
                     map_best_results.append(results.map.best_u_delta_av)
                     map_labels[0] = "μΔAᵥ"
@@ -331,7 +332,7 @@ class Posterior(Step):
                     ind += 1
                 map_init_results.append(results.map.init_u_latents)
                 map_best_results.append(results.map.best_u_latents)
-                if model.map.pae.physical_latents:
+                if self.pae_step.physical_latents:
                     map_init_results.append(results.map.init_delta_av)
                     map_best_results.append(results.map.best_delta_av)
                     map_labels[ind] = "ΔAᵥ"
@@ -341,7 +342,7 @@ class Posterior(Step):
                     ind += 1
                 map_init_results.append(results.map.init_z_latents)
                 map_best_results.append(results.map.best_z_latents)
-                if model.map.pae.physical_latents:
+                if self.pae_step.physical_latents:
                     map_init_results.extend((
                         results.map.init_delta_m,
                         results.map.init_delta_p,
@@ -367,7 +368,7 @@ class Posterior(Step):
                 if model.map.train_delta_p:
                     hmc_labels[hmc_ind] = "Δp"
                     hmc_ind += 1
-                if model.map.nflow.physical_latents:
+                if self.nflow_step.physical_latents:
                     hmc_labels[hmc_ind] = "μΔAᵥ"
                     hmc_ind += 1
                 for i in range(model.map.n_u_latents):
@@ -517,11 +518,11 @@ class Posterior(Step):
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     data = (
                         self.data_step.train_data[
-                            self.pae_step.kfold % len(self.data_step.train_data)
+                            self.kfold % len(self.data_step.train_data)
                         ]
                         if subset == "train"
                         else self.data_step.test_data[
-                            self.pae_step.kfold % len(self.data_step.train_data)
+                            self.kfold % len(self.data_step.train_data)
                         ]
                     )
                     hmc = list(self.results[subset].values())

@@ -178,7 +178,9 @@ class TFPAEEncoder(ks.layers.Layer):
 
         # Determine which spectra to keep
         # Will mask out any spectrum which has at least one unmasked wavelength
-        is_kept = tf.cast(tf.reduce_min(wl_mask, axis=-1, keepdims=True), tf.float32)
+        # is_kept = tf.cast(tf.reduce_min(wl_mask, axis=-1, keepdims=True), tf.float32)
+        # Will mask out any spectrum which has no unmasked wavelength
+        is_kept = tf.cast(tf.reduce_max(input_mask, axis=-1, keepdims=True), tf.float32)
 
         # Latent tensor is the average of the latent values over all unmasked spectra
         # First sum latents over all unmasked spectra
@@ -583,6 +585,7 @@ class TFPAEModel(ks.Model):
         wl_mask: tf.Tensor | None = None,
     ) -> tuple[tf.Tensor, tf.Tensor]:
         training = False if training is None else training
+
         input_phase = inputs[..., :1]
         encoded = self.encoder(inputs, training=training, mask=mask, wl_mask=wl_mask)
 

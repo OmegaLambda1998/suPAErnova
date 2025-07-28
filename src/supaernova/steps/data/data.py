@@ -352,12 +352,12 @@ class Data(Step):
         ]
         spectra = sne_data[spec_cols].reset_index(drop=True)
 
-        self.log.debug(
-            f"Cutting spectra with phases outside the range {self.min_phase} <= phase <= {self.max_phase}",
-        )
-        self.log.debug(f"Number of spectra before phase-cut: {len(spectra)}")
-        spectra = spectra[spectra.phase.between(self.min_phase, self.max_phase)]
-        self.log.debug(f"Number of spectra after phase-cut: {len(spectra)}")
+        # self.log.debug(
+        #     f"Cutting spectra with phases outside the range {self.min_phase} <= phase <= {self.max_phase}",
+        # )
+        # self.log.debug(f"Number of spectra before phase-cut: {len(spectra)}")
+        # spectra = spectra[spectra.phase.between(self.min_phase, self.max_phase)]
+        # self.log.debug(f"Number of spectra after phase-cut: {len(spectra)}")
 
         self.log.debug("Loading spectra data")
         spectra_dtype = {"wave": float, "flux": float, "sigma": float}

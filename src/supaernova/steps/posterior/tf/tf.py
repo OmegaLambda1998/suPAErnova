@@ -62,15 +62,20 @@ class TFPosteriorModel(ks.Model):
         self.debug: bool = options.debug
         self.profile: bool = options.profile
         # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
+        self.data_step = config.data_step
+        self.kfold = config.kfold
         vars(self)["nflow"]: TFNFlowModel = config.nflow_step.model
-        vars(self)["pae"]: TFPAEModel = self.nflow.pae
         self.nflow.trainable = False
         self.nflow.flow.trainable = False
+        vars(self)["pae"]: TFPAEModel = config.pae_step.model
+        self.pae.trainable = False
+        self.pae.encoder.trainable = False
+        self.pae.decoder.trainable = False
 
         self.data: DataStepResult = (
-            self.pae.stage.train_data
+            self.data_step.train_data[self.kfold]
             if self.subset == "train"
-            else self.pae.stage.test_data
+            else self.data_step.test_data[self.kfold]
         )
         self.sn_mask: npt.NDArray[np.int32] = (
             np.array(self.pae.stage.train_sn_mask).astype(np.int32)
@@ -603,7 +608,7 @@ class TFPosteriorModel(ks.Model):
             )
         )
 
-        if self.map.nflow.physical_latents:
+        if self.nflow.physical_latents:
             initial_u_delta_av = self.map.position.current[:, ind : ind + 1]
             u_delta_av = results.position[:, ind : ind + 1]
             ind += 1
@@ -771,13 +776,13 @@ class TFPosteriorModel(ks.Model):
                     ind += 1
                 else:
                     delta_p = self.hmc.delta_p
-                if self.map.nflow.physical_latents:
+                if self.nflow.physical_latents:
                     u_delta_av = samples[..., ind : ind + 1]
                     ind += 1
                 else:
                     u_delta_av = self.hmc.u_delta_av
                 u_latents = samples[..., ind:]
-                if self.map.nflow.physical_latents:
+                if self.nflow.physical_latents:
                     us = np.concatenate([u_delta_av, u_latents], axis=-1)
                 else:
                     us = u_latents
@@ -788,7 +793,7 @@ class TFPosteriorModel(ks.Model):
                     .numpy()
                     .reshape(*samples.shape[:-1], self.map.n_flow_latents)
                 )
-                if self.map.pae.physical_latents:
+                if self.pae.physical_latents:
                     delta_av = z_latents[..., 0:1]
                     z_latents = z_latents[..., 1:]
                 else:
@@ -820,7 +825,7 @@ class TFPosteriorModel(ks.Model):
             stds.append(np.std(self.map.delta_m.best, axis=0))
         if self.map.train_delta_p:
             stds.append(np.std(self.map.delta_p.best, axis=0))
-        if self.map.nflow.physical_latents:
+        if self.nflow.physical_latents:
             stds.append(np.std(self.map.u_delta_av.best, axis=0))
         stds.append(np.std(self.map.u_latents.best, axis=0))
         stds = tf.concat(stds, axis=-1)
@@ -922,13 +927,13 @@ class TFPosteriorModel(ks.Model):
             ind += 1
         else:
             delta_p = self.hmc.delta_p
-        if self.map.nflow.physical_latents:
+        if self.nflow.physical_latents:
             u_delta_av = samples[..., ind : ind + 1]
             ind += 1
         else:
             u_delta_av = self.hmc.u_delta_av
         u_latents = samples[..., ind:]
-        if self.map.nflow.physical_latents:
+        if self.nflow.physical_latents:
             us = np.concatenate([u_delta_av, u_latents], axis=-1)
         else:
             us = u_latents
@@ -939,7 +944,7 @@ class TFPosteriorModel(ks.Model):
             .numpy()
             .reshape(*samples.shape[:-1], self.map.n_flow_latents)
         )
-        if self.map.pae.physical_latents:
+        if self.pae.physical_latents:
             delta_av = z_latents[..., 0:1]
             z_latents = z_latents[..., 1:]
         else:

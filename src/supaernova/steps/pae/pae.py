@@ -382,16 +382,16 @@ class PAE(Step):
                 input_d_amplitude = data.sigma
                 input_mask = data.mask
 
-                mask = (
-                    input_mask
-                    * getattr(self.model.stage, f"{dt}_sn_mask")
-                    * getattr(self.model.stage, f"{dt}_spec_mask")
-                )
+                # mask = (
+                #     input_mask
+                #     * getattr(self.model.stage, f"{dt}_sn_mask")
+                #     * getattr(self.model.stage, f"{dt}_spec_mask")
+                # )
 
                 latents, output_amplitude = self.model(
                     (input_phase, input_amplitude),
                     training=False,
-                    mask=mask,
+                    mask=input_mask,
                     wl_mask=data.wl_mask,
                 )
 
@@ -401,7 +401,7 @@ class PAE(Step):
                     output_amplitude,
                     sample_weight=input_d_amplitude,
                     training=False,
-                    mask=mask,
+                    mask=input_mask,
                 )
 
                 pred_loss = self.model.get_loss("loss_pred")
@@ -418,7 +418,7 @@ class PAE(Step):
                     "input_amp": data.amplitude,
                     "input_d_amp": data.sigma,
                     "input_phase": data.time,
-                    "input_mask": np.array(mask),
+                    "input_mask": np.array(input_mask),
                     "input_colourlaw": self.model.decoder.colourlaw,
                     "latents": latents.numpy()[:, 0, :],
                     "output_amp": output_amplitude.numpy(),
