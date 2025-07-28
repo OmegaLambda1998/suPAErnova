@@ -195,13 +195,20 @@ class Plotter:
         c = cc.ChainConsumer()
 
         for name, chain in chains.items():
+            chain_opts = {}
+            for k, v in chain_kwargs.items():
+                if isinstance(v, dict):
+                    if name in v:
+                        chain_opts[k] = v[name]
+                else:
+                    chain_opts[k] = v
             c.add_chain(
                 cc.Chain(
                     *chain_args,
                     *args,
                     samples=chain,
                     name=str(name),
-                    **chain_kwargs,
+                    **chain_opts,
                     **kwargs,
                 )
             )

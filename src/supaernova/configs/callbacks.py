@@ -40,13 +40,15 @@ class CallbackConfig(InputConfig):
     # === Field Variables ===
     # --- Required ---
     # --- Optional ---
-    callbacks: dict[str, str | dict[str, Callable[[Any], None]]] = {}
+    callbacks: dict[str, str | dict[str, Callable[[Any], None]]] | None = None
 
     # === Model Validators ===
     # --- Before ---
     # --- After ---
     @model_validator(mode="after")
     def _set_callbacks(self) -> Self:
+        if self.callbacks is None:
+            self.callbacks = {}
         for fn, callback in self.callbacks.items():
             if isinstance(callback, str):
                 fn_callbacks = {}

@@ -1,7 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-import os
 from abc import abstractmethod
-import random as rn
 from typing import TYPE_CHECKING, Any, ClassVar
 from pathlib import Path
 import pkgutil
@@ -17,7 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from supaernova.configs.paths import PathConfig
-    from supaernova.configs.steps import StepConfig
     from supaernova.configs.globals import GlobalConfig
     from supaernova.configs.steps.variants import VariantConfig
 
@@ -60,7 +57,8 @@ class Step:
             config.callbacks
         )
 
-        self.seed: int = 0
+        self.seed: int = config.seed
+        self.rng = np.random.default_rng(self.seed)
         self.set_seed()
         self.is_setup: bool = False
         self.is_loaded: bool = False
@@ -156,8 +154,6 @@ class Step:
 
     def set_seed(self, seed: int = 0) -> None:
         seed = self.seed + seed
-        os.environ["PYTHONHASHSEED"] = str(seed)
-        np.random.seed(seed)
-        rn.seed(seed)
+        self.rng.bit_generator.state = type(self.rng.bit_generator)(seed).state
 
     # === Static Methods ===

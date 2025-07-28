@@ -14,7 +14,6 @@ from pydantic import (
 from supaernova.utils import resolve_path
 from supaernova.configs.steps import StepConfig, StepResult, StepAnalysis
 from supaernova.analysis.spectra import SpectraPlot
-from supaernova.configs.callbacks import CallbackConfig
 from supaernova.configs.steps.variants import VariantConfig
 
 
@@ -43,6 +42,9 @@ class DataStepResult(StepResult):
     salt_flux: "npt.NDArray[np.float32]"
     wavelength: "npt.NDArray[np.float32]"
     mask: "npt.NDArray[np.int32]"
+    sn_mask: "npt.NDArray[np.int32]"
+    spec_mask: "npt.NDArray[np.int32]"
+    wl_mask: "npt.NDArray[np.int32]"
     time: "npt.NDArray[np.float32]"
     # --- Optional ---
     # === Model Validators ===

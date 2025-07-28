@@ -1,7 +1,5 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import Any
-
 from pydantic import DirectoryPath
 
 from .base import BaseConfig

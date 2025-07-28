@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any
+from typing import Any, Literal
 from logging import Logger
 from pathlib import Path
 
@@ -18,7 +18,7 @@ class InputConfig(BaseConfig):
     # === Class Variables ===
     # === Class Methods ===
     @classmethod
-    def _default_config(cls, **input_config: dict[str, Any]) -> dict[str, Any]:
+    def _default_config(cls, **input_config) -> dict[str, Any]:
         return {
             "log": setup_logging(
                 input_config.get("name", cls.__name__),
@@ -61,7 +61,7 @@ class InputConfig(BaseConfig):
             input_config = deepmerge(extension, input_config)
             input_config["extends"] = extends_path
         if (
-            "external" in input_config
+            input_config.get("external")
             and not Path(input_config["external"]).is_absolute()
         ):
             input_config["external"] = base_path / input_config["external"]
@@ -81,7 +81,7 @@ class InputConfig(BaseConfig):
     log: Logger
     # --- Optional ---
     extends: FilePath | None = None
-    external: DirectoryPath | None = None
+    external: DirectoryPath | Literal[False] = False
 
     # === Model Validators ===
     # --- Before ---

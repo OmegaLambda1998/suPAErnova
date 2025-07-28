@@ -11,6 +11,8 @@ from pydantic import Field, PositiveInt, PositiveFloat, NonNegativeInt, model_va
 
 from supaernova.configs.base import BaseConfig
 from supaernova.configs.steps import StepResult, StepAnalysis
+from supaernova.configs.steps.pae import PAEStepConfig
+from supaernova.configs.steps.data import DataStepConfig
 from supaernova.analysis.dispersion import DispersionPlot
 from supaernova.configs.steps.nflow import NFlowStepConfig
 from supaernova.configs.steps.models import ModelConfig, BackendConfig
@@ -180,6 +182,9 @@ class PosteriorConfig(BackendConfig):
     train_bias: bool
     # --- Optional ---
     analysis: PosteriorStepAnalysis | None = None
+    data: str | int = 0
+    kfold: int = 0
+    pae: str | int = 0
     nflow: str | int = 0
     debug: bool = False
     profile: bool = False
@@ -230,7 +235,11 @@ class PosteriorConfig(BackendConfig):
 class PosteriorStepConfig(ModelConfig):
     # === Class Variables ===
     id: ClassVar[str] = "posterior"
-    required_steps: ClassVar[list[str]] = [NFlowStepConfig.id]
+    required_steps: ClassVar[list[str]] = [
+        DataStepConfig.id,
+        PAEStepConfig.id,
+        NFlowStepConfig.id,
+    ]
     model_backend: ClassVar[dict[str, Callable[[], type[PosteriorConfig]]]] = {
         "TensorFlow": lambda: importlib.import_module(
             ".tf", __package__

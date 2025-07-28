@@ -16,7 +16,7 @@ class StepResult(BaseConfig):
     # === Field Variables ===
     # --- Required ---
     # --- Optional ---
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] | None = None
     # === Model Validators ===
     # --- Before ---
     # --- After ---
@@ -75,7 +75,6 @@ class StepConfig(CallbackConfig):
             input_config["paths"].results
             / input_config.get("name", self.__class__.__name__),
             relative_path=input_config["paths"].base,
-            mkdir=True,
         )
 
         input_config["paths"].plots = resolve_path(
@@ -92,11 +91,17 @@ class StepConfig(CallbackConfig):
             mkdir=True,
         )
 
-        if input_config.get("external") is not None:
-            input_config["paths"].results = resolve_path(
+        if input_config.get("external"):
+            external_path = resolve_path(
                 Path(input_config["external"]), relative_path=input_config["paths"].base
             )
-            input_config["external"] = input_config["paths"].results
+            input_config["external"] = external_path
+            if not input_config["paths"].results.exists():
+                input_config["paths"].results.symlink_to(
+                    external_path, target_is_directory=True
+                )
+        else:
+            input_config["paths"].results.mkdir(parents=True, exist_ok=True)
         super().__init__(**input_config)
 
     # === Static Methods ===

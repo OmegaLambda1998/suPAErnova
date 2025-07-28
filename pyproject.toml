@@ -24,11 +24,11 @@ dependencies = [
 
 [project.optional-dependencies]
 tf-cpu = [
-  "tensorflow-cpu>=2.18.1,<2.19",
-  "tf-keras>=2.18,<2.19",
-  "tensorflow-probability>=0.25",
-  "tensorboard>=2.18,<2.19",
-  "tensorboard_plugin_profile>=2.19,<2.20",
+  "tensorflow-cpu",
+  "tf-keras",
+  "tensorflow-probability",
+  "tensorboard",
+  "tensorboard_plugin_profile",
 ]
 
 [dependency-groups]

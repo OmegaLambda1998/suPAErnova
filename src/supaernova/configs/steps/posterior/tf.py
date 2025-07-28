@@ -5,7 +5,7 @@ os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
-from typing import cast, override
+from typing import override
 from functools import cached_property
 from collections.abc import Callable
 

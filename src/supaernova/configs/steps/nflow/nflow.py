@@ -9,6 +9,7 @@ from pydantic import Field, PositiveInt, PositiveFloat
 
 from supaernova.configs.steps import StepResult, StepAnalysis
 from supaernova.configs.steps.pae import PAEStepConfig
+from supaernova.configs.steps.data import DataStepConfig
 from supaernova.configs.steps.models import ModelConfig, BackendConfig
 from supaernova.analysis.distribution import DistributionPlot
 
@@ -64,15 +65,19 @@ class NFlowConfig(BackendConfig):
     physical_latents: bool
     validation_frac: Annotated[float, Field(ge=0, le=1)]
     n_batches: PositiveInt
+    n_hidden_units: PositiveInt
+    n_layers: PositiveInt
     # --- Optional ---
     analysis: NFlowStepAnalysis | None = None
+    data: str | int = 0
+    kfold: int = 0
     pae: str | int = 0
     debug: bool = False
     profile: bool = False
     save_best: bool = False
     patience: PositiveFloat = 0.02
 
-    lr: PositiveFloat = 0.0001
+    lr: PositiveFloat = 0.00001
     lr_decay_steps: PositiveFloat = 300
     lr_decay_rate: PositiveFloat = 0.95
     lr_weight_decay_rate: PositiveFloat = 0.0001
@@ -80,14 +85,11 @@ class NFlowConfig(BackendConfig):
     epochs: PositiveInt = 5000
     batch_normalisation: bool = False
 
-    n_hidden_units: PositiveInt = 12
-    n_layers: PositiveInt = 18
-
 
 class NFlowStepConfig(ModelConfig):
     # === Class Variables ===
     id: ClassVar[str] = "nflow"
-    required_steps: ClassVar[list[str]] = [PAEStepConfig.id]
+    required_steps: ClassVar[list[str]] = [DataStepConfig.id, PAEStepConfig.id]
     model_backend: ClassVar[dict[str, Callable[[], type[NFlowConfig]]]] = {
         "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFNFlowConfig
     }

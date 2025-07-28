@@ -60,4 +60,4 @@ class Model(Variant):
                 self.models[name] = variant.model
             if force or not self.models.get(name):
                 self.models[name] = self.models_cls[name](variant)
-        variant.model = self.models[name]
+            variant.model = self.models[name]

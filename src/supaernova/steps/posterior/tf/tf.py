@@ -1,4 +1,5 @@
 # Copyright 2025 Patrick Armstrong
+import gc
 import os
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
     from supaernova.configs.steps.posterior.tf import TFPosteriorModelConfig
     from supaernova.configs.steps.posterior.posterior import PosteriorMapStage
 
+NPROC = os.cpu_count()
+MEM_MB = 0.5 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**2)
+
 
 @ks.utils.register_keras_serializable("SuPAErnova")
 class TFPosteriorModel(ks.Model):
@@ -42,6 +46,7 @@ class TFPosteriorModel(ks.Model):
         **kwargs: "Any",
     ) -> None:
         ks.backend.clear_session()
+        gc.collect()
 
         super().__init__(*args, name=config.name.split()[-1], **kwargs)
         # --- Config ---
@@ -114,6 +119,7 @@ class TFPosteriorModel(ks.Model):
         self.n_burnin: int = options.n_burnin
         self.n_samples: int = options.n_samples
         self.n_leapfrog: int = options.n_leapfrog
+        self.n_thinning: int = options.n_thinning
         self.target_acceptance_rate: float = options.target_acceptance_rate
 
         vars(self)["hmc"]: PosteriorHMCValue = PosteriorHMCValue(
@@ -445,6 +451,7 @@ class TFPosteriorModel(ks.Model):
         if savepath is not None:
             self.save_checkpoint(savepath, save_map=True, save_hmc=True)
 
+    @tf.function
     def vals_and_grads(self, position):
         input_position = self.map.get_position(position)
         log_prob = self(
@@ -454,10 +461,19 @@ class TFPosteriorModel(ks.Model):
         )
         return self._loss(tf.zeros_like(log_prob), log_prob)
 
-    @tf.function
-    def lbfgs(self, x):
-        return tfp.math.value_and_gradient(
-            self.vals_and_grads, x, auto_unpack_single_arg=False
+    # TODO: tf.function temporarily disabled until [#50765](https://github.com/tensorflow/tensorflow/issues/50765) resolved
+    # @tf.function
+    def lbfgs(self):
+        return tfp.optimizer.lbfgs_minimize(
+            lambda x: tfp.math.value_and_gradient(
+                self.vals_and_grads, x, auto_unpack_single_arg=False
+            ),
+            initial_position=self.map.position.current,
+            tolerance=self.tolerance,
+            x_tolerance=self.tolerance,
+            max_iterations=self.max_iterations,
+            num_correction_pairs=1,
+            parallel_iterations=NPROC,
         )
 
     def train_map(
@@ -482,14 +498,7 @@ class TFPosteriorModel(ks.Model):
 
         self.map.setup(stage, chain)
 
-        results = tfp.optimizer.lbfgs_minimize(
-            self.lbfgs,
-            initial_position=tf.identity(self.map.position.current),
-            tolerance=self.tolerance,
-            x_tolerance=self.tolerance,
-            max_iterations=self.max_iterations,
-            num_correction_pairs=1,
-        )
+        results = self.lbfgs()
 
         improved = results.objective_value < self.map.negative_log_prob
         self.map.improved.assign(improved)
@@ -819,8 +828,10 @@ class TFPosteriorModel(ks.Model):
             tf.expand_dims(stds, axis=0), repeats=initial_position.shape[0], axis=0
         )
 
+        step_factor = 2 * (self.n_leapfrog + self.n_thinning + 2)
+
         progress = tqdm(
-            total=(2 * self.n_leapfrog) * (self.n_burnin + self.n_samples),
+            total=(self.n_burnin + self.n_samples) * step_factor,
             leave=True,
         )
 
@@ -828,8 +839,7 @@ class TFPosteriorModel(ks.Model):
         def update_progress(pos, log_prob) -> None:
             progress.set_description(
                 "Burnin"
-                if tf.summary.experimental.get_step()
-                < 2 * self.n_burnin * self.n_leapfrog
+                if tf.summary.experimental.get_step() < self.n_burnin * step_factor
                 else "Run"
             )
             progress.update()
@@ -856,23 +866,29 @@ class TFPosteriorModel(ks.Model):
             return log_prob
 
         def trace_fn(_, pkr):
-            step_size = pkr.inner_results.accepted_results.step_size
+            step_size = pkr.inner_results.step_size
             is_accepted = pkr.inner_results.is_accepted
             return [step_size, is_accepted]
 
         def sample_chain():
             # run hmc
-            hmc = tfp.mcmc.HamiltonianMonteCarlo(
+            # hmc = tfp.mcmc.HamiltonianMonteCarlo(
+            #     target_log_prob_fn=unnormalized_posterior_log_prob,
+            #     num_leapfrog_steps=self.n_leapfrog,
+            #     step_size=step_size,
+            # )
+
+            hmc = tfp.mcmc.NoUTurnSampler(
                 target_log_prob_fn=unnormalized_posterior_log_prob,
-                num_leapfrog_steps=self.n_leapfrog,
                 step_size=step_size,
+                max_tree_depth=self.n_leapfrog,
+                parallel_iterations=NPROC,
             )
 
-            kernel = tfp.mcmc.SimpleStepSizeAdaptation(
+            kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
                 inner_kernel=hmc,
                 num_adaptation_steps=int(self.n_burnin * 0.8),
                 target_accept_prob=self.target_acceptance_rate,
-                reduce_fn=tfp.math.reduce_log_harmonic_mean_exp,
             )
 
             samples, [step_sizes_final, is_accepted] = tfp.mcmc.sample_chain(
@@ -880,8 +896,10 @@ class TFPosteriorModel(ks.Model):
                 current_state=initial_position,
                 kernel=kernel,
                 num_burnin_steps=self.n_burnin,
+                num_steps_between_results=self.n_thinning,
                 trace_fn=trace_fn,
                 name="run",
+                parallel_iterations=NPROC,
             )
 
             return samples, step_sizes_final, is_accepted

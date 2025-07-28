@@ -1,9 +1,7 @@
 # Copyright 2025 Patrick Armstrong
+import gc
 import os
-import random as rn
 from typing import TYPE_CHECKING, cast, override
-
-import numpy as np
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["KERAS_BACKEND"] = "tensorflow"
@@ -18,51 +16,48 @@ from tensorflow_probability import (
 )
 
 if TYPE_CHECKING:
-    from typing import Any, Self, Literal
+    from typing import Any, Self
     from logging import Logger
     from pathlib import Path
     from collections.abc import Callable
 
+    import numpy as np
+
     from supaernova.steps.pae import PAE
     from supaernova.steps.data import Data
-    from supaernova.steps.pae.tf import S, FTensor, TFPAEModel, TensorCompatible
-    from supaernova.steps.nflow.model import NFlowModelStep
-    from supaernova.typing.backends.tf import GenericTensor
-    from supaernova.configs.steps.nflow.tf import TFNFlowModelConfig
-    from supaernova.typing.steps.nflow.nflow import (
-        NULatents,
-        NPhysicalLatents,
-    )
-
-    # === Custom Types ===
-    type NFlowInputs = FTensor[S["batch_dim n_flow_latents"]]
-    type NFlowOutputs = FTensor[S["batch_dim"]]
+    from supaernova.steps.nflow import NFlow
+    from supaernova.steps.pae.tf import TFPAEModel
+    from supaernova.configs.steps.nflow.tf import TFNFlowConfig
 
 
 @ks.utils.register_keras_serializable("SuPAErnova")
 class TFNFlowModel(ks.Model):
     def __init__(
         self,
-        config: "NFlowModelStep[Literal['tf']]",
+        config: "NFlow",
         *args: "Any",
         **kwargs: "Any",
     ) -> None:
         ks.backend.clear_session()
+        gc.collect()
+
         super().__init__(*args, name=config.name.split()[-1], **kwargs)
         # --- Config ---
         global NFLOWMODELSTEP
         NFLOWMODELSTEP = config
-        self.options: "TFNFlowModelConfig" = cast("TFNFlowModelConfig", config.options)
+        self.options: TFNFlowConfig = config.options
         self.log: Logger = config.log
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
         self.seed: int = config.options.seed
+        self.set_seed()
 
         self.debug: bool = self.options.debug
         self.profile: bool = self.options.profile
         self.data_step: Data = config.data_step
+        self.kfold = config.kfold
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
-        vars(self)["pae"]: TFPAEModel = cast("TFPAEModel", config.pae_step.model)
+        vars(self)["pae"]: PAE = config.pae_step.model
         self.pae.trainable = False
         self.pae.encoder.trainable = False
         self.pae.decoder.trainable = False
@@ -91,8 +86,8 @@ class TFNFlowModel(ks.Model):
         loss: ks.losses.Loss = self.options.loss_cls()
         loss.model = self
         self._loss: ks.losses.Loss = loss
-        self._loss_terms: dict[str, FTensor[tuple[None]]]
-        self._val_loss_terms: dict[str, FTensor[tuple[None]]]
+        self._loss_terms: dict[str, tf.Tensor]
+        self._val_loss_terms: dict[str, tf.Tensor]
 
         self.n_hidden_units: int = self.options.n_hidden_units
         self.n_layers: int = self.options.n_layers
@@ -111,12 +106,12 @@ class TFNFlowModel(ks.Model):
         self.epochs: int = self.options.epochs
         self._epoch: int = 0
 
-        self.train_data: "NFlowInputs"
-        self.test_data: "NFlowInputs"
+        self.train_data: tf.Tensor
+        self.test_data: tf.Tensor
 
         # --- Latent Dimensions ---
-        self.n_u_latents: NULatents = self.pae.n_z_latents
-        self.n_physical_latents: NPhysicalLatents = 1 if self.physical_latents else 0
+        self.n_u_latents: int = self.pae.n_z_latents
+        self.n_physical_latents = 1 if self.physical_latents else 0
         self.n_flow_latents = self.n_u_latents + self.n_physical_latents
 
         self.shift: int = self.n_layers - 1
@@ -138,10 +133,8 @@ class TFNFlowModel(ks.Model):
         # --- Layers ---
         self.flow: tfd.TransformedDistribution
 
-        self.set_seed()
-
     @override
-    def build(self, input_shape) -> None:
+    def build(self, input_shape: tuple[int, ...]) -> None:
         gaussian = tfd.MultivariateNormalDiag(
             loc=tf.zeros(self.n_flow_latents),
             scale_diag=tf.ones(self.n_flow_latents),
@@ -205,21 +198,22 @@ class TFNFlowModel(ks.Model):
         )
 
     @override
+    @tf.function
     def call(
         self,
-        inputs: "NFlowInputs",
+        inputs: tf.Tensor,
         training: bool | None = None,
-        mask: "TensorCompatible | None" = None,
-    ) -> "NFlowOutputs":
+        mask: tf.Tensor | None = None,
+    ) -> tf.Tensor:
         return self.flow.log_prob(inputs)
 
-    def u_to_z(self, inputs: "NFlowInputs", *, permute: bool = False) -> "NFlowInputs":
+    def u_to_z(self, inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         # If permute is True, then the incoming u_latents need to be permuted correctly
         if permute:
             inputs = tf.gather(inputs, self.u_to_z_permute, axis=-1)
         return self.flow.bijector.forward(inputs)
 
-    def z_to_u(self, inputs: "NFlowInputs", *, permute: bool = False) -> "NFlowInputs":
+    def z_to_u(self, inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         u_latents = self.flow.bijector.inverse(inputs)
         # If permute is True, then the outgoing u_latents need to be un-permuted correctly
         # Reverse, permute, reverse undoes the initial permutation
@@ -233,8 +227,8 @@ class TFNFlowModel(ks.Model):
         return u_latents
 
     def z_to_u_steps(
-        self, inputs: "NFlowInputs", step: int, *, permute: bool = False
-    ) -> tuple["NFlowInputs", bool]:
+        self, inputs: tf.Tensor, step: int, *, permute: bool = False
+    ) -> tuple[tf.Tensor, bool]:
         if step <= 0:
             return tf.convert_to_tensor(inputs, dtype=tf.float32), False
         bijectors = self.flow.bijector.bijectors
@@ -248,12 +242,10 @@ class TFNFlowModel(ks.Model):
         # If permute is True, then the outgoing u_latents need to be un-permuted correctly
         # Reverse, permute, reverse undoes the initial permutation
         if permute:
-            z_to_u_permute = tf.constant(
-                tf.roll(
-                    tf.range(self.n_flow_latents),
-                    shift=shift,
-                    axis=0,
-                )
+            z_to_u_permute = tf.roll(
+                tf.range(self.n_flow_latents),
+                shift=shift,
+                axis=0,
             )
             u_latents = tf.reverse(
                 tf.gather(tf.reverse(u_latents, axis=(-1,)), z_to_u_permute, axis=-1),
@@ -331,7 +323,6 @@ class TFNFlowModel(ks.Model):
 
         # === Train ===
         self._epoch = 0
-        self.set_seed(self._epoch)
         return self.fit(
             x=self.train_data,
             y=tf.zeros_like(self.train_data, dtype=tf.float32),
@@ -347,9 +338,7 @@ class TFNFlowModel(ks.Model):
             validation_freq=1,
         )
 
-    def get_data(
-        self, latents: "FTensor[S['batch_dim nspec_dim pae_latents']]"
-    ) -> "FTensor[S['batch_dim nspec_dim n_flow_latents']]":
+    def get_data(self, latents: tf.Tensor) -> tf.Tensor:
         # Get the first n_z_latents + 1 latents
         # If there are no physical pae latents, this is all latents
         # If there are physical pae latents, this includes ΔAᵥ
@@ -362,46 +351,36 @@ class TFNFlowModel(ks.Model):
     def build_model(self) -> None:
         if not self.built:
             # === Prep Data ===
-            train_phase = tf.convert_to_tensor(
-                self.pae.stage.train_data.time, dtype=tf.float32
-            )
+            train_data = self.data_step.train_data[self.kfold]
+            train_phase = tf.convert_to_tensor(train_data.time, dtype=tf.float32)
             train_amplitude = tf.convert_to_tensor(
-                self.pae.stage.train_data.amplitude, dtype=tf.float32
+                train_data.amplitude, dtype=tf.float32
             )
-            train_mask = tf.convert_to_tensor(
-                self.pae.stage.train_data.mask, dtype=tf.int32
+            train_mask = tf.convert_to_tensor(train_data.mask, dtype=tf.int32)
+            train_spec_mask = tf.convert_to_tensor(
+                self.pae.stage.train_spec_mask, dtype=tf.int32
             )
             train_sn_mask = tf.convert_to_tensor(
                 self.pae.stage.train_sn_mask, dtype=tf.int32
             )
-            train_spec_mask = tf.convert_to_tensor(
-                self.pae.stage.train_spec_mask, dtype=tf.int32
-            )
 
             train_pae_input = tf.concat((train_phase, train_amplitude), axis=-1)
             train_latents = self.pae.encoder(
-                train_pae_input,
-                training=False,
-                mask=train_mask * train_spec_mask,
+                train_pae_input, training=False, mask=train_mask * train_spec_mask
             )
             train_inds = tf.squeeze(tf.cast(train_sn_mask, tf.bool), axis=(1, 2))
             train_latents = tf.boolean_mask(train_latents, train_inds)
             self.train_data = self.get_data(train_latents)
 
-            test_phase = tf.convert_to_tensor(
-                self.pae.stage.test_data.time, dtype=tf.float32
-            )
-            test_amplitude = tf.convert_to_tensor(
-                self.pae.stage.test_data.amplitude, dtype=tf.float32
-            )
-            test_mask = tf.convert_to_tensor(
-                self.pae.stage.test_data.mask, dtype=tf.int32
+            test_data = self.data_step.test_data[self.kfold]
+            test_phase = tf.convert_to_tensor(test_data.time, dtype=tf.float32)
+            test_amplitude = tf.convert_to_tensor(test_data.amplitude, dtype=tf.float32)
+            test_mask = tf.convert_to_tensor(test_data.mask, dtype=tf.int32)
+            test_spec_mask = tf.convert_to_tensor(
+                self.pae.stage.test_spec_mask, dtype=tf.int32
             )
             test_sn_mask = tf.convert_to_tensor(
                 self.pae.stage.test_sn_mask, dtype=tf.int32
-            )
-            test_spec_mask = tf.convert_to_tensor(
-                self.pae.stage.test_spec_mask, dtype=tf.int32
             )
 
             test_pae_input = tf.concat((test_phase, test_amplitude), axis=-1)
@@ -428,7 +407,7 @@ class TFNFlowModel(ks.Model):
 
             loss = self._loss
             self.compile(optimizer=optimiser, loss=loss, run_eagerly=self.debug)
-            dummy = self(self.train_data, training=False)
+            self(self.train_data, training=False)
 
             self.log.debug("Trainable variables:")
             for var in self.trainable_variables:

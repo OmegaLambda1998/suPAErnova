@@ -19,13 +19,9 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from supaernova.typing.dimensions import SNDim, WLDim, SpecDim
     from supaernova.configs.steps.data import DataStepConfig
 
     SNeDataFrame = pd.DataFrame
-
-WL_MASK_MIN = 3298.68
-WL_MASK_MAX = 9701.23
 
 
 class Data(Step):
@@ -77,10 +73,10 @@ class Data(Step):
         self.test_data: list[DataStepResult]  # Created in self.split_train_test
 
         # Data Dimensions
-        self.sn_dim: SNDim  # Created in self.get_dims
+        self.sn_dim: int  # Created in self.get_dims
         self.nspectra_per_sn: npt.NDArray[int]  # Created in self.get_dims
-        self.spec_dim: SpecDim  # Created in self.get_dims
-        self.wl_dim: WLDim  # Created in self.get_dims
+        self.spec_dim: int  # Created in self.get_dims
+        self.wl_dim: int  # Created in self.get_dims
 
         # === Analysis Variables ===
         self.analysis: DataStepAnalysis = self.options.analysis or DataStepAnalysis()
@@ -214,7 +210,7 @@ class Data(Step):
         for i, train_data in enumerate(self.train_data):
             out_train = self.out_train / f"kfold_{i:d}.npz"
             if self.force or not out_train.exists():
-                self.log.debug(f"Saving {i}th training data array to {out_train}")
+                self.log.debug(f"Saving #{i} training data array to {out_train}")
                 np.savez_compressed(
                     out_train,
                     **train_data.model_dump(exclude={"metadata", "name"}),
@@ -223,7 +219,7 @@ class Data(Step):
         for i, test_data in enumerate(self.test_data):
             out_test = self.out_test / f"kfold_{i:d}.npz"
             if self.force or not out_test.exists():
-                self.log.debug(f"Saving {i}th testing data array to {out_test}")
+                self.log.debug(f"Saving #{i} testing data array to {out_test}")
                 np.savez_compressed(
                     out_test,
                     **test_data.model_dump(exclude={"metadata", "name"}),
@@ -327,8 +323,14 @@ class Data(Step):
         sne_data = sne_data.merge(mask, on=["sn", "id"], how="left")
 
         # Fill missing values with default values
-        sne_data.wl_mask_min = sne_data.wl_mask_min.fillna(WL_MASK_MIN)
-        sne_data.wl_mask_max = sne_data.wl_mask_max.fillna(WL_MASK_MAX)
+        sne_data.wl_mask_min = sne_data.wl_mask_min.fillna(self.min_wavelength)
+        sne_data.loc[sne_data.wl_mask_min < self.min_wavelength, "wl_mask_min"] = (
+            self.min_wavelength
+        )
+        sne_data.wl_mask_max = sne_data.wl_mask_max.fillna(self.max_wavelength)
+        sne_data.loc[sne_data.wl_mask_max > self.max_wavelength, "wl_mask_max"] = (
+            self.max_wavelength
+        )
 
         self.log.debug("Merging SNe data")
         # Split data into two dataframes
@@ -521,7 +523,7 @@ class Data(Step):
         max_id_len = max(len(spectra["id"]) for spectra in self.sne["spectra"])
         spectra_params = {
             "spectra_id": ("id", np.str_("-" * max_id_len)),
-            "phase": ("phase", np.float32(-100.0)),
+            "phase": ("phase", np.float32(-np.inf)),
             "wl_mask_min": ("wl_mask_min", np.float32(np.inf)),
             "wl_mask_max": ("wl_mask_max", np.float32(-np.inf)),
         }
@@ -553,8 +555,9 @@ class Data(Step):
         data["wavelength"] = np.tile(self.wavelength, (self.sn_dim, self.spec_dim, 1))
 
         # Ensure everything has the right number of axes
+        n_axes = 2
         for k, v in data.items():
-            if len(v.shape) == 2:
+            if len(v.shape) == n_axes:
                 data[k] = v[..., np.newaxis]
 
         def nearest_mask[T: np.number[Any]](
@@ -599,13 +602,36 @@ class Data(Step):
 
         # Create a mask of wavelength outside of the wavelength limits
         data["mask"] = np.full(
-            (self.sn_dim, self.spec_dim, self.wl_dim), fill_value=False
+            (self.sn_dim, self.spec_dim, self.wl_dim), fill_value=True
         )
+
+        self.log.debug("Initial:")
+        self.get_unmasked_dims(data["mask"])
+
+        valid_redshift_mask = (self.min_redshift <= data["redshift"]) & (
+            self.max_redshift >= data["redshift"]
+        )
+        data["mask"][~valid_redshift_mask[:, 0, 0]] = False
+        self.log.debug("Valid Redshifts:")
+        self.get_unmasked_dims(data["mask"])
+
+        valid_phase_mask = (self.min_phase <= data["phase"]) & (
+            self.max_phase >= data["phase"]
+        )
+        data["mask"][~valid_phase_mask[:, :, 0]] = False
+        self.log.debug("Valid phases:")
+        self.get_unmasked_dims(data["mask"])
 
         valid_wavelength_mask = nearest_mask(
             data["wavelength"], data["wl_mask_min"], data["wl_mask_max"]
         )
-        data["mask"][valid_wavelength_mask] = True
+
+        data["wl_mask"] = valid_wavelength_mask
+
+        data["mask"][~valid_wavelength_mask] = False
+
+        self.log.debug("Valid Wavelengths:")
+        self.get_unmasked_dims(data["mask"])
 
         # Mask any huge laser lines, Na D (5674 - 5692A)
         # TODO: Make these options
@@ -635,11 +661,14 @@ class Data(Step):
 
         data["mask"] &= ~laser_mask
 
+        self.log.debug("Laser Lines:")
+        self.get_unmasked_dims(data["mask"])
+
         # --- Finalise Data ---
         # Rescale phase to time such that:
         #   time = 0 -> phase = min_phase
         #   time = 1 -> phase = max_phase
-        time_mask = data["phase"] > -100
+        time_mask = data["phase"] > -np.inf
         data["time"] = data["phase"].copy()
         min_phase = max(self.min_phase, data["time"][time_mask].min())
         max_phase = min(self.max_phase, data["time"][time_mask].max())
@@ -660,11 +689,43 @@ class Data(Step):
 
         data["mask"] = data["mask"].astype(np.int32)
 
+        # Mask spectra without any valid wavelength
+        data["spec_mask"] = data["mask"].max(axis=-1, keepdims=True)
+
+        # Mask SNe without any valid spectra
+        data["sn_mask"] = data["spec_mask"].max(axis=-2, keepdims=True)
+
         self.data = DataStepResult.model_validate(data)
         self.results = self.data
 
+    def get_unmasked_dims(self, mask: np.ndarray | None = None) -> tuple[int, int, int]:
+        self.log.debug("Calculating unmasked data dimensions")
+        if mask is None:
+            mask = self.data.mask
+
+        total_mask = np.ones_like(mask).astype(bool)
+
+        unmasked_sn_dim = mask.max(axis=-1).max(axis=-1).sum()
+        total_sn_dim = total_mask.max(axis=-1).max(axis=-1).sum()
+        self.log.debug(
+            f"Number of unmasked SNe: {unmasked_sn_dim} ({unmasked_sn_dim / total_sn_dim:.2%})"
+        )
+
+        unmasked_spec_dim = mask.max(axis=-1).sum()
+        total_spec_dim = total_mask.max(axis=-1).sum()
+        self.log.debug(
+            f"Number of unmasked spectra: {unmasked_spec_dim} ({unmasked_spec_dim / total_spec_dim:.2%})"
+        )
+
+        unmasked_wl_dim = mask.sum()
+        total_wl_dim = total_mask.sum()
+        self.log.debug(
+            f"Number of unmasked WL bins: {unmasked_wl_dim} ({unmasked_wl_dim / total_wl_dim:.2%})"
+        )
+
+        return unmasked_sn_dim, unmasked_spec_dim, unmasked_wl_dim
+
     def split_train_test(self) -> None:
-        self.set_seed()
         self.train_data = []
         self.test_data = []
 
@@ -673,7 +734,7 @@ class Data(Step):
 
         # Select train_frac for training, the rest for testing
         inds = np.arange(0, self.sn_dim)
-        np.random.shuffle(inds)
+        self.rng.shuffle(inds)
 
         # Split into k cross validation sets
         for kfold in range(self.n_kfolds):
@@ -682,16 +743,21 @@ class Data(Step):
             inds_train = inds_k[:ind_split]
             inds_test = inds_k[ind_split:]
 
+            n_axes = 3
             self.train_data.append(
                 DataStepResult.model_validate({
-                    key: val[inds_train, :, :] if val.ndim == 3 else val[inds_train, :]
+                    key: val[inds_train, :, :]
+                    if val.ndim == n_axes
+                    else val[inds_train, :]
                     for key, val in self.data.model_dump().items()
                     if isinstance(val, np.ndarray)
                 })
             )
             self.test_data.append(
                 DataStepResult.model_validate({
-                    key: val[inds_test, :, :] if val.ndim == 3 else val[inds_test, :]
+                    key: val[inds_test, :, :]
+                    if val.ndim == n_axes
+                    else val[inds_test, :]
                     for key, val in self.data.model_dump().items()
                     if isinstance(val, np.ndarray)
                 })

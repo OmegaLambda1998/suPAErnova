@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, Self, Literal, ClassVar, Annotated
+from typing import Self, Literal, ClassVar, Annotated
 from pathlib import Path
 import importlib
 import itertools
@@ -40,18 +40,27 @@ class PAEStage(BaseConfig):
     learning_rate_decay_steps: PositiveInt
     learning_rate_decay_rate: PositiveFloat
     learning_rate_weight_decay_rate: PositiveFloat
-    train_data: DataStepResult
-    train_sn_mask: npt.NDArray[np.bool_]
-    train_spec_mask: npt.NDArray[np.bool_]
-    test_data: DataStepResult
-    test_sn_mask: npt.NDArray[np.bool_]
-    test_spec_mask: npt.NDArray[np.bool_]
-    val_data: DataStepResult
-    val_sn_mask: npt.NDArray[np.bool_]
-    val_spec_mask: npt.NDArray[np.bool_]
+
     data: DataStepResult
-    sn_mask: npt.NDArray[np.bool_]
-    spec_mask: npt.NDArray[np.bool_]
+    spec_mask: npt.NDArray[bool]
+    sn_mask: npt.NDArray[bool]
+    wl_mask: npt.NDArray[bool]
+
+    train_data: DataStepResult
+    train_spec_mask: npt.NDArray[bool]
+    train_sn_mask: npt.NDArray[bool]
+    train_wl_mask: npt.NDArray[bool]
+
+    test_data: DataStepResult
+    test_spec_mask: npt.NDArray[bool]
+    test_sn_mask: npt.NDArray[bool]
+    test_wl_mask: npt.NDArray[bool]
+
+    val_data: DataStepResult
+    val_spec_mask: npt.NDArray[bool]
+    val_sn_mask: npt.NDArray[bool]
+    val_wl_mask: npt.NDArray[bool]
+
     # --- Optional ---
     savepath: Path | None = None
     loadpath: Path | None = None
@@ -141,7 +150,7 @@ class PAEConfig(BackendConfig):
     batch_normalisation: bool = False
     dropout: Annotated[float, Field(ge=0, le=1)] = 0
     save_best: bool = False
-    patience: float | int = 0.1
+    patience: float | int = 0.2
 
     min_phase: float = -np.inf
     max_phase: float = np.inf
@@ -159,14 +168,6 @@ class PAEConfig(BackendConfig):
     max_test_redshift: float | None = None
     min_val_redshift: float | None = None
     max_val_redshift: float | None = None
-    min_wavelength: float = -np.inf
-    max_wavelength: float = np.inf
-    min_train_wavelength: float | None = None
-    max_train_wavelength: float | None = None
-    min_test_wavelength: float | None = None
-    max_test_wavelength: float | None = None
-    min_val_wavelength: float | None = None
-    max_val_wavelength: float | None = None
 
     phase_offset_scale: float = -0.02
     amplitude_offset_scale: NonNegativeFloat = 1.0
@@ -195,12 +196,12 @@ class PAEConfig(BackendConfig):
     delta_m_lr_decay_rate: PositiveFloat = 0.95
     delta_m_lr_weight_decay_rate: PositiveFloat = 0.0001
     delta_p_epochs: PositiveInt = 5000
-    delta_p_lr: PositiveFloat = 0.001
+    delta_p_lr: PositiveFloat = 0.005
     delta_p_lr_decay_steps: PositiveInt = 300
     delta_p_lr_decay_rate: PositiveFloat = 0.95
     delta_p_lr_weight_decay_rate: PositiveFloat = 0.0001
     final_epochs: PositiveFloat = 5000
-    final_lr: PositiveFloat = 0.001
+    final_lr: PositiveFloat = 0.005
     final_lr_decay_steps: PositiveInt = 300
     final_lr_decay_rate: PositiveFloat = 0.95
     final_lr_weight_decay_rate: PositiveFloat = 0.0001
@@ -210,7 +211,7 @@ class PAEConfig(BackendConfig):
     # --- After ---
     @model_validator(mode="after")
     def _validate_bounds(self) -> Self:
-        for var in ["phase", "redshift", "wavelength"]:
+        for var in ["phase", "redshift"]:
             min_bound = getattr(self, f"min_{var}")
             max_bound = getattr(self, f"max_{var}")
             if max_bound <= min_bound:

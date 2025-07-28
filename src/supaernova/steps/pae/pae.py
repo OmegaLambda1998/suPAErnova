@@ -33,19 +33,23 @@ class PAE(Step):
 
         # === Previous Step Variables ===
         self.data_step: Data
-        self.data: DataStepResult
-        self.train_data: DataStepResult
-        self.test_data: DataStepResult
-        self.val_data: DataStepResult
-        self.sn_mask: npt.NDArray[bool]
-        self.train_sn_mask: npt.NDArray[bool]
-        self.test_sn_mask: npt.NDArray[bool]
-        self.val_sn_mask: npt.NDArray[bool]
-        self.spec_mask: npt.NDArray[bool]
-        self.train_spec_mask: npt.NDArray[bool]
-        self.test_spec_mask: npt.NDArray[bool]
-        self.val_spec_mask: npt.NDArray[bool]
         self.kfold = self.options.kfold
+
+        self.data: DataStepResult
+        self.spec_mask: npt.NDArray[bool]
+        self.sn_mask: npt.NDArray[bool]
+
+        self.train_data: DataStepResult
+        self.train_spec_mask: npt.NDArray[bool]
+        self.train_sn_mask: npt.NDArray[bool]
+
+        self.test_data: DataStepResult
+        self.test_spec_mask: npt.NDArray[bool]
+        self.test_sn_mask: npt.NDArray[bool]
+
+        self.val_data: DataStepResult
+        self.val_spec_mask: npt.NDArray[bool]
+        self.val_sn_mask: npt.NDArray[bool]
 
         # === Config Variables ===
         # --- Required ---
@@ -72,8 +76,6 @@ class PAE(Step):
         self.max_phase: float = self.options.max_phase
         self.min_redshift: float = self.options.min_redshift
         self.max_redshift: float = self.options.max_redshift
-        self.min_wavelength: float = self.options.min_wavelength
-        self.max_wavelength: float = self.options.max_wavelength
         self.min_train_phase: float = self.options.min_train_phase or self.min_phase
         self.max_train_phase: float = self.options.max_train_phase or self.max_phase
         self.min_test_phase: float = self.options.min_test_phase or self.min_phase
@@ -97,24 +99,6 @@ class PAE(Step):
         )
         self.max_val_redshift: float = (
             self.options.max_val_redshift or self.max_redshift
-        )
-        self.min_train_wavelength: float = (
-            self.options.min_train_wavelength or self.min_wavelength
-        )
-        self.max_train_wavelength: float = (
-            self.options.max_train_wavelength or self.max_wavelength
-        )
-        self.min_test_wavelength: float = (
-            self.options.min_test_wavelength or self.min_wavelength
-        )
-        self.max_test_wavelength: float = (
-            self.options.max_test_wavelength or self.max_wavelength
-        )
-        self.min_val_wavelength: float = (
-            self.options.min_val_wavelength or self.min_wavelength
-        )
-        self.max_val_wavelength: float = (
-            self.options.max_val_wavelength or self.max_wavelength
         )
         self.phase_offset_scale: float
         self.amplitude_offset_scale: float
@@ -212,18 +196,22 @@ class PAE(Step):
 
         # PAEStages
         stage_data = {
-            "train_data": self.train_data,
-            "train_sn_mask": self.train_sn_mask,
-            "train_spec_mask": self.train_spec_mask,
-            "test_data": self.test_data,
-            "test_sn_mask": self.test_sn_mask,
-            "test_spec_mask": self.test_spec_mask,
-            "val_data": self.val_data,
-            "val_sn_mask": self.val_sn_mask,
-            "val_spec_mask": self.val_spec_mask,
             "data": self.data,
-            "sn_mask": self.sn_mask,
             "spec_mask": self.spec_mask,
+            "sn_mask": self.sn_mask,
+            "wl_mask": self.data.wl_mask,
+            "train_data": self.train_data,
+            "train_spec_mask": self.train_spec_mask,
+            "train_sn_mask": self.train_sn_mask,
+            "train_wl_mask": self.train_data.wl_mask,
+            "test_data": self.test_data,
+            "test_spec_mask": self.test_spec_mask,
+            "test_sn_mask": self.test_sn_mask,
+            "test_wl_mask": self.test_data.wl_mask,
+            "val_data": self.val_data,
+            "val_spec_mask": self.val_spec_mask,
+            "val_sn_mask": self.val_sn_mask,
+            "val_wl_mask": self.val_data.wl_mask,
             "debug": self.debug,
             "profile": self.profile,
         }
@@ -401,7 +389,10 @@ class PAE(Step):
                 )
 
                 latents, output_amplitude = self.model(
-                    (input_phase, input_amplitude), training=False, mask=mask
+                    (input_phase, input_amplitude),
+                    training=False,
+                    mask=mask,
+                    wl_mask=data.wl_mask,
                 )
 
                 loss = self.model.compute_loss(
@@ -590,16 +581,17 @@ class PAE(Step):
                 ..., 0:1
             ]
 
-            # Mask out supernovae outside the redshift range, or with no spectra within the phase range
+            # Mask out spectra outside the phase range
+            spec_mask = phase_mask.astype(np.int32)
+
+            # Mask out SNe with no valid spectra
+            # Mask out SNe outside the redshift range
             sn_mask = (
                 np.any(phase_mask, axis=(1, 2), keepdims=True) & redshift_mask
             ).astype(np.int32)
 
-            # Mask out spectra outside the phase range
-            spec_mask = phase_mask.astype(np.int32)
-
-            setattr(self, f"{mask_type}sn_mask", sn_mask)
             setattr(self, f"{mask_type}spec_mask", spec_mask)
+            setattr(self, f"{mask_type}sn_mask", sn_mask)
 
 
 class PAEStep(Model):

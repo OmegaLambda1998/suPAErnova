@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar, override
 import importlib
 
 import numpy as np
@@ -31,6 +31,7 @@ class NFlow(Step):
         # === Previous Step Variables ===
         self.pae_step: PAE
         self.data_step: Data
+        self.kfold = self.options.kfold
 
         # === Config Variables ===
         # --- Required ---
@@ -63,9 +64,9 @@ class NFlow(Step):
         self.analysis: NFlowStepAnalysis = self.options.analysis or NFlowStepAnalysis()
 
     @override
-    def _setup(self, *, pae: "PAE") -> None:
+    def _setup(self, *, data: "Data", pae: "PAE") -> None:
         self.pae_step = pae
-        self.data_step = self.pae_step.data_step
+        self.data_step = data
         self.batch_size = max(
             int(
                 self.data_step.train_frac
@@ -103,9 +104,9 @@ class NFlow(Step):
 
         dt_results: dict[str, NFlowStepResult] = {}
         for dt in ["train", "test"]:
-            data = getattr(self.model.pae.stage, f"{dt}_data")
-            sn_mask = getattr(self.model.pae.stage, f"{dt}_sn_mask")
+            data = getattr(self.data_step, f"{dt}_data")[self.kfold]
             spec_mask = getattr(self.model.pae.stage, f"{dt}_spec_mask")
+            sn_mask = getattr(self.model.pae.stage, f"{dt}_sn_mask")
 
             input_phase = data.time
             input_amplitude = data.amplitude
@@ -161,7 +162,7 @@ class NFlow(Step):
 
         for dt in ["train", "test"]:
             results = self.results[dt]
-            gaussian = np.random.normal(0, 1, (results.z_to_u.size**2, ind))
+            gaussian = self.rng.normal(0, 1, (results.z_to_u.size**2, ind))
 
             if self.analysis.plot_u_latents is not None:
                 if not isinstance(self.analysis.plot_u_latents, list):
@@ -181,7 +182,7 @@ class NFlow(Step):
                         o,
                         statistics="max_central",
                         shade_alpha=0.0,
-                        plot_cloud=True,
+                        plot_cloud={"u_latents": True},
                     )
 
             if self.analysis.plot_z_latents is not None:
@@ -266,7 +267,7 @@ class NFlow(Step):
                             o,
                             statistics="max_central",
                             shade_alpha=0.0,
-                            plot_cloud=True,
+                            plot_cloud={f"step_{step}_latents": True},
                         )
 
 
