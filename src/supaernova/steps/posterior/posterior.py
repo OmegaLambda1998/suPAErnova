@@ -256,7 +256,7 @@ class Posterior(Step):
                 self.options.subset = subset
                 self.options.seed = seed
                 model = self.models[subset][seed]
-                data = getattr(self.data_step, f"{subset}_data")
+                data = getattr(self.data_step, f"{subset}_data")[self.kfold]
 
                 map_results = {
                     "chain_min": model.map.chain_min.numpy(),
