@@ -59,6 +59,7 @@ class StepConfig(CallbackConfig):
     # === Field Variables ===
     # --- Required ---
     # --- Optional ---
+    skip: bool = False
     seed: PositiveInt = 12345
     analysis: StepAnalysis | None = None
 

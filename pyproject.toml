@@ -6,52 +6,57 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { file = "LICENSE" }
 authors = [
-  { name = "Patrick Armstrong", email = "patrick.james.1998@gmail.com" },
+    { name = "Patrick Armstrong", email = "patrick.james.1998@gmail.com" },
 ]
 dependencies = [
-  "astropy",
-  "cairocffi",
-  "chainconsumer",
-  "click",
-  "coloredlogs",
-  "matplotlib",
-  "pandas",
-  "pydantic",
-  "sncosmo",
-  "toml",
-  "tqdm",
+    "astropy",
+    "cairocffi",
+    "chainconsumer",
+    "click",
+    "coloredlogs",
+    "matplotlib",
+    "pandas",
+    "pydantic",
+    "sncosmo",
+    "toml",
+    "tqdm",
 ]
 
 [project.optional-dependencies]
 tf-cpu = [
-  "tensorflow-cpu",
-  "tf-keras",
-  "tensorflow-probability",
-  "tensorboard",
-  "tensorboard_plugin_profile",
+    "tensorflow-cpu",
+    "tf-keras",
+    "tensorflow-probability",
+    "tensorboard",
+    "tensorboard_plugin_profile",
 ]
 
 [dependency-groups]
 dev = ["pandas-stubs", "types-tensorflow"]
 docs = [
-  "mkapi>=4.4.4",
-  "mkdocs-jupyter>=0.25.1",
-  "mkdocs-material>=9.6.15",
-  "mkdocs>=1.6.1",
+    "mkapi>=4.4.4",
+    "mkdocs-jupyter>=0.25.1",
+    "mkdocs-material>=9.6.15",
+    "mkdocs>=1.6.1",
 ]
-jupyter = [
-  "ipykernel>=6.30.0",
-  "jupyter",
-]
-tests = [
-  "pytest",
-  "pytest-json-ctrf",
-  "pytest-richer",
-]
+jupyter = ["ipykernel>=6.30.0", "jupyter"]
+tests = ["pytest", "pytest-json-ctrf", "pytest-richer"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# === Tools ===
+[tool.uv]
+prerelease = "allow"
+environments = ["sys_platform == 'linux'"]
+
+# We override the tf-keras dependency metadata to avoid installing multiple version of tensorflow
+[[tool.uv.dependency-metadata]]
+name = "tf-keras"
+
+[[tool.uv.dependency-metadata]]
+name = "tf-keras-nightly"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib", "--color=yes", "--tb=short"]
@@ -78,32 +83,32 @@ preview = true
 select = ["ALL"]
 # Rules to ignore
 ignore = [
-  "COM812",  # Missing trailing comma, already handled by formatter
-  "E501",  # Line too long
-  "ERA001",  # Found commented out code
-  "G004",  # Logging statement uses f-string
-  "N999",  # Invalid module name
-  "PLR0913",  # Too many arguments in function definition (_ > 5)
-  "PLR0917",  # Too many positional arguments (_/5)
-  "ANN401",  # Allow *args: Any and **kwargs: Any
-  "UP037",  # Don't remove quotes from type annotations
-  "TC008",  # Don't remove quotes from type aliases
-  "F722",  # Ignore forward annotation syntax errors
+    "COM812",  # Missing trailing comma, already handled by formatter
+    "E501",    # Line too long
+    "ERA001",  # Found commented out code
+    "G004",    # Logging statement uses f-string
+    "N999",    # Invalid module name
+    "PLR0913", # Too many arguments in function definition (_ > 5)
+    "PLR0917", # Too many positional arguments (_/5)
+    "ANN401",  # Allow *args: Any and **kwargs: Any
+    "UP037",   # Don't remove quotes from type annotations
+    "TC008",   # Don't remove quotes from type aliases
+    "F722",    # Ignore forward annotation syntax errors
 ]
 per-file-ignores = { "src/supaernova/configs/**.py" = [
-  "TC001",  # Move first party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
-  "TC002",  # Move third party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
-  "TC003",  # Move standard library typing-only imports into a TYPE_CHECKING block. Breaks pydantic
+    "TC001", # Move first party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
+    "TC002", # Move third party typing-only imports into a TYPE_CHECKING block. Breaks pydantic
+    "TC003", # Move standard library typing-only imports into a TYPE_CHECKING block. Breaks pydantic
 ], "tests/**/*.py" = [
-  "S101",  # Don't warn when assert is used in tests
+    "S101", # Don't warn when assert is used in tests
 ] }
 # Consider all rules fixable
 fixable = ["ALL"]
 # Except these rules
 unfixable = [
-  "F401",  # unused-import, will remove unused imports
-  "F841",  # unused-variable, will remove unused variables not prepended with an `_`
-  "T201",  # Print statements
+    "F401", # unused-import, will remove unused imports
+    "F841", # unused-variable, will remove unused variables not prepended with an `_`
+    "T201", # Print statements
 ]
 
 # --- Flake8 ---
@@ -147,18 +152,3 @@ length-sort-straight = true
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 ignore-decorators = ["typing.overload"]
-
-# === Tools ===
-[tool.uv]
-prerelease = "allow"
-environments = [
-  "sys_platform == 'linux'",
-]
-
-# We override the tf-keras dependency metadata to avoid installing multiple version of tensorflow
-[[tool.uv.dependency-metadata]]
-name = "tf-keras"
-
-[[tool.uv.dependency-metadata]]
-name = "tf-keras-nightly"
-

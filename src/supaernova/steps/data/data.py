@@ -249,21 +249,16 @@ class Data(Step):
                 if opts.savepath is None:
                     opts.savepath = self.paths.plots / str(self.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
-                savepath = (opts.savepath or Path()) / f"{opts.name}.{opts.ext}"
-                if savepath.exists():
-                    continue
-                fig, ax = SpectraPlotter.plot_summary(self.data, opts, save=False)
+                SpectraPlotter.plot_summary(self.data, opts)
                 for dt in ("train", "test"):
                     for kfold in range(self.n_kfolds):
-                        fig, ax = SpectraPlotter.plot_summary(
+                        o = opts.model_copy()
+                        o.name = f"{opts.name}_{dt}_{kfold}"
+                        self.log.debug(f"Plotting {o.name}")
+                        SpectraPlotter.plot_summary(
                             getattr(self, f"{dt}_data")[kfold],
-                            opts,
-                            fig=fig,
-                            ax=ax,
-                            save=False,
+                            o,
                         )
-                fig = Plotter.save(fig, savepath)
-                Plotter.close(fig, ax)
 
     #
     # === DataStep Specific Functions ===
@@ -771,6 +766,66 @@ class Data(Step):
 
 class DataStep(Variant):
     id: ClassVar[str] = "data"
+
+    @override
+    def _analyse(self) -> None:
+        plots = {}
+
+        for variant in self.variants.values():
+            variant.analyse()
+            if variant.analysis.plot_spectra is not None:
+                for opts in variant.analysis.plot_spectra:
+                    o = opts.model_copy()
+                    name = f"{o.name}.{o.ext}"
+                    plots[name] = plots.get(name, {"fig": None, "ax": None})
+                    fig = plots[name]["fig"]
+                    ax = plots[name]["ax"]
+                    fig, ax = SpectraPlotter.plot_spectra(
+                        variant.data, o, fig=fig, ax=ax, save=False, force=True
+                    )
+                    plots[name]["fig"] = fig
+                    plots[name]["ax"] = ax
+
+            if variant.analysis.plot_summary is not None:
+                for opts in variant.analysis.plot_summary:
+                    o = opts.model_copy()
+                    name = f"{o.name}.{o.ext}"
+                    plots[name] = plots.get(name, {"fig": None, "ax": None})
+                    fig = plots[name]["fig"]
+                    ax = plots[name]["ax"]
+                    fig, ax = SpectraPlotter.plot_summary(
+                        variant.data, o, fig=fig, ax=ax, save=False, force=True
+                    )
+                    plots[name]["fig"] = fig
+                    plots[name]["ax"] = ax
+                    for dt in ("train", "test"):
+                        for kfold in range(variant.n_kfolds):
+                            o = opts.model_copy()
+                            o.name = f"{opts.name}_{dt}_{kfold}"
+                            name = f"{o.name}.{o.ext}"
+                            plots[name] = plots.get(name, {"fig": None, "ax": None})
+                            fig = plots[name]["fig"]
+                            ax = plots[name]["ax"]
+                            fig, ax = SpectraPlotter.plot_summary(
+                                getattr(variant, f"{dt}_data")[kfold],
+                                o,
+                                fig=fig,
+                                ax=ax,
+                                save=False,
+                                force=True,
+                            )
+                            plots[name]["fig"] = fig
+                            plots[name]["ax"] = ax
+
+        for name, opts in plots.items():
+            savepath = self.paths.plots / name
+            if savepath.exists():
+                continue
+            self.log.debug(f"Plotting {name}")
+            fig = opts["fig"]
+            ax = opts["ax"]
+            fig = Plotter.save(fig, savepath)
+            Plotter.close(fig, ax)
 
 
 DataStep.register_step(Data)

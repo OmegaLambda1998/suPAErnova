@@ -101,6 +101,7 @@ class SpectraPlotter(Plotter):
                         y = y[order]
                         yerr = yerr[order]
 
+                        fig, ax = Plotter.lines(x, y, *args, fig=fig, ax=ax, **kwargs)
                         fig, ax = Plotter.errorbar(
                             x, y, *args, fig=fig, ax=ax, yerr=yerr, **kwargs
                         )

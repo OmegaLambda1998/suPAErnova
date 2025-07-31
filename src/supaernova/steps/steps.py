@@ -56,6 +56,7 @@ class Step:
         self.callbacks: dict[str, str | dict[str, Callable[[Any], None]]] = (
             config.callbacks
         )
+        self.skip: bool = self.options.skip
 
         self.seed: int = config.seed
         self.rng = np.random.default_rng(self.seed)
