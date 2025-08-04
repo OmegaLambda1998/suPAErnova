@@ -7,10 +7,18 @@ from collections.abc import Callable
 
 import numpy as np
 from numpy import typing as npt
-from pydantic import Field, PositiveInt, PositiveFloat, NonNegativeInt, model_validator
+from pydantic import (
+    Field,
+    PositiveInt,
+    PositiveFloat,
+    NonNegativeInt,
+    NonNegativeFloat,
+    model_validator,
+)
 
 from supaernova.configs.base import BaseConfig
 from supaernova.configs.steps import StepResult, StepAnalysis
+from supaernova.analysis.spectra import SpectraPlot
 from supaernova.configs.steps.pae import PAEStepConfig
 from supaernova.configs.steps.data import DataStepConfig
 from supaernova.analysis.dispersion import DispersionPlot
@@ -155,6 +163,7 @@ class PosteriorStepAnalysis(StepAnalysis):
     plot_map_best: DistributionPlot | list[DistributionPlot] | None = None
     plot_hmc: DistributionPlot | list[DistributionPlot] | None = None
     plot_dispersion: DispersionPlot | list[DispersionPlot] | None = None
+    plot_spectra: SpectraPlot | list[SpectraPlot] | None = None
     # === Model Validators ===
     # --- Before ---
     # --- After ---
@@ -176,7 +185,6 @@ class PosteriorConfig(BackendConfig):
     n_chains_final: int
     n_burnin: PositiveInt
     n_samples: PositiveInt
-    n_leapfrog: PositiveInt
     train_delta_m: bool
     train_delta_p: bool
     train_bias: bool
@@ -192,40 +200,45 @@ class PosteriorConfig(BackendConfig):
     test_subset: bool = True
     subset: Literal["train", "test"] = "train"
     save_best: bool = False
-    tolerance: PositiveFloat = 0.01
+    n_leapfrog: PositiveInt = 2
+    n_thinning: PositiveInt = 1
+    tolerance: PositiveFloat = 1e-8
+    x_tolerance: NonNegativeFloat = 1e-3
+    f_relative_tolerance: NonNegativeFloat = 0
+    f_absolute_tolerance: NonNegativeFloat = 0
     max_iterations: PositiveInt = 2500
     target_acceptance_rate: PositiveFloat = 0.651
     random_initial_positions: bool = False
-    u_delta_av_min: float = -10.0
-    u_delta_av_max: float = 10.0
+    u_delta_av_min: float = -np.inf
+    u_delta_av_max: float = np.inf
     u_delta_av_start: float = -1.0
     u_delta_av_end: float = 1.0
     u_delta_av_mean: float = 0.0
     u_delta_av_std: float = 1.0
-    u_latents_min: float = -10.0
-    u_latents_max: float = 10.0
+    u_latents_min: float = -np.inf
+    u_latents_max: float = np.inf
     u_latents_mean: float = 0.0
     u_latents_std: float = 1.0
-    delta_av_min: float = -5.0
-    delta_av_max: float = 5.0
+    delta_av_min: float = -np.inf
+    delta_av_max: float = np.inf
     delta_av_start: float = -0.5
     delta_av_end: float = 0.5
     delta_av_mean: float = 0.0
     delta_av_std: float = 0.5
-    delta_m_min: float = -15
-    delta_m_max: float = 15
+    delta_m_min: float = -np.inf
+    delta_m_max: float = np.inf
     delta_m_start: float = -1.5
     delta_m_end: float = 1.5
     delta_m_mean: float = 0.0
     delta_m_std: float = 0.1
-    delta_p_min: float = -10
-    delta_p_max: float = 10
+    delta_p_min: float = -np.inf
+    delta_p_max: float = np.inf
     delta_p_start: float = -1.0
     delta_p_end: float = 1.0
     delta_p_mean: float = 0.0
     delta_p_std: float = 0.01
-    bias_min: float = -10
-    bias_max: float = 10
+    bias_min: float = -np.inf
+    bias_max: float = np.inf
     bias_start: float = -1.0
     bias_end: float = 1.0
     bias_mean: float = 0.0

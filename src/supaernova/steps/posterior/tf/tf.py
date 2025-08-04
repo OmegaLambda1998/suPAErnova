@@ -64,13 +64,15 @@ class TFPosteriorModel(ks.Model):
         # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
         self.data_step = config.data_step
         self.kfold = config.kfold
-        vars(self)["nflow"]: TFNFlowModel = config.nflow_step.model
-        self.nflow.trainable = False
-        self.nflow.flow.trainable = False
-        vars(self)["pae"]: TFPAEModel = config.pae_step.model
+        vars(self)["pae_step"]: TFPAEModel = config.pae_step
+        vars(self)["pae"]: TFPAEModel = self.pae_step.model
         self.pae.trainable = False
         self.pae.encoder.trainable = False
         self.pae.decoder.trainable = False
+        vars(self)["nflow_step"]: TFNFlowModel = config.nflow_step
+        vars(self)["nflow"]: TFNFlowModel = self.nflow_step.model
+        self.nflow.trainable = False
+        self.nflow.flow.trainable = False
 
         self.data: DataStepResult = (
             self.data_step.train_data[self.kfold]
@@ -97,6 +99,9 @@ class TFPosteriorModel(ks.Model):
             options, self.nflow, self.pae, self.data
         )
         self.tolerance = options.tolerance
+        self.x_tolerance = options.x_tolerance
+        self.f_relative_tolerance = options.f_relative_tolerance
+        self.f_absolute_tolerance = options.f_absolute_tolerance
         self.max_iterations = options.max_iterations
 
         # --- Training ---
@@ -447,7 +452,6 @@ class TFPosteriorModel(ks.Model):
                             tf.summary.histogram(
                                 f"z_{i}", self.map.z_latents.best[..., i], step=chain
                             )
-
                 chain += 1
         self.log.info(f"Minimum found at chains:\n{self.map.chain_min}")
         self.set_seed()
@@ -459,11 +463,15 @@ class TFPosteriorModel(ks.Model):
     @tf.function
     def vals_and_grads(self, position):
         input_position = self.map.get_position(position)
+        # tf.print(f"{input_position = }")
+        # tf.debugging.check_numerics(input_position, f"{input_position = }")
         log_prob = self(
             (input_position, self.data.time, self.data.amplitude, self.data.sigma),
             training=False,
             mask=self.data.mask,
         )
+        # tf.print(f"{log_prob = }")
+        # tf.debugging.check_numerics(log_prob, f"{log_prob = }")
         return self._loss(tf.zeros_like(log_prob), log_prob)
 
     # TODO: tf.function temporarily disabled until [#50765](https://github.com/tensorflow/tensorflow/issues/50765) resolved
@@ -474,10 +482,12 @@ class TFPosteriorModel(ks.Model):
                 self.vals_and_grads, x, auto_unpack_single_arg=False
             ),
             initial_position=self.map.position.current,
-            tolerance=self.tolerance,
-            x_tolerance=self.tolerance,
-            max_iterations=self.max_iterations,
             num_correction_pairs=1,
+            tolerance=self.tolerance,
+            x_tolerance=self.x_tolerance,
+            f_relative_tolerance=self.f_relative_tolerance,
+            f_absolute_tolerance=self.f_absolute_tolerance,
+            max_iterations=self.max_iterations,
             parallel_iterations=NPROC,
         )
 
@@ -820,32 +830,42 @@ class TFPosteriorModel(ks.Model):
             log_dir = savepath.parent / self.log_path / savepath.stem / "hmc"
             summary_writer = tf.summary.create_file_writer(str(log_dir))
 
+        pae_stds = self.pae_step.results[self.subset][
+            str(self.pae_step.run_stages[-1].stage)
+        ].latents.std(axis=-1)
+        nflow_stds = self.nflow_step.results[self.subset].z_to_u.std(axis=0)
         stds = []
         if self.map.train_delta_m:
-            stds.append(np.std(self.map.delta_m.best, axis=0))
+            stds.append(pae_stds[-2:-1].astype(np.float32))
         if self.map.train_delta_p:
-            stds.append(np.std(self.map.delta_p.best, axis=0))
+            stds.append(pae_stds[-1:].astype(np.float32))
         if self.nflow.physical_latents:
-            stds.append(np.std(self.map.u_delta_av.best, axis=0))
-        stds.append(np.std(self.map.u_latents.best, axis=0))
-        stds = tf.concat(stds, axis=-1)
+            stds.append(nflow_stds[0:1].astype(np.float32))
+        stds.append(nflow_stds[1:].astype(np.float32))
+        stds = tf.concat(stds, axis=0)
         step_size = tf.repeat(
             tf.expand_dims(stds, axis=0), repeats=initial_position.shape[0], axis=0
         )
 
-        step_factor = 2 * (self.n_leapfrog + self.n_thinning + 2)
-
         progress = tqdm(
-            total=(self.n_burnin + self.n_samples) * step_factor,
+            total=self.n_samples + 1,
             leave=True,
         )
 
+        @tf.function
+        def unnormalized_posterior_log_prob(*pos):
+            input_position = self.map.get_position(*pos)
+            return self(
+                (input_position, self.data.time, self.data.amplitude, self.data.sigma),
+                training=False,
+                mask=self.data.mask,
+            )
+
         @tf.py_function(Tout=[])
-        def update_progress(pos, log_prob) -> None:
+        def update_progress(state) -> None:
+            log_prob = unnormalized_posterior_log_prob(state)
             progress.set_description(
-                "Burnin"
-                if tf.summary.experimental.get_step() < self.n_burnin * step_factor
-                else "Run"
+                "Burnin" if tf.summary.experimental.get_step() <= 1 else "Run"
             )
             progress.update()
 
@@ -858,32 +878,14 @@ class TFPosteriorModel(ks.Model):
                     tf.summary.scalar("mean_log_prob", np.nanmean(lp))
                     tf.summary.scalar("max_log_prob", np.nanmax(lp))
 
-        def unnormalized_posterior_log_prob(*pos):
-            input_position = self.map.get_position(*pos)
-            # tf.print("input_position", input_position.shape, input_position)
-            log_prob = self(
-                (input_position, self.data.time, self.data.amplitude, self.data.sigma),
-                training=False,
-                mask=self.data.mask,
-            )
-            update_progress(input_position, log_prob)
-            # tf.print("log_prob", log_prob.shape, log_prob)
-            return log_prob
-
-        def trace_fn(_, pkr):
+        def trace_fn(state, pkr):
+            update_progress(state)
             step_size = pkr.inner_results.step_size
             is_accepted = pkr.inner_results.is_accepted
             return [step_size, is_accepted]
 
         def sample_chain():
-            # run hmc
-            # hmc = tfp.mcmc.HamiltonianMonteCarlo(
-            #     target_log_prob_fn=unnormalized_posterior_log_prob,
-            #     num_leapfrog_steps=self.n_leapfrog,
-            #     step_size=step_size,
-            # )
-
-            hmc = tfp.mcmc.NoUTurnSampler(
+            sampler = tfp.mcmc.NoUTurnSampler(
                 target_log_prob_fn=unnormalized_posterior_log_prob,
                 step_size=step_size,
                 max_tree_depth=self.n_leapfrog,
@@ -891,7 +893,7 @@ class TFPosteriorModel(ks.Model):
             )
 
             kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
-                inner_kernel=hmc,
+                inner_kernel=sampler,
                 num_adaptation_steps=int(self.n_burnin * 0.8),
                 target_accept_prob=self.target_acceptance_rate,
             )

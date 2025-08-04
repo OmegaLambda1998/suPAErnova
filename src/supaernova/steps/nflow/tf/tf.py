@@ -366,10 +366,12 @@ class TFNFlowModel(ks.Model):
 
             train_pae_input = tf.concat((train_phase, train_amplitude), axis=-1)
             train_latents = self.pae.encoder(
-                train_pae_input, training=False, mask=train_mask * train_spec_mask
+                train_pae_input,
+                training=False,
+                mask=train_mask * train_spec_mask * train_sn_mask,
             )
-            train_inds = tf.squeeze(tf.cast(train_sn_mask, tf.bool), axis=(1, 2))
-            train_latents = tf.boolean_mask(train_latents, train_inds)
+            # train_inds = tf.squeeze(tf.cast(train_sn_mask, tf.bool), axis=(1, 2))
+            # train_latents = tf.boolean_mask(train_latents, train_inds)
             self.train_data = self.get_data(train_latents)
 
             test_data = self.data_step.test_data[self.kfold]
@@ -387,19 +389,22 @@ class TFNFlowModel(ks.Model):
             test_latents = self.pae.encoder(
                 test_pae_input,
                 training=False,
-                mask=test_mask * test_spec_mask,
+                mask=test_mask * test_spec_mask * test_sn_mask,
             )
-            test_inds = tf.squeeze(tf.cast(test_sn_mask, tf.bool), axis=(1, 2))
-            test_latents = tf.boolean_mask(test_latents, test_inds)
+            # test_inds = tf.squeeze(tf.cast(test_sn_mask, tf.bool), axis=(1, 2))
+            # test_latents = tf.boolean_mask(test_latents, test_inds)
             self.test_data = self.get_data(test_latents)
 
             self.build(self.train_data.shape)
 
-            schedule = self._scheduler(
-                initial_learning_rate=self.lr,
-                decay_steps=self.lr_decay_steps,
-                decay_rate=self.lr_decay_rate,
-            )
+            if self._scheduler is not None:
+                schedule = self._scheduler(
+                    initial_learning_rate=self.lr,
+                    decay_steps=self.lr_decay_steps,
+                    decay_rate=self.lr_decay_rate,
+                )
+            else:
+                schedule = self.lr
             optimiser = self._optimiser(
                 learning_rate=schedule,
                 weight_decay=self.lr_weight_decay_rate,

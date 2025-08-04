@@ -104,11 +104,15 @@ class TFNFlowConfig(NFlowConfig):
             cast("object", validate_optimiser(self.optimiser)),
         )
 
-    scheduler: ConfigInputObject[SchedulerObject]
+    scheduler: ConfigInputObject[SchedulerObject] | None = None
 
     @computed_field
     @cached_property
-    def scheduler_cls(self) -> type[ks.optimizers.schedules.LearningRateSchedule]:
+    def scheduler_cls(
+        self,
+    ) -> type[ks.optimizers.schedules.LearningRateSchedule] | None:
+        if self.scheduler is None:
+            return None
         scheduler = validate_scheduler(self.scheduler)
         if isinstance(scheduler, type):
             return scheduler

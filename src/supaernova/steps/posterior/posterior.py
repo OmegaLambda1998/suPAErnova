@@ -6,6 +6,7 @@ import pandas as pd
 
 from supaernova.steps import Step
 from supaernova.steps.models import Model
+from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis.dispersion import DispersionPlotter
 from supaernova.analysis.distribution import DistributionPlotter
 from supaernova.configs.steps.posterior import (
@@ -374,6 +375,129 @@ class Posterior(Step):
                 for i in range(model.map.n_u_latents):
                     hmc_labels[hmc_ind + i] = f"μ{i}"
                 subset_hmc_labels[seed] = hmc_labels
+
+                if self.analysis.plot_spectra is not None:
+                    if not isinstance(self.analysis.plot_spectra, list):
+                        self.analysis.plot_spectra = [self.analysis.plot_spectra]
+                    for opts in self.analysis.plot_spectra:
+                        o = opts.model_copy()
+                        if o.name is None:
+                            o.name = "summary"
+                        self.log.debug(f"Plotting {o.name}")
+                        if o.savepath is None:
+                            o.savepath = (
+                                self.paths.plots
+                                / str(self.seeds[0])
+                                / subset
+                                / str(seed)
+                            )
+                        o.savepath.mkdir(parents=True, exist_ok=True)
+
+                        data = model.data
+
+                        fig, ax = SpectraPlotter.plot_summary(data, o, save=False)
+
+                        pae_data = data.model_copy()
+                        pae_results = self.pae_step.results[subset][
+                            str(self.pae_step.run_stages[-1].stage)
+                        ]
+                        pae_data.amplitude = pae_results.output_amp
+
+                        fig, ax = SpectraPlotter.plot_summary(
+                            pae_data, o, fig=fig, ax=ax, save=False
+                        )
+
+                        map_data = data.model_copy()
+
+                        decoder_inputs = np.concatenate(
+                            (
+                                data.time[..., :1],
+                                np.repeat(
+                                    results.map.best_delta_av[:, np.newaxis, :],
+                                    data.time.shape[1],
+                                    axis=1,
+                                ),
+                                np.repeat(
+                                    results.map.best_z_latents[:, np.newaxis, :],
+                                    data.time.shape[1],
+                                    axis=1,
+                                ),
+                                np.repeat(
+                                    results.map.best_delta_m[:, np.newaxis, :],
+                                    data.time.shape[1],
+                                    axis=1,
+                                ),
+                                np.repeat(
+                                    results.map.best_delta_p[:, np.newaxis, :],
+                                    data.time.shape[1],
+                                    axis=1,
+                                ),
+                            ),
+                            axis=-1,
+                        )
+                        map_amp = model.map.pae.decoder(decoder_inputs, mask=data.mask)
+
+                        if model.map.train_delta_m and not model.pae.physical_latents:
+                            map_amp *= results.map.best_delta_m
+
+                        if model.map.train_bias:
+                            map_amp += results.map.best_bias
+
+                        map_data.amplitude = map_amp.numpy()
+
+                        fig, ax = SpectraPlotter.plot_summary(
+                            map_data, o, fig=fig, ax=ax, save=False
+                        )
+
+                        posterior_data = data.model_copy()
+
+                        decoder_inputs = np.concatenate(
+                            (
+                                data.time,
+                                np.repeat(
+                                    np.mean(results.hmc.delta_av, axis=0)[
+                                        :, np.newaxis, :
+                                    ],
+                                    data.time.shape[1],
+                                    axis=1,
+                                ),
+                                np.repeat(
+                                    np.mean(results.hmc.z_latents, axis=0)[
+                                        :, np.newaxis, :
+                                    ],
+                                    data.time.shape[1],
+                                    axis=1,
+                                ),
+                                np.repeat(
+                                    np.mean(results.hmc.delta_m, axis=0)[
+                                        :, np.newaxis, :
+                                    ],
+                                    data.time.shape[1],
+                                    axis=1,
+                                ),
+                                np.repeat(
+                                    np.mean(results.hmc.delta_p, axis=0)[
+                                        :, np.newaxis, :
+                                    ],
+                                    data.time.shape[1],
+                                    axis=1,
+                                ),
+                            ),
+                            axis=-1,
+                        )
+                        posterior_amp = model.map.pae.decoder(
+                            decoder_inputs, mask=data.mask
+                        )
+
+                        if model.map.train_delta_m and not model.pae.physical_latents:
+                            map_amp *= results.hmc.delta_m
+
+                        if model.map.train_bias:
+                            map_amp += results.hmc.bias
+
+                        posterior_data.amplitude = posterior_amp.numpy()
+
+                        SpectraPlotter.plot_summary(posterior_data, o, fig=fig, ax=ax)
 
                 if self.analysis.plot_map_init is not None:
                     if not isinstance(self.analysis.plot_map_init, list):

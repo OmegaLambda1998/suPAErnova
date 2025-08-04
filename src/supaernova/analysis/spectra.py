@@ -101,9 +101,15 @@ class SpectraPlotter(Plotter):
                         y = y[order]
                         yerr = yerr[order]
 
-                        fig, ax = Plotter.lines(x, y, *args, fig=fig, ax=ax, **kwargs)
                         fig, ax = Plotter.errorbar(
-                            x, y, *args, fig=fig, ax=ax, yerr=yerr, **kwargs
+                            x,
+                            y,
+                            *args,
+                            fig=fig,
+                            ax=ax,
+                            yerr=yerr,
+                            linestyle="-",
+                            **kwargs,
                         )
         if save:
             fig = Plotter.save(fig, savepath)
@@ -139,7 +145,7 @@ class SpectraPlotter(Plotter):
         # Mean
         y_mean = y.mean(axis=(0, 1))
         y_std = y.std(axis=(0, 1))
-        yerr_mean = np.sqrt(np.sum(yerr * yerr, axis=(0, 1))) / yerr.count(axis=(0, 1))
+        yerr_mean = np.sum(yerr * yerr, axis=(0, 1)) / yerr.count(axis=(0, 1))
 
         order = np.argsort(x)
         x = x[order]
@@ -164,8 +170,12 @@ class SpectraPlotter(Plotter):
             fig=fig,
             ax=ax,
             yerr=yerr_mean,
+            linestyle="-",
             **kwargs,
         )
+
+        y_min, y_max = ax.get_ylim()
+        ax.set_ylim((min(y_mean.min() * 0.9, y_min), max(y_mean.max() * 1.1, y_max)))
 
         if save:
             fig = Plotter.save(fig, savepath)
