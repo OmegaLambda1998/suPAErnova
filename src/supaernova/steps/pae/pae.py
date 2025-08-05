@@ -466,9 +466,20 @@ class PAE(Step):
                                 / str(stage.stage)
                             )
                         o.savepath.mkdir(parents=True, exist_ok=True)
+                        if o.plot_kwargs is None:
+                            o.plot_kwargs = {"label": f"{self.name}_{stage.name}"}
+                        wl, _amplitude, sigma, sn_mask, spec_mask, wl_mask = (
+                            SpectraPlotter.prep(getattr(self, f"{dt}_data"), o)
+                        )
+                        base_wl = wl
+                        base_sigma = sigma
+                        base_mask = np.logical_not(sn_mask * spec_mask * wl_mask)
+                        o.base_wl = base_wl
+                        o.base_amp = self.results[dt][str(stage.stage)].output_amp
+                        o.base_sigma = base_sigma
+                        o.base_mask = base_mask
                         SpectraPlotter.plot_residual(
                             getattr(self, f"{dt}_data"),
-                            self.results[dt][str(stage.stage)].output_amp,
                             o,
                         )
 
@@ -512,19 +523,42 @@ class PAE(Step):
                     if o.savepath is None:
                         o.savepath = self.paths.plots / dt / str(self.model.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
+                    if o.plot_kwargs is None:
+                        o.plot_kwargs = {}
+                    o.plot_kwargs["label"] = f"{self.name}_{self.run_stages[0].name}"
 
                     savepath = (o.savepath or Path()) / f"{o.name}.{o.ext}"
                     if not savepath.exists():
+                        wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = (
+                            SpectraPlotter.prep(getattr(self, f"{dt}_data"), o)
+                        )
+                        base_wl = wl
+                        base_amp = amplitude
+                        base_sigma = sigma
+                        base_mask = np.logical_not(sn_mask * spec_mask * wl_mask)
+                        o.base_wl = base_wl
+                        o.base_amp = base_amp
+                        o.base_sigma = base_sigma
+                        o.base_mask = base_mask
+                        data = getattr(self, f"{dt}_data").model_copy()
+                        data.amplitude = self.results[dt][
+                            str(self.run_stages[0].stage)
+                        ].output_amp
                         fig, ax = SpectraPlotter.plot_residual(
-                            getattr(self, f"{dt}_data"),
-                            self.results[dt][str(self.run_stages[0].stage)].output_amp,
+                            data,
                             o,
                             save=False,
                         )
                         for stage in self.run_stages[1:]:
+                            data = getattr(self, f"{dt}_data").model_copy()
+                            data.amplitude = self.results[dt][
+                                str(stage.stage)
+                            ].output_amp
+                            o.plot_kwargs["label"] = f"{self.name}_{stage.name}"
+                            o.plot_base = False
+
                             fig, ax = SpectraPlotter.plot_residual(
-                                getattr(self, f"{dt}_data"),
-                                self.results[dt][str(stage.stage)].output_amp,
+                                data,
                                 o,
                                 fig=fig,
                                 ax=ax,

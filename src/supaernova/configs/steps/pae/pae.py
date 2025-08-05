@@ -17,7 +17,7 @@ from pydantic import (
 )
 
 from supaernova.configs.base import BaseConfig
-from supaernova.analysis.spectra import SpectraPlot
+from supaernova.analysis.spectra import ResidualPlot
 from supaernova.configs.steps.data import DataStepConfig, DataStepResult
 from supaernova.configs.steps.steps import StepResult, StepAnalysis
 from supaernova.configs.steps.models import ModelConfig, BackendConfig
@@ -114,7 +114,7 @@ class PAEStepAnalysis(StepAnalysis):
     # === Field Variables ===
     # --- Required ---
     # --- Optional ---
-    plot_residual: SpectraPlot | list[SpectraPlot] | None = None
+    plot_residual: ResidualPlot | list[ResidualPlot] | None = None
     plot_latents: DistributionPlot | list[DistributionPlot] | None = None
     # === Model Validators ===
     # --- Before ---

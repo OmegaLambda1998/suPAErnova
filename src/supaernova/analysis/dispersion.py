@@ -174,7 +174,7 @@ class DispersionPlotter(Plotter):
                 + (magshift_error * magshift_error)
             )
 
-            redshift_mask = ((redshift > 0.02) & (redshift < 1.0)).astype(int)
+            redshift_mask = ((redshift > 0.02) & (redshift < 1.0)).astype(np.int32)
             sn_mask = redshift_mask * np.max(legacy["mask"][legacy_mask], axis=(-2, -1))
 
             twins_mask = np.ones_like(sn_mask)

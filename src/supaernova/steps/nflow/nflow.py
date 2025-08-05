@@ -118,7 +118,7 @@ class NFlow(Step):
                 mask=input_mask * spec_mask,
             )[0]
 
-            inds = np.squeeze(np.array(sn_mask).astype(np.bool_), axis=(1, 2))
+            inds = np.squeeze(np.array(sn_mask).astype(bool), axis=(1, 2))
             latents = latents[inds]
 
             z = latents[:, 0, :4]

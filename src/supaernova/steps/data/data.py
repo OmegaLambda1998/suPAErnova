@@ -237,6 +237,8 @@ class Data(Step):
                 if opts.savepath is None:
                     opts.savepath = self.paths.plots / str(self.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
+                if opts.plot_kwargs is None:
+                    opts.plot_kwargs = {"title": self.name}
                 SpectraPlotter.plot_spectra(self.data, opts)
 
         if self.analysis.plot_summary is not None:
@@ -249,16 +251,23 @@ class Data(Step):
                 if opts.savepath is None:
                     opts.savepath = self.paths.plots / str(self.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
+                if opts.plot_kwargs is None:
+                    opts.plot_kwargs = {"label": self.name}
                 SpectraPlotter.plot_summary(self.data, opts)
-                for dt in ("train", "test"):
-                    for kfold in range(self.n_kfolds):
-                        o = opts.model_copy()
-                        o.name = f"{opts.name}_{dt}_{kfold}"
-                        self.log.debug(f"Plotting {o.name}")
-                        SpectraPlotter.plot_summary(
-                            getattr(self, f"{dt}_data")[kfold],
-                            o,
-                        )
+
+        if self.analysis.plot_residual is not None:
+            if not isinstance(self.analysis.plot_residual, list):
+                self.analysis.plot_residual = [self.analysis.plot_residual]
+            for opts in self.analysis.plot_residual:
+                if opts.name is None:
+                    opts.name = "residual"
+                self.log.debug(f"Plotting {opts.name}")
+                if opts.savepath is None:
+                    opts.savepath = self.paths.plots / str(self.seed)
+                opts.savepath.mkdir(parents=True, exist_ok=True)
+                if opts.plot_kwargs is None:
+                    opts.plot_kwargs = {"label": self.name}
+                SpectraPlotter.plot_residual(self.data, opts)
 
     #
     # === DataStep Specific Functions ===
@@ -770,21 +779,39 @@ class DataStep(Variant):
     @override
     def _analyse(self) -> None:
         plots = {}
-
+        bases = {}
         for variant in self.variants.values():
-            variant.analyse()
-            if variant.analysis.plot_spectra is not None:
-                for opts in variant.analysis.plot_spectra:
-                    o = opts.model_copy()
-                    name = f"{o.name}.{o.ext}"
-                    plots[name] = plots.get(name, {"fig": None, "ax": None})
-                    fig = plots[name]["fig"]
-                    ax = plots[name]["ax"]
-                    fig, ax = SpectraPlotter.plot_spectra(
-                        variant.data, o, fig=fig, ax=ax, save=False, force=True
+            if variant.analysis.plot_residual is not None:
+                if not isinstance(variant.analysis.plot_residual, list):
+                    variant.analysis.plot_residual = [variant.analysis.plot_residual]
+                for opts in variant.analysis.plot_residual:
+                    name = f"{opts.name}.{opts.ext}"
+                    bases[name] = bases.get(
+                        name, {"wl": None, "amp": None, "sigma": None, "mask": None}
                     )
-                    plots[name]["fig"] = fig
-                    plots[name]["ax"] = ax
+                    base_wl = bases[name]["wl"]
+                    base_amp = bases[name]["amp"]
+                    base_sigma = bases[name]["sigma"]
+                    base_mask = bases[name]["mask"]
+                    if base_amp is None:
+                        wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = (
+                            SpectraPlotter.prep(variant.data, opts)
+                        )
+                        base_wl = wl
+                        base_amp = amplitude
+                        base_sigma = sigma
+                        base_mask = np.logical_not(sn_mask * spec_mask * wl_mask)
+                    bases[name]["wl"] = base_wl
+                    bases[name]["amp"] = base_amp
+                    bases[name]["sigma"] = base_sigma
+                    bases[name]["mask"] = base_mask
+                    opts.base_wl = base_wl
+                    opts.base_amp = base_amp
+                    opts.base_sigma = base_sigma
+                    opts.base_mask = base_mask
+                    opts.plot_base = True
+
+            variant.analyse()
 
             if variant.analysis.plot_summary is not None:
                 for opts in variant.analysis.plot_summary:
@@ -798,24 +825,23 @@ class DataStep(Variant):
                     )
                     plots[name]["fig"] = fig
                     plots[name]["ax"] = ax
-                    for dt in ("train", "test"):
-                        for kfold in range(variant.n_kfolds):
-                            o = opts.model_copy()
-                            o.name = f"{opts.name}_{dt}_{kfold}"
-                            name = f"{o.name}.{o.ext}"
-                            plots[name] = plots.get(name, {"fig": None, "ax": None})
-                            fig = plots[name]["fig"]
-                            ax = plots[name]["ax"]
-                            fig, ax = SpectraPlotter.plot_summary(
-                                getattr(variant, f"{dt}_data")[kfold],
-                                o,
-                                fig=fig,
-                                ax=ax,
-                                save=False,
-                                force=True,
-                            )
-                            plots[name]["fig"] = fig
-                            plots[name]["ax"] = ax
+
+            if variant.analysis.plot_residual is not None:
+                for opts in variant.analysis.plot_residual:
+                    o = opts.model_copy()
+                    name = f"{o.name}.{o.ext}"
+                    plots[name] = plots.get(
+                        name, {"fig": None, "ax": None, "base": True}
+                    )
+                    fig = plots[name]["fig"]
+                    ax = plots[name]["ax"]
+                    o.plot_base = plots[name]["base"]
+                    fig, ax = SpectraPlotter.plot_residual(
+                        variant.data, o, fig=fig, ax=ax, save=False, force=True
+                    )
+                    plots[name]["fig"] = fig
+                    plots[name]["ax"] = ax
+                    plots[name]["base"] = False
 
         for name, opts in plots.items():
             savepath = self.paths.plots / name

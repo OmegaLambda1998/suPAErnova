@@ -13,7 +13,7 @@ from pydantic import (
 
 from supaernova.utils import resolve_path
 from supaernova.configs.steps import StepConfig, StepResult, StepAnalysis
-from supaernova.analysis.spectra import SpectraPlot
+from supaernova.analysis.spectra import SpectraPlot, ResidualPlot
 from supaernova.configs.steps.variants import VariantConfig
 
 
@@ -65,6 +65,7 @@ class DataStepAnalysis(StepAnalysis):
     # --- Optional ---
     plot_spectra: SpectraPlot | list[SpectraPlot] | None = None
     plot_summary: SpectraPlot | list[SpectraPlot] | None = None
+    plot_residual: ResidualPlot | list[ResidualPlot] | None = None
     # === Model Validators ===
     # --- Before ---
     # --- After ---
