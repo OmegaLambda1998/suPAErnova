@@ -248,6 +248,7 @@ class PAE(Step):
         if not self.seperate_z_latent_training:
             self.stage_zs = self.stage_zs[-1:]
             self.stage_zs[0].prev_stage = 1
+            self.stage_zs[0].name = "zs"
 
         self.stage_delta_m = PAEStage.model_validate({
             "stage": z0 + self.n_z_latents,
@@ -445,7 +446,7 @@ class PAE(Step):
             labels[self.n_pae_latents - 2] = "Δℳ"
             labels[self.n_pae_latents - 1] = "Δp"
         for i in range(self.n_z_latents):
-            labels[ind] = f"z{i}"
+            labels[ind] = f"z{i + 1}"
             ind += 1
 
         for dt in ["train", "test"]:
@@ -467,7 +468,9 @@ class PAE(Step):
                             )
                         o.savepath.mkdir(parents=True, exist_ok=True)
                         if o.plot_kwargs is None:
-                            o.plot_kwargs = {"label": f"{self.name}_{stage.name}"}
+                            o.plot_kwargs = {
+                                "label": f"{self.name}_{dt}_{stage.name}",
+                            }
                         wl, _amplitude, sigma, sn_mask, spec_mask, wl_mask = (
                             SpectraPlotter.prep(getattr(self, f"{dt}_data"), o)
                         )
@@ -501,6 +504,8 @@ class PAE(Step):
                                 / str(stage.stage)
                             )
                         o.savepath.mkdir(parents=True, exist_ok=True)
+                        if o.plot_kwargs is None:
+                            o.plot_kwargs = {"title": f"{self.name}_{dt}_{stage.name}"}
                         chains = self.results[dt][str(stage.stage)].latents[
                             :, : stage.stage
                         ]
@@ -510,6 +515,7 @@ class PAE(Step):
                             statistics="max_central",
                             shade_alpha=0.0,
                             plot_cloud=True,
+                            smooth=0,
                         )
 
             if self.analysis.plot_residual is not None:
@@ -525,8 +531,9 @@ class PAE(Step):
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {}
-                    o.plot_kwargs["label"] = f"{self.name}_{self.run_stages[0].name}"
-
+                    o.plot_kwargs["label"] = (
+                        f"{self.name}_{dt}_{self.run_stages[0].name}"
+                    )
                     savepath = (o.savepath or Path()) / f"{o.name}.{o.ext}"
                     if not savepath.exists():
                         wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = (
@@ -554,7 +561,7 @@ class PAE(Step):
                             data.amplitude = self.results[dt][
                                 str(stage.stage)
                             ].output_amp
-                            o.plot_kwargs["label"] = f"{self.name}_{stage.name}"
+                            o.plot_kwargs["label"] = f"{self.name}_{dt}_{stage.name}"
                             o.plot_base = False
 
                             fig, ax = SpectraPlotter.plot_residual(
@@ -584,6 +591,8 @@ class PAE(Step):
                     if o.savepath is None:
                         o.savepath = self.paths.plots / dt / str(self.model.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
+                    if o.plot_kwargs is None:
+                        o.plot_kwargs = {"title": f"{self.name}_{dt}"}
 
                     chains = {
                         stage.name: self.results[dt][str(stage.stage)].latents
@@ -596,6 +605,8 @@ class PAE(Step):
                         statistics="max_central",
                         shade_alpha=0.0,
                         plot_cloud=True,
+                        smooth=0,
+                        bins=self.sn_dim,
                     )
 
     # === Instance Methods ===

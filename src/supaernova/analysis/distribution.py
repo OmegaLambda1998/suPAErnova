@@ -79,6 +79,7 @@ class DistributionPlotter(Plotter):
             chains = {labels[i]: chain for (i, chain) in enumerate(chains)}
 
         fig, ax = Plotter.corner(chains, fig=fig, ax=ax, chain_kwargs=chain_kwargs)
+        fig.suptitle((config.plot_kwargs or {}).get("title", config.name.capitalize()))
 
         if save:
             fig = Plotter.save(fig, savepath)

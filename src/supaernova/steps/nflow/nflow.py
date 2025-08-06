@@ -155,14 +155,16 @@ class NFlow(Step):
             labels[0] = "z/μΔAᵥ"
             ind = 1
         for i in range(self.model.n_u_latents):
-            z_labels[ind] = f"z{i}"
-            u_labels[ind] = f"μ{i}"
-            labels[ind] = f"z/μ{i}"
+            z_labels[ind] = f"z{i + 1}"
+            u_labels[ind] = f"μ{i + 1}"
+            labels[ind] = f"z/μ{i + 1}"
             ind += 1
 
         for dt in ["train", "test"]:
             results = self.results[dt]
             gaussian = self.rng.normal(0, 1, (results.z_to_u.size**2, ind))
+            u_latents = self.model.z_to_u(results.latents, permute=True).numpy()
+            z_latents = self.model.u_to_z(u_latents, permute=True).numpy()
 
             if self.analysis.plot_u_latents is not None:
                 if not isinstance(self.analysis.plot_u_latents, list):
@@ -177,12 +179,16 @@ class NFlow(Step):
                     if o.savepath is None:
                         o.savepath = self.paths.plots / dt / str(self.model.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
+                    if o.plot_kwargs is None:
+                        o.plot_kwargs = {"title": f"{self.name}_{dt}"}
                     DistributionPlotter.plot_corner(
-                        {"gaussian": gaussian, "u_latents": results.z_to_u},
+                        {"gaussian": gaussian, "u_latents": u_latents},
                         o,
                         statistics="max_central",
                         shade_alpha=0.0,
                         plot_cloud={"u_latents": True},
+                        smooth={"u_latents": 0},
+                        bins={"u_latents": u_latents.shape[0]},
                     )
 
             if self.analysis.plot_z_latents is not None:
@@ -191,19 +197,26 @@ class NFlow(Step):
                 for opts in self.analysis.plot_z_latents:
                     o = opts.model_copy()
                     if o.labels is None:
-                        o.labels = z_labels
+                        o.labels = {"z_latents": z_labels, "u_to_z_latents": z_labels}
                     if o.name is None:
                         o.name = "z_latents"
                     self.log.debug(f"Plotting {o.name}")
                     if o.savepath is None:
                         o.savepath = self.paths.plots / dt / str(self.model.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
+                    if o.plot_kwargs is None:
+                        o.plot_kwargs = {"title": f"{self.name}_{dt}"}
                     DistributionPlotter.plot_corner(
-                        results.u_to_z,
+                        {"z_latents": results.latents, "u_to_z_latents": z_latents},
                         o,
                         statistics="max_central",
                         shade_alpha=0.0,
                         plot_cloud=True,
+                        smooth={"z_latents": 0, "u_to_z_latents": 0},
+                        bins={
+                            "z_latents": results.latents.shape[0],
+                            "u_to_z_latents": z_latents.shape[0],
+                        },
                     )
 
             if self.analysis.plot_latents is not None:
@@ -222,14 +235,19 @@ class NFlow(Step):
                     if o.savepath is None:
                         o.savepath = self.paths.plots / dt / str(self.model.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
-                    u_latents = self.model.z_to_u(results.latents, permute=True).numpy()
-                    z_latents = self.model.u_to_z(u_latents, permute=True).numpy()
+                    if o.plot_kwargs is None:
+                        o.plot_kwargs = {"title": f"{self.name}_{dt}"}
                     DistributionPlotter.plot_corner(
                         {"u_latents": u_latents, "z_latents": z_latents},
                         o,
                         statistics="max_central",
                         shade_alpha=0.0,
                         plot_cloud=True,
+                        smooth={"u_latents": 0, "z_latents": 0},
+                        bins={
+                            "u_latents": u_latents.shape[0],
+                            "z_latents": z_latents.shape[0],
+                        },
                     )
 
             if self.analysis.plot_latent_steps is not None:
@@ -258,6 +276,8 @@ class NFlow(Step):
                                 self.paths.plots / dt / str(self.model.seed) / "steps"
                             )
                         o.savepath.mkdir(parents=True, exist_ok=True)
+                        if o.plot_kwargs is None:
+                            o.plot_kwargs = {"title": f"{self.name}_{dt}"}
 
                         DistributionPlotter.plot_corner(
                             {
@@ -268,6 +288,12 @@ class NFlow(Step):
                             statistics="max_central",
                             shade_alpha=0.0,
                             plot_cloud={f"step_{step}_latents": True},
+                            smooth={
+                                f"step_{step}_latents": 0,
+                            },
+                            bins={
+                                f"step_{step}_latents": step_latents.shape[0],
+                            },
                         )
 
 
