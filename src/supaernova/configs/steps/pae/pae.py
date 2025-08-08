@@ -34,6 +34,7 @@ class PAEStage(BaseConfig):
     name: str
     fname: str
     epochs: PositiveInt
+    patience: PositiveFloat | PositiveInt
     debug: bool
     profile: bool
     learning_rate: PositiveFloat
@@ -42,23 +43,27 @@ class PAEStage(BaseConfig):
     learning_rate_weight_decay_rate: PositiveFloat
 
     data: DataStepResult
-    spec_mask: npt.NDArray[bool]
+    mask: npt.NDArray[bool]
     sn_mask: npt.NDArray[bool]
+    spec_mask: npt.NDArray[bool]
     wl_mask: npt.NDArray[bool]
 
     train_data: DataStepResult
-    train_spec_mask: npt.NDArray[bool]
+    train_mask: npt.NDArray[bool]
     train_sn_mask: npt.NDArray[bool]
+    train_spec_mask: npt.NDArray[bool]
     train_wl_mask: npt.NDArray[bool]
 
     test_data: DataStepResult
-    test_spec_mask: npt.NDArray[bool]
+    test_mask: npt.NDArray[bool]
     test_sn_mask: npt.NDArray[bool]
+    test_spec_mask: npt.NDArray[bool]
     test_wl_mask: npt.NDArray[bool]
 
+    val_mask: npt.NDArray[bool]
     val_data: DataStepResult
-    val_spec_mask: npt.NDArray[bool]
     val_sn_mask: npt.NDArray[bool]
+    val_spec_mask: npt.NDArray[bool]
     val_wl_mask: npt.NDArray[bool]
 
     # --- Optional ---
@@ -87,6 +92,9 @@ class PAEStepResult(StepResult):
     input_d_amp: npt.NDArray[np.float32]
     input_phase: npt.NDArray[np.float32]
     input_mask: npt.NDArray[np.float32]
+    input_sn_mask: npt.NDArray[np.float32]
+    input_spec_mask: npt.NDArray[np.float32]
+    input_wl_mask: npt.NDArray[np.float32]
     input_colourlaw: npt.NDArray[np.float32] | None
     latents: npt.NDArray[np.float32]
     output_amp: npt.NDArray[np.float32]
@@ -150,16 +158,7 @@ class PAEConfig(BackendConfig):
     batch_normalisation: bool = False
     dropout: Annotated[float, Field(ge=0, le=1)] = 0
     save_best: bool = False
-    patience: float | int = 0.2
 
-    min_phase: float = -np.inf
-    max_phase: float = np.inf
-    min_train_phase: float | None = None
-    max_train_phase: float | None = None
-    min_test_phase: float | None = None
-    max_test_phase: float | None = None
-    min_val_phase: float | None = None
-    max_val_phase: float | None = None
     min_redshift: float = -np.inf
     max_redshift: float = np.inf
     min_train_redshift: float | None = None
@@ -168,6 +167,22 @@ class PAEConfig(BackendConfig):
     max_test_redshift: float | None = None
     min_val_redshift: float | None = None
     max_val_redshift: float | None = None
+    min_phase: float = -np.inf
+    max_phase: float = np.inf
+    min_train_phase: float | None = None
+    max_train_phase: float | None = None
+    min_test_phase: float | None = None
+    max_test_phase: float | None = None
+    min_val_phase: float | None = None
+    max_val_phase: float | None = None
+    min_wavelength: float = -np.inf
+    max_wavelength: float = np.inf
+    min_train_wavelength: float | None = None
+    max_train_wavelength: float | None = None
+    min_test_wavelength: float | None = None
+    max_test_wavelength: float | None = None
+    min_val_wavelength: float | None = None
+    max_val_wavelength: float | None = None
 
     phase_offset_scale: float = -0.02
     amplitude_offset_scale: NonNegativeFloat = 1.0
@@ -181,26 +196,31 @@ class PAEConfig(BackendConfig):
     loss_decorrelate_dust: bool = True
     loss_clip_delta: PositiveFloat = 25
     delta_av_epochs: PositiveInt = 1000
+    delta_av_patience: PositiveFloat | PositiveInt = 0.25
     delta_av_lr: PositiveFloat = 0.005
     delta_av_lr_decay_steps: PositiveInt = 300
     delta_av_lr_decay_rate: PositiveFloat = 0.95
     delta_av_lr_weight_decay_rate: PositiveFloat = 0.0001
     zs_epochs: PositiveInt = 1000
+    zs_patience: PositiveFloat | PositiveInt = 0.25
     zs_lr: PositiveFloat = 0.005
     zs_lr_decay_steps: PositiveInt = 300
     zs_lr_decay_rate: PositiveFloat = 0.95
     zs_lr_weight_decay_rate: PositiveFloat = 0.0001
     delta_m_epochs: PositiveInt = 5000
+    delta_m_patience: PositiveFloat | PositiveInt = 0.2
     delta_m_lr: PositiveFloat = 0.005
     delta_m_lr_decay_steps: PositiveInt = 300
     delta_m_lr_decay_rate: PositiveFloat = 0.95
     delta_m_lr_weight_decay_rate: PositiveFloat = 0.0001
     delta_p_epochs: PositiveInt = 5000
+    delta_p_patience: PositiveFloat | PositiveInt = 0.1
     delta_p_lr: PositiveFloat = 0.005
     delta_p_lr_decay_steps: PositiveInt = 300
     delta_p_lr_decay_rate: PositiveFloat = 0.95
     delta_p_lr_weight_decay_rate: PositiveFloat = 0.0001
     final_epochs: PositiveFloat = 5000
+    final_patience: PositiveFloat | PositiveInt = 0.25
     final_lr: PositiveFloat = 0.005
     final_lr_decay_steps: PositiveInt = 300
     final_lr_decay_rate: PositiveFloat = 0.95
@@ -211,7 +231,7 @@ class PAEConfig(BackendConfig):
     # --- After ---
     @model_validator(mode="after")
     def _validate_bounds(self) -> Self:
-        for var in ["phase", "redshift"]:
+        for var in ["phase", "redshift", "wavelength"]:
             min_bound = getattr(self, f"min_{var}")
             max_bound = getattr(self, f"max_{var}")
             if max_bound <= min_bound:

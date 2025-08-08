@@ -52,7 +52,7 @@ def snpae_data_step_factory(
         for dt in ("train", "test"):
             dt_data = []
             for kfold in range(datastep.n_kfolds):
-                data = datastep.data.model_copy().model_dump()
+                data = datastep.data.model_copy(deep=True).model_dump()
                 orig_data_file = orig_data_path / f"{dt}_data_kfold{kfold}.npy"
                 orig_data = np.load(orig_data_file, allow_pickle=True).item()
                 kfold_mask = np.logical_or.reduce([

@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 
 class SpectraPlot(AbstractPlot):
-    mask: bool = False
     filter: (
         dict[
             str,
@@ -47,6 +46,11 @@ class SpectraPlotter(Plotter):
     def prep(
         data: "DataStepResult",
         config: "SpectraPlot",
+        *,
+        mask: "npt.NDArray[np.float32] | None" = None,
+        sn_mask: "npt.NDArray[np.float32] | None" = None,
+        spec_mask: "npt.NDArray[np.float32] | None" = None,
+        wl_mask: "npt.NDArray[np.float32] | None" = None,
     ) -> tuple[
         "npt.NDArray[np.float32]",
         "npt.NDArray[np.float32]",
@@ -54,25 +58,46 @@ class SpectraPlotter(Plotter):
         "npt.NDArray[np.int32]",
         "npt.NDArray[np.int32]",
         "npt.NDArray[np.int32]",
+        "npt.NDArray[np.int32]",
     ]:
         wl = data.wavelength.copy()
         amplitude = data.amplitude.copy()
         sigma = data.sigma.copy()
-        wl_mask = data.mask.copy()
-        if not config.mask:
-            wl_mask = np.ones_like(wl_mask)
+
+        input_mask = data.mask.copy() if mask is None else mask
+        # Wavelength Range Mask
+        input_wl_mask = np.ones_like(input_mask) if wl_mask is None else wl_mask
+        # Phase Range Mask
+        input_spec_mask = (
+            input_wl_mask.max(axis=-1, keepdims=True)
+            if spec_mask is None
+            else spec_mask
+        )
+        # Redshift Range Mask
+        input_sn_mask = (
+            input_spec_mask.max(axis=-2, keepdims=True) if sn_mask is None else sn_mask
+        )
 
         if config.filter is not None:
             for key, constraints in config.filter.items():
                 value = getattr(data, key)
                 for comparison, constraint in constraints.items():
                     compare = CONSTRAINTS[comparison]
-                    wl_mask *= compare(value, constraint).astype(np.int32)
+                    input_wl_mask *= compare(value, constraint).astype(np.int32)
 
-        spec_mask = wl_mask.max(axis=-1, keepdims=True)
-        sn_mask = spec_mask.max(axis=-2, keepdims=True)
+        input_spec_mask *= input_wl_mask.max(axis=-1, keepdims=True)
+        input_sn_mask *= input_spec_mask.max(axis=-2, keepdims=True)
+        input_mask *= input_sn_mask * input_spec_mask * input_wl_mask
 
-        return wl, amplitude, sigma, sn_mask, spec_mask, wl_mask
+        return (
+            wl,
+            amplitude,
+            sigma,
+            input_mask,
+            input_sn_mask,
+            input_spec_mask,
+            input_wl_mask,
+        )
 
     @staticmethod
     def plot_spectra(
@@ -83,20 +108,37 @@ class SpectraPlotter(Plotter):
         ax: "Axis | None" = None,
         force: bool = False,
         save: bool = True,
+        mask: "npt.NDArray[np.float32] | None" = None,
+        sn_mask: "npt.NDArray[np.float32] | None" = None,
+        spec_mask: "npt.NDArray[np.float32] | None" = None,
+        wl_mask: "npt.NDArray[np.float32] | None" = None,
         **kwargs: "Any",
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
             return None, None
-        wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = SpectraPlotter.prep(
-            data, config
+        (
+            wl,
+            amplitude,
+            sigma,
+            input_mask,
+            input_sn_mask,
+            input_spec_mask,
+            _input_wl_mask,
+        ) = SpectraPlotter.prep(
+            data,
+            config,
+            mask=mask,
+            sn_mask=sn_mask,
+            spec_mask=spec_mask,
+            wl_mask=wl_mask,
         )
 
-        n_sn, n_spec, _n_wl = wl_mask.shape
+        n_sn, n_spec, _n_wl = input_mask.shape
 
         i = 0
         for sn in range(n_sn):
-            if sn_mask[sn, 0, 0]:
+            if input_sn_mask[sn, 0, 0]:
                 colours = Plotter.colour_maps[i % len(Plotter.colour_maps)]
                 i += 1
                 fig, ax, _lines = Plotter.lines(
@@ -111,9 +153,9 @@ class SpectraPlotter(Plotter):
                     **kwargs,
                 )
                 for spec in range(n_spec):
-                    if spec_mask[sn, spec, 0]:
+                    if input_spec_mask[sn, spec, 0]:
                         c = colours(data.time[sn, spec, 0])
-                        ma = wl_mask[sn, spec, :].astype(bool)
+                        ma = input_mask[sn, spec, :].astype(bool)
                         x = wl[sn, spec, :][ma]
                         y = amplitude[sn, spec, :][ma]
                         yerr = sigma[sn, spec, :][ma]
@@ -163,20 +205,37 @@ class SpectraPlotter(Plotter):
         ax: "Axis | None" = None,
         force: bool = False,
         save: bool = True,
+        mask: "npt.NDArray[np.float32] | None" = None,
+        sn_mask: "npt.NDArray[np.float32] | None" = None,
+        spec_mask: "npt.NDArray[np.float32] | None" = None,
+        wl_mask: "npt.NDArray[np.float32] | None" = None,
         **kwargs: "Any",
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
             return None, None
-        wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = SpectraPlotter.prep(
-            data, config
+        (
+            wl,
+            amplitude,
+            sigma,
+            input_mask,
+            _input_sn_mask,
+            _input_spec_mask,
+            _input_wl_mask,
+        ) = SpectraPlotter.prep(
+            data,
+            config,
+            mask=mask,
+            sn_mask=sn_mask,
+            spec_mask=spec_mask,
+            wl_mask=wl_mask,
         )
 
-        mask = np.logical_not(sn_mask * spec_mask * wl_mask)
+        input_mask = np.logical_not(input_mask)
 
-        x = np.ma.masked_array(wl, mask).mean(axis=(0, 1))
-        y = np.ma.masked_array(amplitude, mask)
-        yerr = np.ma.masked_array(sigma, mask)
+        x = np.ma.masked_array(wl, input_mask).mean(axis=(0, 1))
+        y = np.ma.masked_array(amplitude, input_mask)
+        yerr = np.ma.masked_array(sigma, input_mask)
 
         # Mean
         y_mean = y.mean(axis=(0, 1))
@@ -188,7 +247,6 @@ class SpectraPlotter(Plotter):
         y_mean = y_mean[order]
         y_std = y_std[order]
         yerr_mean = yerr_mean[order]
-
         fig, ax, ebar = Plotter.errorbar(
             x,
             y_mean,
@@ -251,21 +309,38 @@ class SpectraPlotter(Plotter):
         ax: "Axis | None" = None,
         force: bool = False,
         save: bool = True,
+        mask: "npt.NDArray[np.float32] | None" = None,
+        sn_mask: "npt.NDArray[np.float32] | None" = None,
+        spec_mask: "npt.NDArray[np.float32] | None" = None,
+        wl_mask: "npt.NDArray[np.float32] | None" = None,
         **kwargs: "Any",
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
             return None, None
-        wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = SpectraPlotter.prep(
-            data, config
+        (
+            wl,
+            amplitude,
+            sigma,
+            input_mask,
+            _input_sn_mask,
+            _input_spec_mask,
+            _input_wl_mask,
+        ) = SpectraPlotter.prep(
+            data,
+            config,
+            mask=mask,
+            sn_mask=sn_mask,
+            spec_mask=spec_mask,
+            wl_mask=wl_mask,
         )
 
-        mask = np.logical_not(sn_mask * spec_mask * wl_mask)
-        base_mask = config.base_mask if config.base_mask is not None else mask
+        input_mask = np.logical_not(input_mask)
+        base_mask = config.base_mask if config.base_mask is not None else input_mask
 
-        x = np.ma.masked_array(wl, mask).mean(axis=(0, 1))
-        y = np.ma.masked_array(amplitude, mask)
-        yerr = np.ma.masked_array(sigma, mask)
+        x = np.ma.masked_array(wl, input_mask).mean(axis=(0, 1))
+        y = np.ma.masked_array(amplitude, input_mask)
+        yerr = np.ma.masked_array(sigma, input_mask)
         x_prime = np.ma.masked_array(config.base_wl, base_mask).mean(axis=(0, 1))
         y_prime = np.ma.masked_array(config.base_amp, base_mask)
         yerr_prime = np.ma.masked_array(config.base_sigma, base_mask)

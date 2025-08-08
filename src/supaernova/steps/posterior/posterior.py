@@ -380,7 +380,7 @@ class Posterior(Step):
                     if not isinstance(self.analysis.plot_spectra, list):
                         self.analysis.plot_spectra = [self.analysis.plot_spectra]
                     for opts in self.analysis.plot_spectra:
-                        o = opts.model_copy()
+                        o = opts.model_copy(deep=True)
                         if o.name is None:
                             o.name = "summary"
                         self.log.debug(f"Plotting {o.name}")
@@ -397,7 +397,7 @@ class Posterior(Step):
 
                         fig, ax = SpectraPlotter.plot_summary(data, o, save=False)
 
-                        pae_data = data.model_copy()
+                        pae_data = data.model_copy(deep=True)
                         pae_results = self.pae_step.results[subset][
                             str(self.pae_step.run_stages[-1].stage)
                         ]
@@ -407,7 +407,7 @@ class Posterior(Step):
                             pae_data, o, fig=fig, ax=ax, save=False
                         )
 
-                        map_data = data.model_copy()
+                        map_data = data.model_copy(deep=True)
 
                         decoder_inputs = np.concatenate(
                             (
@@ -449,7 +449,7 @@ class Posterior(Step):
                             map_data, o, fig=fig, ax=ax, save=False
                         )
 
-                        posterior_data = data.model_copy()
+                        posterior_data = data.model_copy(deep=True)
 
                         decoder_inputs = np.concatenate(
                             (
@@ -503,7 +503,7 @@ class Posterior(Step):
                     if not isinstance(self.analysis.plot_map_init, list):
                         self.analysis.plot_map_init = [self.analysis.plot_map_init]
                     for opts in self.analysis.plot_map_init:
-                        o = opts.model_copy()
+                        o = opts.model_copy(deep=True)
                         if o.labels is None:
                             o.labels = map_labels
                         if o.name is None:
@@ -526,7 +526,7 @@ class Posterior(Step):
                     if not isinstance(self.analysis.plot_map_best, list):
                         self.analysis.plot_map_best = [self.analysis.plot_map_best]
                     for opts in self.analysis.plot_map_best:
-                        o = opts.model_copy()
+                        o = opts.model_copy(deep=True)
                         if o.labels is None:
                             o.labels = map_labels
                         if o.name is None:
@@ -549,7 +549,7 @@ class Posterior(Step):
                     if not isinstance(self.analysis.plot_hmc, list):
                         self.analysis.plot_hmc = [self.analysis.plot_hmc]
                     for opts in self.analysis.plot_hmc:
-                        o = opts.model_copy()
+                        o = opts.model_copy(deep=True)
                         if o.labels is None:
                             o.labels = hmc_labels
                         if o.name is None:
@@ -577,7 +577,7 @@ class Posterior(Step):
                 if not isinstance(self.analysis.plot_map_init, list):
                     self.analysis.plot_map_init = [self.analysis.plot_map_init]
                 for opts in self.analysis.plot_map_init:
-                    o = opts.model_copy()
+                    o = opts.model_copy(deep=True)
                     if o.labels is None:
                         o.labels = subset_map_labels
                     if o.name is None:
@@ -595,7 +595,7 @@ class Posterior(Step):
                 if not isinstance(self.analysis.plot_map_best, list):
                     self.analysis.plot_map_best = [self.analysis.plot_map_best]
                 for opts in self.analysis.plot_map_best:
-                    o = opts.model_copy()
+                    o = opts.model_copy(deep=True)
                     if o.labels is None:
                         o.labels = subset_map_labels
                     if o.name is None:
@@ -613,7 +613,7 @@ class Posterior(Step):
                 if not isinstance(self.analysis.plot_hmc, list):
                     self.analysis.plot_hmc = [self.analysis.plot_hmc]
                 for opts in self.analysis.plot_hmc:
-                    o = opts.model_copy()
+                    o = opts.model_copy(deep=True)
                     if o.labels is None:
                         o.labels = subset_hmc_labels
                     if o.name is None:
@@ -632,7 +632,7 @@ class Posterior(Step):
                 if not isinstance(self.analysis.plot_dispersion, list):
                     self.analysis.plot_dispersion = [self.analysis.plot_dispersion]
                 for opts in self.analysis.plot_dispersion:
-                    o = opts.model_copy()
+                    o = opts.model_copy(deep=True)
                     if o.subset != subset:
                         continue
                     if o.name is None:

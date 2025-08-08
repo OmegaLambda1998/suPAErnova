@@ -335,6 +335,7 @@ class Data(Step):
         sne_data.loc[sne_data.wl_mask_max > self.max_wavelength, "wl_mask_max"] = (
             self.max_wavelength
         )
+        sne_data.flag = sne_data.flag.fillna(1)
 
         self.log.debug("Merging SNe data")
         # Split data into two dataframes
@@ -355,13 +356,6 @@ class Data(Step):
             "wl_mask_max",
         ]
         spectra = sne_data[spec_cols].reset_index(drop=True)
-
-        # self.log.debug(
-        #     f"Cutting spectra with phases outside the range {self.min_phase} <= phase <= {self.max_phase}",
-        # )
-        # self.log.debug(f"Number of spectra before phase-cut: {len(spectra)}")
-        # spectra = spectra[spectra.phase.between(self.min_phase, self.max_phase)]
-        # self.log.debug(f"Number of spectra after phase-cut: {len(spectra)}")
 
         self.log.debug("Loading spectra data")
         spectra_dtype = {"wave": float, "flux": float, "sigma": float}
@@ -615,26 +609,34 @@ class Data(Step):
         valid_redshift_mask = (self.min_redshift <= data["redshift"]) & (
             self.max_redshift >= data["redshift"]
         )
-        data["mask"][~valid_redshift_mask[:, 0, 0]] = False
-        self.log.debug("Valid Redshifts:")
+        data["sn_mask"] = sn_mask = valid_redshift_mask
+        data["mask"] &= sn_mask
+
+        self.log.debug(
+            f"Valid Redshifts ({self.min_redshift} <= z <= {self.max_redshift}):"
+        )
         self.get_unmasked_dims(data["mask"])
 
         valid_phase_mask = (self.min_phase <= data["phase"]) & (
             self.max_phase >= data["phase"]
         )
-        data["mask"][~valid_phase_mask[:, :, 0]] = False
-        self.log.debug("Valid phases:")
+        data["spec_mask"] = spec_mask = (
+            valid_phase_mask & (data["phase"] > -np.inf) & (data["phase"] < np.inf)
+        )
+        data["mask"] &= spec_mask
+
+        self.log.debug(f"Valid Phases ({self.min_phase} <= p <= {self.max_phase}):")
         self.get_unmasked_dims(data["mask"])
 
         valid_wavelength_mask = nearest_mask(
             data["wavelength"], data["wl_mask_min"], data["wl_mask_max"]
         )
+        data["wl_mask"] = wl_mask = valid_wavelength_mask
+        data["mask"] &= wl_mask
 
-        data["wl_mask"] = valid_wavelength_mask
-
-        data["mask"][~valid_wavelength_mask] = False
-
-        self.log.debug("Valid Wavelengths:")
+        self.log.debug(
+            f"Valid Wavelengths ({self.min_wavelength} <= wl <= {self.max_wavelength}):"
+        )
         self.get_unmasked_dims(data["mask"])
 
         # Mask any huge laser lines, Na D (5674 - 5692A)
@@ -672,14 +674,17 @@ class Data(Step):
         # Rescale phase to time such that:
         #   time = 0 -> phase = min_phase
         #   time = 1 -> phase = max_phase
-        time_mask = data["phase"] > -np.inf
-        data["time"] = data["phase"].copy()
-        min_phase = max(self.min_phase, data["time"][time_mask].min())
-        max_phase = min(self.max_phase, data["time"][time_mask].max())
-        data["time"][time_mask] = (data["time"][time_mask] - min_phase) / (
-            max_phase - min_phase
-        )
-        data["time"][~time_mask] = -1
+        time = data["phase"][spec_mask]
+        min_phase = time.min()
+        if not np.isinf(self.min_phase):
+            min_phase = max(self.min_phase, min_phase)
+        self.log.debug(f"{self.min_phase = }, {time.min() = }, {min_phase = }")
+        max_phase = time.max()
+        if not np.isinf(self.max_phase):
+            max_phase = min(self.max_phase, max_phase)
+        self.log.debug(f"{self.max_phase = }, {time.max() = }, {max_phase = }")
+        data["time"] = (data["phase"] - min_phase) / (max_phase - min_phase)
+        data["time"][~spec_mask] = -1
 
         # Remove negative amplitude from unmasked amplitudes
         data["amplitude"][data["mask"]] = np.clip(
@@ -692,12 +697,6 @@ class Data(Step):
         data["sigma"] = 1.4 * data["sigma"] + 4e-10
 
         data["mask"] = data["mask"].astype(np.int32)
-
-        # Mask spectra without any valid wavelength
-        data["spec_mask"] = data["mask"].max(axis=-1, keepdims=True)
-
-        # Mask SNe without any valid spectra
-        data["sn_mask"] = data["spec_mask"].max(axis=-2, keepdims=True)
 
         self.data = DataStepResult.model_validate(data)
         self.results = self.data
@@ -794,13 +793,13 @@ class DataStep(Variant):
                     base_sigma = bases[name]["sigma"]
                     base_mask = bases[name]["mask"]
                     if base_amp is None:
-                        wl, amplitude, sigma, sn_mask, spec_mask, wl_mask = (
+                        wl, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask = (
                             SpectraPlotter.prep(variant.data, opts)
                         )
                         base_wl = wl
                         base_amp = amplitude
                         base_sigma = sigma
-                        base_mask = np.logical_not(sn_mask * spec_mask * wl_mask)
+                        base_mask = np.logical_not(mask * sn_mask * spec_mask * wl_mask)
                     bases[name]["wl"] = base_wl
                     bases[name]["amp"] = base_amp
                     bases[name]["sigma"] = base_sigma
@@ -815,7 +814,7 @@ class DataStep(Variant):
 
             if variant.analysis.plot_summary is not None:
                 for opts in variant.analysis.plot_summary:
-                    o = opts.model_copy()
+                    o = opts.model_copy(deep=True)
                     name = f"{o.name}.{o.ext}"
                     plots[name] = plots.get(name, {"fig": None, "ax": None})
                     fig = plots[name]["fig"]
@@ -828,7 +827,7 @@ class DataStep(Variant):
 
             if variant.analysis.plot_residual is not None:
                 for opts in variant.analysis.plot_residual:
-                    o = opts.model_copy()
+                    o = opts.model_copy(deep=True)
                     name = f"{o.name}.{o.ext}"
                     plots[name] = plots.get(
                         name, {"fig": None, "ax": None, "base": True}

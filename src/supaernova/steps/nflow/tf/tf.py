@@ -299,10 +299,10 @@ class TFNFlowModel(ks.Model):
                     write_images=False,
                     write_steps_per_second=False,
                     update_freq="epoch",
-                    profile_batch=(
-                        int(n_batches_per_epoch * self.epochs * 0.1),
-                        int(n_batches_per_epoch * self.epochs * 0.1) + 10,
-                    ),
+                    # profile_batch=(
+                    #     int(n_batches_per_epoch * self.epochs * 0.1),
+                    #     int(n_batches_per_epoch * self.epochs * 0.1) + 10,
+                    # ),
                     embeddings_freq=0,
                 ),
             )

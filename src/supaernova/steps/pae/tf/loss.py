@@ -12,7 +12,11 @@ if TYPE_CHECKING:
 
 
 def WHuber(y_true, y_pred, *, model: "TFPAEModel"):
-    error = model._loss.input_mask * (y_true - y_pred) / model._loss.input_d_amp
+    error = (
+        tf.cast(model._loss.input_mask, tf.float32)
+        * (y_true - y_pred)
+        / model._loss.input_d_amp
+    )
     cond = tf.abs(error) < model.loss_clip_delta
     squared_loss = 0.5 * tf.square(error)
     linear_loss = model.loss_clip_delta * (tf.abs(error) - 0.5 * model.loss_clip_delta)

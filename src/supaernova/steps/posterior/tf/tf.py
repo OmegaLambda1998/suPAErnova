@@ -249,7 +249,7 @@ class TFPosteriorModel(ks.Model):
 
         phase = input_phase
         # XXX: Test whether this fixes things
-        if self.map.train_delta_p:  # and not self.pae.physical_latents:
+        if self.map.train_delta_p and not self.pae.physical_latents:
             delta_p = ks.layers.RepeatVector(1)(delta_p)
             phase += delta_p
 

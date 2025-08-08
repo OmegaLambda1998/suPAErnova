@@ -170,7 +170,7 @@ class NFlow(Step):
                 if not isinstance(self.analysis.plot_u_latents, list):
                     self.analysis.plot_u_latents = [self.analysis.plot_u_latents]
                 for opts in self.analysis.plot_u_latents:
-                    o = opts.model_copy()
+                    o = opts.model_copy(deep=True)
                     if o.labels is None:
                         o.labels = {"gaussian": u_labels, "u_latents": u_labels}
                     if o.name is None:
@@ -195,7 +195,7 @@ class NFlow(Step):
                 if not isinstance(self.analysis.plot_z_latents, list):
                     self.analysis.plot_z_latents = [self.analysis.plot_z_latents]
                 for opts in self.analysis.plot_z_latents:
-                    o = opts.model_copy()
+                    o = opts.model_copy(deep=True)
                     if o.labels is None:
                         o.labels = {"z_latents": z_labels, "u_to_z_latents": z_labels}
                     if o.name is None:
@@ -223,7 +223,7 @@ class NFlow(Step):
                 if not isinstance(self.analysis.plot_latents, list):
                     self.analysis.plot_latents = [self.analysis.plot_latents]
                 for opts in self.analysis.plot_latents:
-                    o = opts.model_copy()
+                    o = opts.model_copy(deep=True)
                     if o.labels is None:
                         o.labels = {
                             "z_latents": labels,
@@ -262,7 +262,7 @@ class NFlow(Step):
                         )
                         if is_shift:
                             continue
-                        o = opts.model_copy()
+                        o = opts.model_copy(deep=True)
                         if o.labels is None:
                             o.labels = {
                                 "gaussian": labels,
