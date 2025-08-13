@@ -11,7 +11,8 @@ from supaernova.utils import resolve_path
 from supaernova.steps.variants import Variant
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis.analysis import Plotter
-from supaernova.configs.steps.data import DataStepResult, DataStepAnalysis
+from supaernova.configs.callbacks import callback
+from supaernova.configs.steps.data import SNPAEData, DataStepResult, DataStepAnalysis
 
 if TYPE_CHECKING:
     from typing import Any
@@ -40,12 +41,12 @@ class Data(Step):
         self.train_frac: float = self.options.train_frac
 
         # --- Optional ---
-        self.cosmological_model: cosmo.FlatLambdaCDM
+        self.cosmological_model: cosmo.FLRW
         self.salt_model: sncosmo.SALT2Source | sncosmo.SALT3Source
-        self.min_phase: float = self.options.min_phase
-        self.max_phase: float = self.options.max_phase
         self.min_redshift: float = self.options.min_redshift
         self.max_redshift: float = self.options.max_redshift
+        self.min_phase: float = self.options.min_phase
+        self.max_phase: float = self.options.max_phase
         self.min_wavelength: float = self.options.min_wavelength
         self.max_wavelength: float = self.options.max_wavelength
         self.seed: int = self.options.seed
@@ -68,9 +69,9 @@ class Data(Step):
         # === Result Variables ===
         self.results: DataStepResult
         self.sne: SNeDataFrame  # Created in self.load_sne
-        self.data: DataStepResult  # Created in self.prepare_data_arrays
-        self.train_data: list[DataStepResult]  # Created in self.split_train_test
-        self.test_data: list[DataStepResult]  # Created in self.split_train_test
+        self.data: SNPAEData  # Created in self.prepare_data_arrays
+        self.train_data: list[SNPAEData]  # Created in self.split_train_test
+        self.test_data: list[SNPAEData]  # Created in self.split_train_test
 
         # Data Dimensions
         self.sn_dim: int  # Created in self.get_dims
@@ -82,17 +83,18 @@ class Data(Step):
         self.analysis: DataStepAnalysis = self.options.analysis or DataStepAnalysis()
 
     @override
-    def _setup(self) -> None:
+    def _setup(self, *args: "Any", **kwargs: "Any") -> None:
         # === Previous Step Variables ===
 
         # === Config Variables ===
         # --- Required ---
+
+        # --- Optional ---
         colourlaw = self.options.colourlaw
         if colourlaw is not None:
             _, colourlaw = np.loadtxt(colourlaw, unpack=True)
         self.colourlaw = colourlaw
 
-        # --- Optional ---
         # Get astropy.cosmology model associated with provided cosmological_model string
         self.cosmological_model = getattr(cosmo, self.options.cosmological_model)
 
@@ -120,8 +122,10 @@ class Data(Step):
         self.test_frac = 1 - self.train_frac
         self.n_kfolds = int(1 / self.test_frac)
 
+        self.is_setup = True
+
     @override
-    def _completed(self) -> bool:
+    def _completed(self, *args: "Any", **kwargs: "Any") -> bool:
         if not self.out_data.exists():
             self.log.debug(
                 f"{self.name} has not completed as {self.out_data} does not exist"
@@ -155,7 +159,9 @@ class Data(Step):
         return True
 
     @override
-    def _load(self) -> None:
+    def _load(self, *args: "Any", **kwargs: "Any") -> None:
+        results = {}
+
         # Load SNe DataFrames
         self.log.debug(f"Loading SNe dataframe from {self.out_sne}")
         self.sne = pd.read_pickle(self.out_sne)
@@ -167,36 +173,47 @@ class Data(Step):
         self.log.debug(f"Loading data arrays from {self.out_data}")
         with np.load(self.out_data, allow_pickle=True) as io:
             data = dict(io.items())
-        self.data = DataStepResult.model_validate(data)
-        self.results = self.data
+        results["data"] = SNPAEData.model_validate(data)
 
         # Load in training and testing data
         self.log.debug(f"Loading training data arrays from {self.out_train}")
-        self.train_data = []
+        training_data = []
         for train_data in self.out_train.iterdir():
             if train_data.is_file():
                 with np.load(train_data, allow_pickle=True) as io:
                     data = dict(io.items())
-                self.train_data.append(DataStepResult.model_validate(data))
+                training_data.append(SNPAEData.model_validate(data))
+        results["train_data"] = training_data
 
         self.log.debug(f"Loading testing data arrays from {self.out_test}")
-        self.test_data = []
+        testing_data = []
         for test_data in self.out_test.iterdir():
             if test_data.is_file():
                 with np.load(test_data, allow_pickle=True) as io:
                     data = dict(io.items())
-                self.test_data.append(DataStepResult.model_validate(data))
+                testing_data.append(SNPAEData.model_validate(data))
+        results["test_data"] = testing_data
+
+        self.results = DataStepResult.model_validate(results)
+
+        self.is_loaded = True
 
     @override
-    def _run(self) -> None:
+    def _run(self, *args: "Any", **kwargs: "Any") -> None:
         self.load_sne()
         self.calculate_salt_flux()
         self.get_dims()
         self.prepare_data_arrays()
         self.split_train_test()
+        results = {}
+        results["data"] = self.data
+        results["train_data"] = self.train_data
+        results["test_data"] = self.test_data
+        self.results = DataStepResult.model_validate(results)
+        self.is_loaded = True
 
     @override
-    def _result(self) -> None:
+    def _result(self, *args: "Any", **kwargs: "Any") -> None:
         if self.force or not self.out_sne.exists():
             self.log.debug(f"Saving SNe DataFrame to {self.out_sne}")
             self.sne.to_pickle(self.out_sne)
@@ -204,10 +221,11 @@ class Data(Step):
         if self.force or not self.out_data.exists():
             self.log.debug(f"Saving data arrays to {self.out_data}")
             np.savez_compressed(
-                self.out_data, **self.data.model_dump(exclude={"metadata", "name"})
+                self.out_data,
+                **self.results.data.model_dump(exclude={"metadata", "name"}),
             )
 
-        for i, train_data in enumerate(self.train_data):
+        for i, train_data in enumerate(self.results.train_data):
             out_train = self.out_train / f"kfold_{i:d}.npz"
             if self.force or not out_train.exists():
                 self.log.debug(f"Saving #{i} training data array to {out_train}")
@@ -216,7 +234,7 @@ class Data(Step):
                     **train_data.model_dump(exclude={"metadata", "name"}),
                 )
 
-        for i, test_data in enumerate(self.test_data):
+        for i, test_data in enumerate(self.results.test_data):
             out_test = self.out_test / f"kfold_{i:d}.npz"
             if self.force or not out_test.exists():
                 self.log.debug(f"Saving #{i} testing data array to {out_test}")
@@ -225,8 +243,10 @@ class Data(Step):
                     **test_data.model_dump(exclude={"metadata", "name"}),
                 )
 
+        self.has_results = True
+
     @override
-    def _analyse(self) -> None:
+    def _analyse(self, *args: "Any", **kwargs: "Any") -> None:
         if self.analysis.plot_spectra is not None:
             if not isinstance(self.analysis.plot_spectra, list):
                 self.analysis.plot_spectra = [self.analysis.plot_spectra]
@@ -239,7 +259,7 @@ class Data(Step):
                 opts.savepath.mkdir(parents=True, exist_ok=True)
                 if opts.plot_kwargs is None:
                     opts.plot_kwargs = {"title": self.name}
-                SpectraPlotter.plot_spectra(self.data, opts)
+                SpectraPlotter.plot_spectra(self.results.data, opts)
 
         if self.analysis.plot_summary is not None:
             if not isinstance(self.analysis.plot_summary, list):
@@ -253,7 +273,7 @@ class Data(Step):
                 opts.savepath.mkdir(parents=True, exist_ok=True)
                 if opts.plot_kwargs is None:
                     opts.plot_kwargs = {"label": self.name}
-                SpectraPlotter.plot_summary(self.data, opts)
+                SpectraPlotter.plot_summary(self.results.data, opts)
 
         if self.analysis.plot_residual is not None:
             if not isinstance(self.analysis.plot_residual, list):
@@ -267,7 +287,9 @@ class Data(Step):
                 opts.savepath.mkdir(parents=True, exist_ok=True)
                 if opts.plot_kwargs is None:
                     opts.plot_kwargs = {"label": self.name}
-                SpectraPlotter.plot_residual(self.data, opts)
+                SpectraPlotter.plot_residual(self.results.data, opts)
+
+        self.was_analysed = True
 
     #
     # === DataStep Specific Functions ===
@@ -698,8 +720,7 @@ class Data(Step):
 
         data["mask"] = data["mask"].astype(np.int32)
 
-        self.data = DataStepResult.model_validate(data)
-        self.results = self.data
+        self.data = SNPAEData.model_validate(data)
 
     def get_unmasked_dims(self, mask: np.ndarray | None = None) -> tuple[int, int, int]:
         self.log.debug("Calculating unmasked data dimensions")
@@ -748,7 +769,7 @@ class Data(Step):
 
             n_axes = 3
             self.train_data.append(
-                DataStepResult.model_validate({
+                SNPAEData.model_validate({
                     key: val[inds_train, :, :]
                     if val.ndim == n_axes
                     else val[inds_train, :]
@@ -757,7 +778,7 @@ class Data(Step):
                 })
             )
             self.test_data.append(
-                DataStepResult.model_validate({
+                SNPAEData.model_validate({
                     key: val[inds_test, :, :]
                     if val.ndim == n_axes
                     else val[inds_test, :]
@@ -775,82 +796,103 @@ class Data(Step):
 class DataStep(Variant):
     id: ClassVar[str] = "data"
 
+    def __init__(self, config: "DataStepConfig") -> None:
+        super().__init__(config)
+        self.plots = {}
+        self.bases = {}
+
     @override
-    def _analyse(self) -> None:
-        plots = {}
-        bases = {}
-        for variant in self.variants.values():
+    def _analyse(
+        self, *args: "Any", variants: str | list[str] | None = None, **kwargs: "Any"
+    ) -> None:
+        if variants is None:
+            return
+        if not isinstance(variants, list):
+            variants = [variants]
+        for variant_name in variants:
+            variant = self.variants[variant_name]
             if variant.analysis.plot_residual is not None:
                 if not isinstance(variant.analysis.plot_residual, list):
                     variant.analysis.plot_residual = [variant.analysis.plot_residual]
                 for opts in variant.analysis.plot_residual:
                     name = f"{opts.name}.{opts.ext}"
-                    bases[name] = bases.get(
+                    self.bases[name] = self.bases.get(
                         name, {"wl": None, "amp": None, "sigma": None, "mask": None}
                     )
-                    base_wl = bases[name]["wl"]
-                    base_amp = bases[name]["amp"]
-                    base_sigma = bases[name]["sigma"]
-                    base_mask = bases[name]["mask"]
+                    base_wl = self.bases[name]["wl"]
+                    base_amp = self.bases[name]["amp"]
+                    base_sigma = self.bases[name]["sigma"]
+                    base_mask = self.bases[name]["mask"]
                     if base_amp is None:
                         wl, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask = (
-                            SpectraPlotter.prep(variant.data, opts)
+                            SpectraPlotter.prep(
+                                self.variants[opts.base].results.data, opts
+                            )
                         )
                         base_wl = wl
                         base_amp = amplitude
                         base_sigma = sigma
                         base_mask = np.logical_not(mask * sn_mask * spec_mask * wl_mask)
-                    bases[name]["wl"] = base_wl
-                    bases[name]["amp"] = base_amp
-                    bases[name]["sigma"] = base_sigma
-                    bases[name]["mask"] = base_mask
+                    self.bases[name]["wl"] = base_wl
+                    self.bases[name]["amp"] = base_amp
+                    self.bases[name]["sigma"] = base_sigma
+                    self.bases[name]["mask"] = base_mask
                     opts.base_wl = base_wl
                     opts.base_amp = base_amp
                     opts.base_sigma = base_sigma
                     opts.base_mask = base_mask
                     opts.plot_base = True
 
-            variant.analyse()
+            super()._analyse(*args, **{**kwargs, "variants": [variant_name]})
 
             if variant.analysis.plot_summary is not None:
                 for opts in variant.analysis.plot_summary:
                     o = opts.model_copy(deep=True)
                     name = f"{o.name}.{o.ext}"
-                    plots[name] = plots.get(name, {"fig": None, "ax": None})
-                    fig = plots[name]["fig"]
-                    ax = plots[name]["ax"]
+                    self.plots[name] = self.plots.get(name, {"fig": None, "ax": None})
+                    fig = self.plots[name]["fig"]
+                    ax = self.plots[name]["ax"]
                     fig, ax = SpectraPlotter.plot_summary(
-                        variant.data, o, fig=fig, ax=ax, save=False, force=True
+                        variant.results.data, o, fig=fig, ax=ax, save=False, force=True
                     )
-                    plots[name]["fig"] = fig
-                    plots[name]["ax"] = ax
+                    self.plots[name]["fig"] = fig
+                    self.plots[name]["ax"] = ax
 
             if variant.analysis.plot_residual is not None:
                 for opts in variant.analysis.plot_residual:
                     o = opts.model_copy(deep=True)
                     name = f"{o.name}.{o.ext}"
-                    plots[name] = plots.get(
+                    self.plots[name] = self.plots.get(
                         name, {"fig": None, "ax": None, "base": True}
                     )
-                    fig = plots[name]["fig"]
-                    ax = plots[name]["ax"]
-                    o.plot_base = plots[name]["base"]
+                    fig = self.plots[name]["fig"]
+                    ax = self.plots[name]["ax"]
+                    o.plot_base = self.plots[name]["base"]
                     fig, ax = SpectraPlotter.plot_residual(
-                        variant.data, o, fig=fig, ax=ax, save=False, force=True
+                        variant.results.data, o, fig=fig, ax=ax, save=False, force=True
                     )
-                    plots[name]["fig"] = fig
-                    plots[name]["ax"] = ax
-                    plots[name]["base"] = False
+                    self.plots[name]["fig"] = fig
+                    self.plots[name]["ax"] = ax
+                    self.plots[name]["base"] = False
 
-        for name, opts in plots.items():
-            savepath = self.paths.plots / name
-            if savepath.exists():
-                continue
-            self.log.debug(f"Plotting {name}")
-            fig = opts["fig"]
-            ax = opts["ax"]
-            fig = Plotter.save(fig, savepath)
-            Plotter.close(fig, ax)
+            # self._init_variants(
+            #     variants=self.variant_configs[variant.name],
+            # )
+
+    @override
+    @callback
+    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
+        super().analyse(*args, **kwargs)
+        if len(self.variants) > 1:
+            for name, opts in self.plots.items():
+                savepath = self.paths.plots / name
+                if savepath.exists():
+                    continue
+                self.log.debug(f"Plotting {name}")
+                fig = opts["fig"]
+                ax = opts["ax"]
+                fig = Plotter.save(fig, savepath)
+                Plotter.close(fig, ax)
 
 
 DataStep.register_step(Data)

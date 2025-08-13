@@ -255,8 +255,6 @@ class Plotter:
             plot_kwargs = {}
         c = cc.ChainConsumer()
 
-        extents = {}
-
         for name, chain in chains.items():
             chain_opts = {}
             for k, v in chain_kwargs.items():
@@ -265,14 +263,6 @@ class Plotter:
                         chain_opts[k] = v[name]
                 else:
                     chain_opts[k] = v
-            for n, col in chain.items():
-                col_min, col_max = extents.get(n, (col.min() * 0.9, col.max() * 1.1))
-                col_min = min(col.min() * 0.9, col_min)
-                col_max = max(col.max() * 1.1, col_max)
-                col_diff = max(abs(col.min() - col_min), abs(col.max() - col_max))
-                col_min = col.min() - col_diff
-                col_max = col.max() + col_diff
-                extents[n] = (col_min, col_max)
             c.add_chain(
                 cc.Chain(
                     *chain_args,
@@ -284,14 +274,13 @@ class Plotter:
                 )
             )
 
-        c.plotter.set_config(cc.PlotConfig(extents=extents))
         fig = c.plotter.plot(*plot_args, *args, **plot_kwargs, **kwargs)
         ax = fig.gca()
         return fig, ax
 
     @staticmethod
     def save(fig: "Figure", savepath: "Path", *, clear: bool = True) -> "Figure":
-        fig.savefig(savepath)
+        fig.savefig(savepath, transparent=True)
         if clear:
             fig, _ = Plotter.clear(fig=fig)
         return fig

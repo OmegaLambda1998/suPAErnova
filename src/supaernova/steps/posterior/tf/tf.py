@@ -1,5 +1,4 @@
 # Copyright 2025 Patrick Armstrong
-import gc
 import os
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
@@ -26,12 +25,12 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from supaernova.steps.pae.tf import S, TFPAEModel, TensorCompatible
-    from supaernova.steps.nflow.tf import TFNFlowModel
+    from supaernova.steps.pae.tf import PAE, TFPAEModel
+    from supaernova.steps.nflow.tf import NFlow, TFNFlowModel
+    from supaernova.steps.posterior import Posterior
     from supaernova.configs.steps.data import DataStepResult
-    from supaernova.steps.posterior.model import PosteriorModelStep
-    from supaernova.configs.steps.posterior.tf import TFPosteriorModelConfig
-    from supaernova.configs.steps.posterior.posterior import PosteriorMapStage
+    from supaernova.configs.steps.posterior import PosteriorMAPStage
+    from supaernova.configs.steps.posterior.tf import TFPosteriorConfig
 
 NPROC = os.cpu_count()
 MEM_MB = 0.5 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**2)
@@ -40,72 +39,59 @@ MEM_MB = 0.5 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024*
 @ks.utils.register_keras_serializable("SuPAErnova")
 class TFPosteriorModel(ks.Model):
     def __init__(
-        self: "TFPosteriorModel",
-        config: "PosteriorModelStep[TFPosteriorModelConfig]",
+        self,
+        config: "Posterior",
         *args: "Any",
         **kwargs: "Any",
     ) -> None:
-        ks.backend.clear_session()
-        gc.collect()
-
         super().__init__(*args, name=config.name.split()[-1], **kwargs)
         # --- Config ---
         global POSTERIORMODELSTEP
         POSTERIORMODELSTEP = config
-        options = config.options
+        self.options: TFPosteriorConfig = config.options
         self.log: Logger = config.log
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
-        self.seed: int = config.options.seed
-        self.subset: Literal["train", "test"] = config.options.subset
+        self.seed: int = self.options.seed
+        self.subset: Literal["train", "test"] = self.options.subset
 
-        self.debug: bool = options.debug
-        self.profile: bool = options.profile
-        # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
-        self.data_step = config.data_step
-        self.kfold = config.kfold
-        vars(self)["pae_step"]: TFPAEModel = config.pae_step
-        vars(self)["pae"]: TFPAEModel = self.pae_step.model
+        self.debug: bool = self.options.debug
+        self.profile: bool = self.options.profile
+
+        self.data: DataStepResult = getattr(config, f"{self.subset}_data")
+        self.data_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_mask")
+        self.sn_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_sn_mask")
+        self.spec_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_spec_mask")
+        self.wl_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_wl_mask")
+
+        # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
+        vars(self)["pae_step"]: PAE = config.pae_step
+        vars(self)["pae"]: TFPAEModel = config.pae
         self.pae.trainable = False
         self.pae.encoder.trainable = False
         self.pae.decoder.trainable = False
-        vars(self)["nflow_step"]: TFNFlowModel = config.nflow_step
-        vars(self)["nflow"]: TFNFlowModel = self.nflow_step.model
+
+        # Equivalent to `self.nflow = ...` but avoids tf / ks from tracking self.nflow
+        vars(self)["nflow_step"]: NFlow = config.nflow_step
+        vars(self)["nflow"]: TFNFlowModel = config.nflow
         self.nflow.trainable = False
         self.nflow.flow.trainable = False
-
-        self.data: DataStepResult = (
-            self.data_step.train_data[self.kfold]
-            if self.subset == "train"
-            else self.data_step.test_data[self.kfold]
-        )
-        self.sn_mask: npt.NDArray[np.int32] = (
-            np.array(self.pae.stage.train_sn_mask).astype(np.int32)
-            if self.subset == "train"
-            else np.array(self.pae.stage.test_sn_mask).astype(np.int32)
-        )
-        self.spec_mask: npt.NDArray[np.int32] = (
-            np.array(self.pae.stage.train_spec_mask).astype(np.int32)
-            if self.subset == "train"
-            else np.array(self.pae.stage.test_spec_mask).astype(np.int32)
-        )
-        self.data.mask *= self.sn_mask * self.spec_mask
 
         self.sn_dim = self.data.time.shape[0]
         self.spec_dim = self.data.time.shape[1]
 
         # MAP Variables
         vars(self)["map"]: PosteriorMap = PosteriorMap(
-            options, self.nflow, self.pae, self.data
+            self, self.nflow, self.pae, self.data
         )
-        self.tolerance = options.tolerance
-        self.x_tolerance = options.x_tolerance
-        self.f_relative_tolerance = options.f_relative_tolerance
-        self.f_absolute_tolerance = options.f_absolute_tolerance
-        self.max_iterations = options.max_iterations
+        self.tolerance = self.options.tolerance
+        self.x_tolerance = self.options.x_tolerance
+        self.f_relative_tolerance = self.options.f_relative_tolerance
+        self.f_absolute_tolerance = self.options.f_absolute_tolerance
+        self.max_iterations = self.options.max_iterations
 
         # --- Training ---
-        self.save_best: bool = options.save_best
+        self.save_best: bool = self.options.save_best
         self.ckpt_path: str = (
             f"{'best' if self.save_best else 'latest'}.model.checkpoint/"
         )
@@ -121,16 +107,16 @@ class TFPosteriorModel(ks.Model):
             ))
         )
 
-        loss: ks.losses.Loss = options.loss_cls()
+        loss: ks.losses.Loss = self.options.loss_cls()
         loss.model = self
         self._loss: ks.losses.Loss = loss
 
         # HMC Variables
-        self.n_burnin: int = options.n_burnin
-        self.n_samples: int = options.n_samples
-        self.n_leapfrog: int = options.n_leapfrog
-        self.n_thinning: int = options.n_thinning
-        self.target_acceptance_rate: float = options.target_acceptance_rate
+        self.n_burnin: int = self.options.n_burnin
+        self.n_samples: int = self.options.n_samples
+        self.n_leapfrog: int = self.options.n_leapfrog
+        self.n_thinning: int = self.options.n_thinning
+        self.target_acceptance_rate: float = self.options.target_acceptance_rate
 
         vars(self)["hmc"]: PosteriorHMCValue = PosteriorHMCValue(
             tf.Variable(  # Samples
@@ -189,18 +175,40 @@ class TFPosteriorModel(ks.Model):
     @tf.function
     def call(
         self,
-        inputs: "PosteriorInputs",
+        inputs: tf.Tensor,
+        *,
         training: bool | None = None,
-        mask: "TensorCompatible | None" = None,
-    ) -> "PosteriorOutputs":
+        mask: tf.Tensor | None = None,
+        sn_mask: tf.Tensor | None = None,
+        spec_mask: tf.Tensor | None = None,
+        wl_mask: tf.Tensor | None = None,
+        testing: bool | None = None,
+    ) -> tf.Tensor:
         training = False if training is None else training
+        testing = False if testing is None else testing
 
+        # === Unpack Inputs ===
         input_position = inputs[0]
         input_phase = inputs[1]
         input_amp = inputs[2]
         input_sigma = inputs[3]
-        input_mask = (
-            mask if mask is not None else tf.ones_like(input_amp, dtype=tf.int32)
+
+        # --- Masks ---
+        # Data Mask
+        input_mask = tf.ones_like(input_amp, dtype=tf.int32) if mask is None else mask
+        # Wavelength Range Mask
+        input_wl_mask = tf.ones_like(input_mask) if wl_mask is None else wl_mask
+        # Phase Range Mask
+        input_spec_mask = (
+            tf.reduce_max(input_wl_mask, axis=-1, keepdims=True)
+            if spec_mask is None
+            else spec_mask
+        )
+        # Redshift Range Mask
+        input_sn_mask = (
+            tf.reduce_max(input_spec_mask, axis=-2, keepdims=True)
+            if sn_mask is None
+            else sn_mask
         )
 
         # Determine the prior probability early to avoid exploring non-physical parameter spaces.
@@ -237,7 +245,13 @@ class TFPosteriorModel(ks.Model):
 
         # Create synthetic spectra from z-latents
         decoder_inputs = tf.concat((input_phase, zs), axis=-1)
-        synth_amp = self.pae.decoder(decoder_inputs, mask=input_mask)
+        synth_amp = self.pae.decoder(
+            decoder_inputs,
+            mask=input_mask,
+            sn_mask=input_sn_mask,
+            spec_mask=input_spec_mask,
+            wl_mask=input_wl_mask,
+        )
 
         if self.map.train_delta_m and not self.pae.physical_latents:
             delta_m = ks.layers.RepeatVector(1)(delta_m)
@@ -346,7 +360,7 @@ class TFPosteriorModel(ks.Model):
 
     def train_model(
         self,
-        stages: "Sequence[PosteriorMapStage]",
+        stages: "Sequence[PosteriorMAPStage]",
         *,
         savepath: "Path | None" = None,
     ) -> None:
@@ -468,7 +482,10 @@ class TFPosteriorModel(ks.Model):
         log_prob = self(
             (input_position, self.data.time, self.data.amplitude, self.data.sigma),
             training=False,
-            mask=self.data.mask,
+            mask=self.data_mask,
+            sn_mask=self.sn_mask,
+            spec_mask=self.spec_mask,
+            wl_mask=self.wl_mask,
         )
         # tf.print(f"{log_prob = }")
         # tf.debugging.check_numerics(log_prob, f"{log_prob = }")
@@ -833,7 +850,7 @@ class TFPosteriorModel(ks.Model):
         pae_stds = self.pae_step.results[self.subset][
             str(self.pae_step.run_stages[-1].stage)
         ].latents.std(axis=-1)
-        nflow_stds = self.nflow_step.results[self.subset].z_to_u.std(axis=0)
+        nflow_stds = self.nflow_step.results[self.subset].u_latents.std(axis=0)
         stds = []
         if self.map.train_delta_m:
             stds.append(pae_stds[-2:-1].astype(np.float32))

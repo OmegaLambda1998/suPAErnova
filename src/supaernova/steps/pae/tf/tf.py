@@ -1,5 +1,4 @@
 # Copyright 2025 Patrick Armstrong
-import gc
 import os
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
@@ -54,9 +53,6 @@ class TFPAEEncoder(ks.layers.Layer):
         n_z_latents: int = options.n_z_latents
         self.n_pae_latents: int = n_physical_latents + n_z_latents
 
-        self.latents_z_mask: tf.Variable = tf.Variable(
-            tf.zeros(self.n_pae_latents), trainable=False, name="PAEELatentsZMask"
-        )
         self.latents_physical_mask: tf.Variable = tf.Variable(
             tf.zeros(self.n_pae_latents),
             trainable=False,
@@ -215,13 +211,6 @@ class TFPAEEncoder(ks.layers.Layer):
             ),
             tf.float32,
         )
-        # tf.print(
-        #     "encoder",
-        #     "n_unmasked_spec",
-        #     n_unmasked_spec.shape,
-        #     tf.reduce_min(n_unmasked_spec),
-        #     tf.reduce_max(n_unmasked_spec),
-        # )
 
         # Determine which SNe to keep
         # Will mask out any SN with *no* unmasked spectra
@@ -234,22 +223,15 @@ class TFPAEEncoder(ks.layers.Layer):
             # y=1),
             tf.float32,
         )
-        # tf.print(
-        #     "encoder",
-        #     "n_unmasked_sn",
-        #     n_unmasked_sn.shape,
-        #     tf.reduce_min(n_unmasked_sn),
-        #     tf.reduce_max(n_unmasked_sn),
-        # )
 
         # Determine which latents to keep
         # The latents are ordered by training stage
         # ΔAᵥ -> zs -> ΔM  -> Δp
         # Note that this differs from the order used in the legacy SuPAErnova code:
         # Δp -> ΔM  -> ΔAᵥ -> zs
-        masked_latents = tf.zeros(self.n_pae_latents - self.stage_num)
-        unmasked_latents = tf.ones(self.stage_num)
-        latent_mask = tf.concat((unmasked_latents, masked_latents), axis=0)
+        latent_mask = tf.cast(
+            tf.sequence_mask(self.stage_num, self.n_pae_latents), tf.float32
+        )
 
         # === Run Encoder ===
         # Create initial input layer
@@ -288,14 +270,11 @@ class TFPAEEncoder(ks.layers.Layer):
             latents -= self.latents_physical_mask * latents_mean
         else:
             # Normalise the physical latents within this batch such that the entire unbatched sample has a mean of 0
-            # tf.print("encoder", "moving means", self.moving_means)
-            # tf.print("encoder", "init means", latents_mean)
             latents -= self.latents_physical_mask * self.moving_means
             latents_mean = (
                 tf.reduce_sum(latents * tf.cast(mask_sn, tf.float32), axis=0)
                 / n_unmasked_sn
             )
-            # tf.print("encoder", "corrected means", latents_mean)
 
         # Repeat latent layers across spec_dim
         return self.repeat_latent_layer(latents)
@@ -559,15 +538,12 @@ class TFPAEModel(ks.Model):
         *args: "Any",
         **kwargs: "Any",
     ) -> None:
-        ks.backend.clear_session()
-        gc.collect()
-
         super().__init__(*args, name=config.name.rsplit(maxsplit=1)[-1], **kwargs)
         # --- Config ---
         global PAEMODELSTEP
         PAEMODELSTEP = config
-        self.options: "TFPAEConfig" = config.options
-        self.log: "Logger" = config.log
+        self.options: TFPAEConfig = config.options
+        self.log: Logger = config.log
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
         self.seed: int = config.options.seed
@@ -583,7 +559,7 @@ class TFPAEModel(ks.Model):
         self.encoder: TFPAEEncoder = TFPAEEncoder(self.options, config.name)
         self.decoder: TFPAEDecoder = TFPAEDecoder(self.options, config.name)
         self.decoder.wl_dim = config.wl_dim
-        self.decoder.colourlaw = config.data_step.colourlaw
+        self.decoder.colourlaw = config.colourlaw
 
         # --- Training ---
         self.built: bool = False
@@ -610,7 +586,6 @@ class TFPAEModel(ks.Model):
         self._optimiser: type[ks.optimizers.Optimizer] = self.options.optimiser_cls
 
         self.stage: PAEStage
-        self.latents_z_mask: tf.Tensor
         self.latents_physical_mask: tf.Tensor
 
         # --- Loss ---
@@ -869,13 +844,6 @@ class TFPAEModel(ks.Model):
             ),
             tf.float32,
         )
-        # tf.print(
-        #     "loss",
-        #     "n_unmasked_spec",
-        #     n_unmasked_spec.shape,
-        #     tf.reduce_min(n_unmasked_spec),
-        #     tf.reduce_max(n_unmasked_spec),
-        # )
 
         # Determine which SNe to keep
         # Will mask out any SN with *no* unmasked spectra
@@ -888,14 +856,6 @@ class TFPAEModel(ks.Model):
             # y=1),
             tf.float32,
         )
-
-        # tf.print(
-        #     "loss",
-        #     "n_unmasked_sn",
-        #     n_unmasked_sn.shape,
-        #     tf.reduce_min(n_unmasked_sn),
-        #     tf.reduce_max(n_unmasked_sn),
-        # )
 
         loss = self.options.loss_cls()
         loss.input_mask = input_mask
@@ -1314,17 +1274,16 @@ class TFPAEModel(ks.Model):
         if not self.built or update:
             # Mask tensors to select specific latents
             if self.physical_latents:
-                self.latents_z_mask = tf.concat(
+                latents_z_mask = tf.concat(
                     (tf.zeros(1), tf.ones(self.n_z_latents), tf.zeros(1), tf.zeros(1)),
                     axis=0,
                 )
             else:
-                self.latents_z_mask = tf.ones(self.n_z_latents)
-            self.latents_physical_mask = 1 - self.latents_z_mask  # Swap 0s and 1s
+                latents_z_mask = tf.ones(self.n_z_latents)
+            self.latents_physical_mask = 1 - latents_z_mask  # Swap 0s and 1s
 
             # === Setup Encoder ===
             self.encoder.stage_num.assign(self.stage.stage)
-            self.encoder.latents_z_mask.assign(self.latents_z_mask)
             self.encoder.latents_physical_mask.assign(self.latents_physical_mask)
 
             schedule = self._scheduler(
@@ -1333,7 +1292,8 @@ class TFPAEModel(ks.Model):
                 decay_rate=self.stage.learning_rate_decay_rate,
             )
             if update:
-                self.optimizer.learning_rate = schedule
+                self.optimizer.learning_rate.assign(self.stage.learning_rate)
+                self.optimizer.iterations.assign(0)
                 self.optimizer.weight_decay = self.stage.learning_rate_weight_decay_rate
             else:
                 optimiser = self._optimiser(
@@ -1469,13 +1429,6 @@ class TFPAEModel(ks.Model):
                 ),
                 tf.float32,
             )
-            # tf.print(
-            #     "load",
-            #     "n_unmasked_spec",
-            #     n_unmasked_spec.shape,
-            #     tf.reduce_min(n_unmasked_spec),
-            #     tf.reduce_max(n_unmasked_spec),
-            # )
 
             # Determine which SNe to keep
             # Will mask out any SN with *no* unmasked spectra
@@ -1488,13 +1441,6 @@ class TFPAEModel(ks.Model):
                 # y=1),
                 tf.float32,
             )
-            # tf.print(
-            #     "load",
-            #     "n_unmasked_sn",
-            #     n_unmasked_sn.shape,
-            #     tf.reduce_min(n_unmasked_sn),
-            #     tf.reduce_max(n_unmasked_sn),
-            # )
 
             self.encoder.moving_means.assign(tf.zeros(self.encoder.n_pae_latents))
 
@@ -1518,20 +1464,6 @@ class TFPAEModel(ks.Model):
             )
 
             self.encoder.moving_means.assign(latents_mean)
-
-            # tf.print("load", "moving_means", self.encoder.moving_means)
-            # tf.print("load", "init means", latents_mean)
-            # tf.print(
-            #     "load", "corrected means", latents_mean - self.encoder.moving_means
-            # )
-            # encoded = self.encoder(
-            #     pae_input,
-            #     training=False,
-            #     mask=mask,
-            #     sn_mask=sn_mask,
-            #     spec_mask=spec_mask,
-            #     wl_mask=wl_mask,
-            # )
 
     @tf.function
     def prep_data_per_epoch(

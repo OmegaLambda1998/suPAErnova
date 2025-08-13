@@ -7,6 +7,7 @@ import pandas as pd
 from supaernova.steps import Step
 from supaernova.steps.models import Model
 from supaernova.analysis.spectra import SpectraPlotter
+from supaernova.configs.steps.data import DataStepResult
 from supaernova.analysis.dispersion import DispersionPlotter
 from supaernova.analysis.distribution import DistributionPlotter
 from supaernova.configs.steps.posterior import (
@@ -19,12 +20,12 @@ if TYPE_CHECKING:
     from pathlib import Path
     from collections.abc import Callable
 
-    from supaernova.steps.pae import PAE
+    from numpy import typing as npt
+
+    from supaernova.steps.pae import PAE, PAEModel
     from supaernova.steps.data import Data
-    from supaernova.steps.nflow import NFlow
-    from supaernova.configs.steps.posterior import (
-        PosteriorStepConfig,
-    )
+    from supaernova.steps.nflow import NFlow, NFlowModel
+    from supaernova.configs.steps.posterior import PosteriorStepConfig
 
     from .tf import TFPosteriorModel
 
@@ -36,14 +37,41 @@ class Posterior(Step):
         super().__init__(config)
 
         # === Previous Step Variables ===
-        self.nflow_step: NFlow
-        self.pae_step: PAE
         self.data_step: Data
-        self.kfold = self.options.kfold
+        self.kfold: int
+        self.pae_step: PAE
+        self.pae: PAEModel
+        self.nflow_step: NFlow
+        self.nflow: NFlowModel
+
+        self.data: DataStepResult
+        self.mask: npt.NDArray[bool]
+        self.sn_mask: npt.NDArray[bool]
+        self.spec_mask: npt.NDArray[bool]
+        self.wl_mask: npt.NDArray[bool]
+
+        self.train_data: DataStepResult
+        self.train_mask: npt.NDArray[bool]
+        self.train_sn_mask: npt.NDArray[bool]
+        self.train_spec_mask: npt.NDArray[bool]
+        self.train_wl_mask: npt.NDArray[bool]
+
+        self.test_data: DataStepResult
+        self.test_mask: npt.NDArray[bool]
+        self.test_sn_mask: npt.NDArray[bool]
+        self.test_spec_mask: npt.NDArray[bool]
+        self.test_wl_mask: npt.NDArray[bool]
+
+        self.val_data: DataStepResult
+        self.val_mask: npt.NDArray[bool]
+        self.val_sn_mask: npt.NDArray[bool]
+        self.val_spec_mask: npt.NDArray[bool]
+        self.val_wl_mask: npt.NDArray[bool]
 
         # === Config Variables ===
         # --- Required ---
         self.iterations: int
+        self.validation_frac: float = self.options.validation_frac
         self.seeds: list[int] = [self.seed + i for i in range(self.options.iterations)]
         self.n_chains_early: int = self.options.n_chains_early
         self.n_chains_mid: int = self.options.n_chains_mid
@@ -57,10 +85,10 @@ class Posterior(Step):
         # --- Optional ---
         self.debug: bool = self.options.debug
         self.profile: bool = self.options.profile
+        self.save_best: bool = self.options.save_best
         self.subsets = (["train"] if self.options.train_subset else []) + (
             ["test"] if self.options.test_subset else []
         )
-        self.save_best: bool = self.options.save_best
         self.tolerance: float = self.options.tolerance
         self.target_acceptance_rate: float = self.options.target_acceptance_rate
         self.random_initial_positions: bool = self.options.random_initial_positions
@@ -130,9 +158,83 @@ class Posterior(Step):
     @override
     def _setup(self, *, data: "Data", pae: "PAE", nflow: "NFlow") -> None:
         # === Previous Step Variables ===
-        self.nflow_step = nflow
-        self.pae_step = pae
         self.data_step = data
+        self.data = data.data
+        self.pae_step = pae
+        self.pae_step.load()
+        self.pae = self.pae_step.model
+        self.nflow_step = nflow
+        self.nflow_step.load()
+        self.nflow = self.nflow_step.model
+        self.kfold = self.options.kfold or self.pae_step.kfold
+        self.train_data = data.train_data[self.kfold % len(data.train_data)]
+        self.test_data = data.test_data[self.kfold % len(data.test_data)]
+        self.val_data = self.test_data
+        if self.validation_frac > 0:
+            ind_split = int(self.data_step.sn_dim * self.validation_frac)
+            self.val_data = DataStepResult.model_validate({
+                k: v[-ind_split:] for k, v in self.train_data.model_dump().items()
+            })
+            self.train_data = DataStepResult.model_validate({
+                k: v[:-ind_split] for k, v in self.train_data.model_dump().items()
+            })
+
+        self.min_redshift = self.options.min_redshift or max(
+            self.nflow_step.min_redshift,
+            self.pae_step.min_redshift,
+            self.data_step.min_redshift,
+        )
+        self.max_redshift = self.options.max_redshift or min(
+            self.nflow_step.max_redshift,
+            self.pae_step.max_redshift,
+            self.data_step.max_redshift,
+        )
+        self.min_train_redshift = self.options.min_train_redshift or self.min_redshift
+        self.max_train_redshift = self.options.max_train_redshift or self.max_redshift
+        self.min_test_redshift = self.options.min_test_redshift or self.min_redshift
+        self.max_test_redshift = self.options.max_test_redshift or self.max_redshift
+        self.min_val_redshift = self.options.min_val_redshift or self.min_redshift
+        self.max_val_redshift = self.options.max_val_redshift or self.max_redshift
+
+        self.min_phase = self.options.min_phase or max(
+            self.nflow_step.min_phase, self.pae_step.min_phase, self.data_step.min_phase
+        )
+        self.max_phase = self.options.max_phase or min(
+            self.nflow_step.max_phase, self.pae_step.max_phase, self.data_step.max_phase
+        )
+        self.min_train_phase = self.options.min_train_phase or self.min_phase
+        self.max_train_phase = self.options.max_train_phase or self.max_phase
+        self.min_test_phase = self.options.min_test_phase or self.min_phase
+        self.max_test_phase = self.options.max_test_phase or self.max_phase
+        self.min_val_phase = self.options.min_val_phase or self.min_phase
+        self.max_val_phase = self.options.max_val_phase or self.max_phase
+
+        self.min_wavelength = self.options.min_wavelength or max(
+            self.nflow_step.min_wavelength,
+            self.pae_step.min_wavelength,
+            self.data_step.min_wavelength,
+        )
+        self.max_wavelength = self.options.max_wavelength or min(
+            self.nflow_step.max_wavelength,
+            self.pae_step.max_wavelength,
+            self.data_step.max_wavelength,
+        )
+        self.min_train_wavelength = (
+            self.options.min_train_wavelength or self.min_wavelength
+        )
+        self.max_train_wavelength = (
+            self.options.max_train_wavelength or self.max_wavelength
+        )
+        self.min_test_wavelength = (
+            self.options.min_test_wavelength or self.min_wavelength
+        )
+        self.max_test_wavelength = (
+            self.options.max_test_wavelength or self.max_wavelength
+        )
+        self.min_val_wavelength = self.options.min_val_wavelength or self.min_wavelength
+        self.max_val_wavelength = self.options.max_val_wavelength or self.max_wavelength
+
+        self.setup_data_masks()
 
         # --- Stages ---
         self.map_stage_init = PosteriorMAPStage.model_validate({
@@ -691,6 +793,42 @@ class Posterior(Step):
                     DispersionPlotter.plot_dispersion(
                         data, hmc, o, twins=twins, legacy=legacy_data
                     )
+
+    # === Instance Methods ===
+
+    def setup_data_masks(self) -> None:
+        for mask_type in ["train_", "test_", "val_", ""]:
+            data: DataStepResult = getattr(self, f"{mask_type}data")
+            mask = data.mask
+
+            min_redshift: float = getattr(self, f"min_{mask_type}redshift")
+            max_redshift: float = getattr(self, f"max_{mask_type}redshift")
+            redshift_mask = (
+                (data.redshift >= min_redshift) & (data.redshift <= max_redshift)
+            )[:, 0:1, 0:1]
+            # Mask out SNe outside the redshift range
+            sn_mask = redshift_mask.astype(np.int32)
+
+            min_phase: float = getattr(self, f"min_{mask_type}phase")
+            max_phase: float = getattr(self, f"max_{mask_type}phase")
+            phase_mask = ((data.phase >= min_phase) & (data.phase <= max_phase))[
+                ..., 0:1
+            ]
+            # Mask out spectra outside the phase range
+            spec_mask = phase_mask.astype(np.int32)
+
+            min_wavelength: float = getattr(self, f"min_{mask_type}wavelength")
+            max_wavelength: float = getattr(self, f"max_{mask_type}wavelength")
+            wavelength_mask = (data.wavelength >= min_wavelength) & (
+                data.wavelength <= max_wavelength
+            )
+            # Mask out wavelengths outside the wavelength range
+            wl_mask = wavelength_mask.astype(np.int32)
+
+            setattr(self, f"{mask_type}mask", mask)
+            setattr(self, f"{mask_type}sn_mask", sn_mask)
+            setattr(self, f"{mask_type}spec_mask", spec_mask)
+            setattr(self, f"{mask_type}wl_mask", wl_mask)
 
 
 class PosteriorStep(Model):

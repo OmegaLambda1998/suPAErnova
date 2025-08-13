@@ -38,8 +38,8 @@ class DispersionPlotter(Plotter):
         if savepath.exists() and not force:
             return
 
-        _wl, _amplitude, _sigma, sn_mask, _spec_mask, _wl_mask = SpectraPlotter.prep(
-            data, config
+        _wl, _amplitude, _sigma, mask, sn_mask, _spec_mask, _wl_mask = (
+            SpectraPlotter.prep(data, config)
         )
 
         sn_mask = sn_mask[:, 0, 0]
@@ -98,7 +98,7 @@ class DispersionPlotter(Plotter):
             print("RMS: ", w_rms)
             print("NMAD: ", w_mad)
 
-            fig, ax = Plotter.errorbar(
+            fig, ax, _ebar = Plotter.errorbar(
                 x,
                 y,
                 yerr=yerr,
@@ -215,7 +215,7 @@ class DispersionPlotter(Plotter):
             yerr = weighted_stds[mask]
             fig, ax = _plot(x, y, yerr, fig, ax, "green", "s", 1, "Legacy Final")
 
-        fig, ax = Plotter.axhline(0, fig=fig, ax=ax, color="black")
+        fig, ax, _hline = Plotter.axhline(0, fig=fig, ax=ax, color="black")
         ax.set_ylim(-0.75, 0.75)
         # ax.legend()
         fig = Plotter.save(fig, savepath)

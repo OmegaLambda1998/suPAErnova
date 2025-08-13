@@ -1,6 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import Any, Literal, ClassVar
+from typing import Any, Literal, ClassVar, Annotated
 from pathlib import Path
 import importlib
 from collections.abc import Callable
@@ -191,7 +191,8 @@ class PosteriorConfig(BackendConfig):
     # --- Optional ---
     analysis: PosteriorStepAnalysis | None = None
     data: str | int = 0
-    kfold: int = 0
+    kfold: int | None = None
+    validation_frac: Annotated[float, Field(ge=0, le=1)]
     pae: str | int = 0
     nflow: str | int = 0
     debug: bool = False
@@ -243,6 +244,66 @@ class PosteriorConfig(BackendConfig):
     bias_end: float = 1.0
     bias_mean: float = 0.0
     bias_std: float = 1.0
+
+    min_redshift: float | Literal["inf", "-inf"] | None = None
+    max_redshift: float | Literal["inf", "-inf"] | None = None
+    min_train_redshift: float | Literal["inf", "-inf"] | None = None
+    max_train_redshift: float | Literal["inf", "-inf"] | None = None
+    min_test_redshift: float | Literal["inf", "-inf"] | None = None
+    max_test_redshift: float | Literal["inf", "-inf"] | None = None
+    min_val_redshift: float | Literal["inf", "-inf"] | None = None
+    max_val_redshift: float | Literal["inf", "-inf"] | None = None
+    min_phase: float | Literal["inf", "-inf"] | None = None
+    max_phase: float | Literal["inf", "-inf"] | None = None
+    min_train_phase: float | Literal["inf", "-inf"] | None = None
+    max_train_phase: float | Literal["inf", "-inf"] | None = None
+    min_test_phase: float | Literal["inf", "-inf"] | None = None
+    max_test_phase: float | Literal["inf", "-inf"] | None = None
+    min_val_phase: float | Literal["inf", "-inf"] | None = None
+    max_val_phase: float | Literal["inf", "-inf"] | None = None
+    min_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_train_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_train_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_test_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_test_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_val_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_val_wavelength: float | Literal["inf", "-inf"] | None = None
+
+    # === Model Validators ===
+    # --- Before ---
+    @classmethod
+    @model_validator(mode="before")
+    def _validate_bounds(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for var in ["redshift", "phase", "wavelength"]:
+                min_bound = data.get(f"min_{var}")
+                if min_bound == "inf":
+                    min_bound = np.inf
+                elif min_bound == "-inf":
+                    min_bound = -np.inf
+                max_bound = data.get(f"max_{var}")
+                if max_bound == "inf":
+                    max_bound = np.inf
+                elif max_bound == "-inf":
+                    max_bound = -np.inf
+                if (
+                    (min_bound is not None)
+                    and (max_bound is not None)
+                    and (max_bound <= min_bound)
+                ):
+                    err = f"`max_{var}`: {max_bound} is not strictly greater than `min_{var}`: {min_bound}"
+                    cls._raise(err)
+                data[f"min_{var}"] = min_bound
+                data[f"max_{var}"] = max_bound
+        return data
+
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
 
 
 class PosteriorStepConfig(ModelConfig):

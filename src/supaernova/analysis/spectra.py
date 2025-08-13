@@ -26,6 +26,7 @@ class SpectraPlot(AbstractPlot):
 
 
 class ResidualPlot(SpectraPlot):
+    base: str
     base_wl: np.ndarray | None = None
     base_amp: np.ndarray | None = None
     base_sigma: np.ndarray | None = None

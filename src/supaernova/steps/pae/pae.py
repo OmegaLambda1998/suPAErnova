@@ -32,8 +32,8 @@ class PAE(Step):
         super().__init__(config)
 
         # === Previous Step Variables ===
-        self.data_step: Data
-        self.kfold = self.options.kfold
+        self.kfold: int = self.options.kfold
+        self.colourlaw: npt.NDArray[np.float64] | None
 
         self.data: DataStepResult
         self.mask: npt.NDArray[bool]
@@ -80,56 +80,32 @@ class PAE(Step):
         self.dropout: float
         self.save_best: bool
 
-        self.min_redshift: float = self.options.min_redshift
-        self.max_redshift: float = self.options.max_redshift
-        self.min_train_redshift: float = (
-            self.options.min_train_redshift or self.min_redshift
-        )
-        self.max_train_redshift: float = (
-            self.options.max_train_redshift or self.max_redshift
-        )
-        self.min_test_redshift: float = (
-            self.options.min_test_redshift or self.min_redshift
-        )
-        self.max_test_redshift: float = (
-            self.options.max_test_redshift or self.max_redshift
-        )
-        self.min_val_redshift: float = (
-            self.options.min_val_redshift or self.min_redshift
-        )
-        self.max_val_redshift: float = (
-            self.options.max_val_redshift or self.max_redshift
-        )
+        self.min_redshift: float
+        self.max_redshift: float
+        self.min_train_redshift: float
+        self.max_train_redshift: float
+        self.min_test_redshift: float
+        self.max_test_redshift: float
+        self.min_val_redshift: float
+        self.max_val_redshift: float
 
-        self.min_phase: float = self.options.min_phase
-        self.max_phase: float = self.options.max_phase
-        self.min_train_phase: float = self.options.min_train_phase or self.min_phase
-        self.max_train_phase: float = self.options.max_train_phase or self.max_phase
-        self.min_test_phase: float = self.options.min_test_phase or self.min_phase
-        self.max_test_phase: float = self.options.max_test_phase or self.max_phase
-        self.min_val_phase: float = self.options.min_val_phase or self.min_phase
-        self.max_val_phase: float = self.options.max_val_phase or self.max_phase
+        self.min_phase: float
+        self.max_phase: float
+        self.min_train_phase: float
+        self.max_train_phase: float
+        self.min_test_phase: float
+        self.max_test_phase: float
+        self.min_val_phase: float
+        self.max_val_phase: float
 
-        self.min_wavelength: float = self.options.min_wavelength
-        self.max_wavelength: float = self.options.max_wavelength
-        self.min_train_wavelength: float = (
-            self.options.min_train_wavelength or self.min_wavelength
-        )
-        self.max_train_wavelength: float = (
-            self.options.max_train_wavelength or self.max_wavelength
-        )
-        self.min_test_wavelength: float = (
-            self.options.min_test_wavelength or self.min_wavelength
-        )
-        self.max_test_wavelength: float = (
-            self.options.max_test_wavelength or self.max_wavelength
-        )
-        self.min_val_wavelength: float = (
-            self.options.min_val_wavelength or self.min_wavelength
-        )
-        self.max_val_wavelength: float = (
-            self.options.max_val_wavelength or self.max_wavelength
-        )
+        self.min_wavelength: float
+        self.max_wavelength: float
+        self.min_train_wavelength: float
+        self.max_train_wavelength: float
+        self.min_test_wavelength: float
+        self.max_test_wavelength: float
+        self.min_val_wavelength: float
+        self.max_val_wavelength: float
 
         self.phase_offset_scale: float
         self.amplitude_offset_scale: float
@@ -152,7 +128,7 @@ class PAE(Step):
         self.wl_dim: int
         self.phase_dim: int = 1
 
-        # PAEStages
+        # PAE Stages
         self.stage_delta_av: PAEStage
         self.stage_zs: list[PAEStage]
         self.stage_delta_m: PAEStage
@@ -168,16 +144,16 @@ class PAE(Step):
         self.analysis: PAEStepAnalysis = self.options.analysis or PAEStepAnalysis()
 
     @override
-    def _setup(self, *, data: "Data") -> None:
+    def _setup(self, *, data_step: "Data") -> None:
         super()._setup()
         # === Previous Step Variables ===
-        self.data_step = data
-        self.data = data.data
-        self.train_data = data.train_data[self.kfold % len(data.train_data)]
-        self.test_data = data.test_data[self.kfold % len(data.test_data)]
+        self.data = data_step.data
+        self.colourlaw = data_step.colourlaw
+        self.train_data = data_step.train_data[self.kfold % len(data_step.train_data)]
+        self.test_data = data_step.test_data[self.kfold % len(data_step.test_data)]
         self.val_data = self.test_data
         if self.validation_frac > 0:
-            ind_split = int(self.data_step.sn_dim * self.validation_frac)
+            ind_split = int(data_step.sn_dim * self.validation_frac)
             self.val_data = DataStepResult.model_validate({
                 k: v[-ind_split:] for k, v in self.train_data.model_dump().items()
             })
@@ -185,20 +161,56 @@ class PAE(Step):
                 k: v[:-ind_split] for k, v in self.train_data.model_dump().items()
             })
 
+        # --- Bounds ---
+        self.min_redshift = self.options.min_redshift or data_step.min_redshift
+        self.max_redshift = self.options.max_redshift or data_step.max_redshift
+        self.min_train_redshift = self.options.min_train_redshift or self.min_redshift
+        self.max_train_redshift = self.options.max_train_redshift or self.max_redshift
+        self.min_test_redshift = self.options.min_test_redshift or self.min_redshift
+        self.max_test_redshift = self.options.max_test_redshift or self.max_redshift
+        self.min_val_redshift = self.options.min_val_redshift or self.min_redshift
+        self.max_val_redshift = self.options.max_val_redshift or self.max_redshift
+
+        self.min_phase = self.options.min_phase or data_step.min_phase
+        self.max_phase = self.options.max_phase or data_step.max_phase
+        self.min_train_phase = self.options.min_train_phase or self.min_phase
+        self.max_train_phase = self.options.max_train_phase or self.max_phase
+        self.min_test_phase = self.options.min_test_phase or self.min_phase
+        self.max_test_phase = self.options.max_test_phase or self.max_phase
+        self.min_val_phase = self.options.min_val_phase or self.min_phase
+        self.max_val_phase = self.options.max_val_phase or self.max_phase
+
+        self.min_wavelength = self.options.min_wavelength or data_step.min_wavelength
+        self.max_wavelength = self.options.max_wavelength or data_step.max_wavelength
+        self.min_train_wavelength = (
+            self.options.min_train_wavelength or self.min_wavelength
+        )
+        self.max_train_wavelength = (
+            self.options.max_train_wavelength or self.max_wavelength
+        )
+        self.min_test_wavelength = (
+            self.options.min_test_wavelength or self.min_wavelength
+        )
+        self.max_test_wavelength = (
+            self.options.max_test_wavelength or self.max_wavelength
+        )
+        self.min_val_wavelength = self.options.min_val_wavelength or self.min_wavelength
+        self.max_val_wavelength = self.options.max_val_wavelength or self.max_wavelength
+
         self.setup_data_masks()
 
         # === Config Variables ===
         # --- Required ---
         n_batches = self.options.n_batches
         self.batch_size = max(
-            int(self.data_step.train_frac * self.data_step.sn_dim / n_batches), 1
+            int(data_step.train_frac * data_step.sn_dim / n_batches), 1
         )
 
         # === Setup Variables ===
         # Data Dimensions
-        self.sn_dim = self.data_step.sn_dim
-        self.spec_dim = self.data_step.spec_dim
-        self.wl_dim = self.data_step.wl_dim
+        self.sn_dim = data_step.sn_dim
+        self.spec_dim = data_step.spec_dim
+        self.wl_dim = data_step.wl_dim
 
         # PAEStages
         stage_data = {
@@ -490,7 +502,7 @@ class PAE(Step):
                         o.savepath.mkdir(parents=True, exist_ok=True)
                         if o.plot_kwargs is None:
                             o.plot_kwargs = {
-                                "label": f"{self.name}_{dt}{stage.name} ({results.loss:.2E}, {results.pred_loss:.2E})",
+                                "label": f"{dt}{self.name}_{stage.name} ({results.loss:.2E}, {results.pred_loss:.2E})",
                             }
 
                         input_mask = results.input_mask
@@ -542,7 +554,7 @@ class PAE(Step):
                             )
                         o.savepath.mkdir(parents=True, exist_ok=True)
                         if o.plot_kwargs is None:
-                            o.plot_kwargs = {"title": f"{self.name}_{dt}{stage.name}"}
+                            o.plot_kwargs = {"title": f"{dt}{self.name}{stage.name}"}
                         chains = results.latents[:, : stage.stage]
 
                         DistributionPlotter.plot_corner(
@@ -570,7 +582,7 @@ class PAE(Step):
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {}
                     o.plot_kwargs["label"] = (
-                        f"{self.name}_{dt}{self.run_stages[0].name} ({results.loss:.2E}, {results.pred_loss:.2E})",
+                        f"{dt}{self.name}{self.run_stages[0].name} ({results.loss:.2E}, {results.pred_loss:.2E})",
                     )
                     savepath = (o.savepath or Path()) / f"{o.name}.{o.ext}"
                     if not savepath.exists():
@@ -633,7 +645,7 @@ class PAE(Step):
                             data = getattr(self, f"{dt}data").model_copy(deep=True)
                             data.amplitude = results.output_amp
                             o.plot_kwargs["label"] = (
-                                f"{self.name}_{dt}{stage.name} ({results.loss:.2E}, {results.pred_loss:.2E})"
+                                f"{dt}{self.name}{stage.name} ({results.loss:.2E}, {results.pred_loss:.2E})"
                             )
                             o.plot_base = False
 
@@ -669,7 +681,7 @@ class PAE(Step):
                         o.savepath = self.paths.plots / dt[:-1] / str(self.model.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     if o.plot_kwargs is None:
-                        o.plot_kwargs = {"title": f"{self.name}_{dt[:-1]}"}
+                        o.plot_kwargs = {"title": f"{dt}{self.name}"}
 
                     chains = {
                         stage.name: self.results[dt[:-1]][str(stage.stage)].latents

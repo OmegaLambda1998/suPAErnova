@@ -1,11 +1,11 @@
 # Copyright 2025 Patrick Armstrong
-from typing import ClassVar, Annotated
+from typing import Any, Literal, ClassVar, Annotated
 import importlib
 from collections.abc import Callable
 
 import numpy as np
 from numpy import typing as npt
-from pydantic import Field, PositiveInt, PositiveFloat
+from pydantic import Field, PositiveInt, PositiveFloat, model_validator
 
 from supaernova.configs.steps import StepResult, StepAnalysis
 from supaernova.configs.steps.pae import PAEStepConfig
@@ -22,10 +22,10 @@ class NFlowStepResult(StepResult):
     ind: "npt.NDArray[np.int32]"
     sn_name: "npt.NDArray[np.str_]"
     spectra_id: "npt.NDArray[np.str_]"
-    latents: "npt.NDArray[np.float32]"
+    z_latents: "npt.NDArray[np.float32]"
+    u_latents: "npt.NDArray[np.float32]"
+    u_to_z_latents: "npt.NDArray[np.float32]"
     log_prob: "npt.NDArray[np.float32]"
-    z_to_u: "npt.NDArray[np.float32]"
-    u_to_z: "npt.NDArray[np.float32]"
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---
@@ -70,20 +70,80 @@ class NFlowConfig(BackendConfig):
     # --- Optional ---
     analysis: NFlowStepAnalysis | None = None
     data: str | int = 0
-    kfold: int = 0
+    kfold: int | None = None
     pae: str | int = 0
     debug: bool = False
     profile: bool = False
     save_best: bool = False
-    patience: PositiveFloat = 0.02
+    patience: PositiveFloat = 0.05
 
-    lr: PositiveFloat = 0.00001
+    lr: PositiveFloat = 0.001
     lr_decay_steps: PositiveFloat = 300
     lr_decay_rate: PositiveFloat = 0.95
     lr_weight_decay_rate: PositiveFloat = 0.0001
 
-    epochs: PositiveInt = 5000
+    epochs: PositiveInt = 500
     batch_normalisation: bool = False
+
+    min_redshift: float | Literal["inf", "-inf"] | None = None
+    max_redshift: float | Literal["inf", "-inf"] | None = None
+    min_train_redshift: float | Literal["inf", "-inf"] | None = None
+    max_train_redshift: float | Literal["inf", "-inf"] | None = None
+    min_test_redshift: float | Literal["inf", "-inf"] | None = None
+    max_test_redshift: float | Literal["inf", "-inf"] | None = None
+    min_val_redshift: float | Literal["inf", "-inf"] | None = None
+    max_val_redshift: float | Literal["inf", "-inf"] | None = None
+    min_phase: float | Literal["inf", "-inf"] | None = None
+    max_phase: float | Literal["inf", "-inf"] | None = None
+    min_train_phase: float | Literal["inf", "-inf"] | None = None
+    max_train_phase: float | Literal["inf", "-inf"] | None = None
+    min_test_phase: float | Literal["inf", "-inf"] | None = None
+    max_test_phase: float | Literal["inf", "-inf"] | None = None
+    min_val_phase: float | Literal["inf", "-inf"] | None = None
+    max_val_phase: float | Literal["inf", "-inf"] | None = None
+    min_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_train_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_train_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_test_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_test_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_val_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_val_wavelength: float | Literal["inf", "-inf"] | None = None
+
+    # === Model Validators ===
+    # --- Before ---
+    @classmethod
+    @model_validator(mode="before")
+    def _validate_bounds(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for var in ["redshift", "phase", "wavelength"]:
+                min_bound = data.get(f"min_{var}")
+                if min_bound == "inf":
+                    min_bound = np.inf
+                elif min_bound == "-inf":
+                    min_bound = -np.inf
+                max_bound = data.get(f"max_{var}")
+                if max_bound == "inf":
+                    max_bound = np.inf
+                elif max_bound == "-inf":
+                    max_bound = -np.inf
+                if (
+                    (min_bound is not None)
+                    and (max_bound is not None)
+                    and (max_bound <= min_bound)
+                ):
+                    err = f"`max_{var}`: {max_bound} is not strictly greater than `min_{var}`: {min_bound}"
+                    cls._raise(err)
+                data[f"min_{var}"] = min_bound
+                data[f"max_{var}"] = max_bound
+        return data
+
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
 
 
 class NFlowStepConfig(ModelConfig):

@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Self, Literal, ClassVar, Annotated
+from typing import Any, Self, Literal, ClassVar, Annotated
 from pathlib import Path
 import importlib
 import itertools
@@ -159,30 +159,30 @@ class PAEConfig(BackendConfig):
     dropout: Annotated[float, Field(ge=0, le=1)] = 0
     save_best: bool = False
 
-    min_redshift: float = -np.inf
-    max_redshift: float = np.inf
-    min_train_redshift: float | None = None
-    max_train_redshift: float | None = None
-    min_test_redshift: float | None = None
-    max_test_redshift: float | None = None
-    min_val_redshift: float | None = None
-    max_val_redshift: float | None = None
-    min_phase: float = -np.inf
-    max_phase: float = np.inf
-    min_train_phase: float | None = None
-    max_train_phase: float | None = None
-    min_test_phase: float | None = None
-    max_test_phase: float | None = None
-    min_val_phase: float | None = None
-    max_val_phase: float | None = None
-    min_wavelength: float = -np.inf
-    max_wavelength: float = np.inf
-    min_train_wavelength: float | None = None
-    max_train_wavelength: float | None = None
-    min_test_wavelength: float | None = None
-    max_test_wavelength: float | None = None
-    min_val_wavelength: float | None = None
-    max_val_wavelength: float | None = None
+    min_redshift: float | Literal["inf", "-inf"] | None = None
+    max_redshift: float | Literal["inf", "-inf"] | None = None
+    min_train_redshift: float | Literal["inf", "-inf"] | None = None
+    max_train_redshift: float | Literal["inf", "-inf"] | None = None
+    min_test_redshift: float | Literal["inf", "-inf"] | None = None
+    max_test_redshift: float | Literal["inf", "-inf"] | None = None
+    min_val_redshift: float | Literal["inf", "-inf"] | None = None
+    max_val_redshift: float | Literal["inf", "-inf"] | None = None
+    min_phase: float | Literal["inf", "-inf"] | None = None
+    max_phase: float | Literal["inf", "-inf"] | None = None
+    min_train_phase: float | Literal["inf", "-inf"] | None = None
+    max_train_phase: float | Literal["inf", "-inf"] | None = None
+    min_test_phase: float | Literal["inf", "-inf"] | None = None
+    max_test_phase: float | Literal["inf", "-inf"] | None = None
+    min_val_phase: float | Literal["inf", "-inf"] | None = None
+    max_val_phase: float | Literal["inf", "-inf"] | None = None
+    min_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_train_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_train_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_test_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_test_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_val_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_val_wavelength: float | Literal["inf", "-inf"] | None = None
 
     phase_offset_scale: float = -0.02
     amplitude_offset_scale: NonNegativeFloat = 1.0
@@ -195,50 +195,66 @@ class PAEConfig(BackendConfig):
     loss_decorrelate_all: bool = True
     loss_decorrelate_dust: bool = True
     loss_clip_delta: PositiveFloat = 25
-    delta_av_epochs: PositiveInt = 1000
+    delta_av_epochs: PositiveInt = 2000
     delta_av_patience: PositiveFloat | PositiveInt = 0.25
     delta_av_lr: PositiveFloat = 0.005
     delta_av_lr_decay_steps: PositiveInt = 300
     delta_av_lr_decay_rate: PositiveFloat = 0.95
     delta_av_lr_weight_decay_rate: PositiveFloat = 0.0001
-    zs_epochs: PositiveInt = 1000
+    zs_epochs: PositiveInt = 2000
     zs_patience: PositiveFloat | PositiveInt = 0.25
     zs_lr: PositiveFloat = 0.005
     zs_lr_decay_steps: PositiveInt = 300
     zs_lr_decay_rate: PositiveFloat = 0.95
     zs_lr_weight_decay_rate: PositiveFloat = 0.0001
     delta_m_epochs: PositiveInt = 5000
-    delta_m_patience: PositiveFloat | PositiveInt = 0.2
+    delta_m_patience: PositiveFloat | PositiveInt = 0.25
     delta_m_lr: PositiveFloat = 0.005
     delta_m_lr_decay_steps: PositiveInt = 300
     delta_m_lr_decay_rate: PositiveFloat = 0.95
     delta_m_lr_weight_decay_rate: PositiveFloat = 0.0001
     delta_p_epochs: PositiveInt = 5000
-    delta_p_patience: PositiveFloat | PositiveInt = 0.1
-    delta_p_lr: PositiveFloat = 0.005
+    delta_p_patience: PositiveFloat | PositiveInt = 0.25
+    delta_p_lr: PositiveFloat = 0.001
     delta_p_lr_decay_steps: PositiveInt = 300
     delta_p_lr_decay_rate: PositiveFloat = 0.95
     delta_p_lr_weight_decay_rate: PositiveFloat = 0.0001
     final_epochs: PositiveFloat = 5000
     final_patience: PositiveFloat | PositiveInt = 0.25
-    final_lr: PositiveFloat = 0.005
+    final_lr: PositiveFloat = 0.001
     final_lr_decay_steps: PositiveInt = 300
     final_lr_decay_rate: PositiveFloat = 0.95
     final_lr_weight_decay_rate: PositiveFloat = 0.0001
 
     # === Model Validators ===
     # --- Before ---
-    # --- After ---
-    @model_validator(mode="after")
-    def _validate_bounds(self) -> Self:
-        for var in ["phase", "redshift", "wavelength"]:
-            min_bound = getattr(self, f"min_{var}")
-            max_bound = getattr(self, f"max_{var}")
-            if max_bound <= min_bound:
-                err = f"`max_{var}`: {max_bound} is not strictly greater than `min_{var}`: {min_bound}"
-                self._raise(err)
-        return self
+    @classmethod
+    @model_validator(mode="before")
+    def _validate_bounds(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for var in ["redshift", "phase", "wavelength"]:
+                min_bound = data.get(f"min_{var}")
+                if min_bound == "inf":
+                    min_bound = np.inf
+                elif min_bound == "-inf":
+                    min_bound = -np.inf
+                max_bound = data.get(f"max_{var}")
+                if max_bound == "inf":
+                    max_bound = np.inf
+                elif max_bound == "-inf":
+                    max_bound = -np.inf
+                if (
+                    (min_bound is not None)
+                    and (max_bound is not None)
+                    and (max_bound <= min_bound)
+                ):
+                    err = f"`max_{var}`: {max_bound} is not strictly greater than `min_{var}`: {min_bound}"
+                    cls._raise(err)
+                data[f"min_{var}"] = min_bound
+                data[f"max_{var}"] = max_bound
+        return data
 
+    # --- After ---
     @model_validator(mode="after")
     def _validate_decode_dims(self) -> Self:
         if len(self.decode_dims) == 0:

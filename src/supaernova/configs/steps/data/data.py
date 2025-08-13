@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Self, ClassVar, Annotated
+from typing import Any, Self, Literal, ClassVar, Annotated
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +17,7 @@ from supaernova.analysis.spectra import SpectraPlot, ResidualPlot
 from supaernova.configs.steps.variants import VariantConfig
 
 
-class DataStepResult(StepResult):
+class SNPAEData(StepResult):
     # === Class Variables ===
     # === Class Methods ===
     # === Field Variables ===
@@ -57,6 +57,25 @@ class DataStepResult(StepResult):
     # === Static Methods ===
 
 
+class DataStepResult(StepResult):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
+    data: SNPAEData
+    train_data: list[SNPAEData]
+    test_data: list[SNPAEData]
+    # --- Optional ---
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
+
+
 class DataStepAnalysis(StepAnalysis):
     # === Class Variables ===
     # === Class Methods ===
@@ -85,22 +104,44 @@ class DataConfig(StepConfig):
     meta: Path
     idr: Path
     mask: Path
-    colourlaw: Path | None
     train_frac: Annotated[float, Field(ge=0, le=1)]
 
     # --- Optional ---
+    colourlaw: Path | None = None
     analysis: DataStepAnalysis | None = None
     cosmological_model: str = "WMAP7"
     salt_model: str | Path = "salt2"
-    min_phase: float = -np.inf
-    max_phase: float = np.inf
-    min_redshift: float = -np.inf
-    max_redshift: float = np.inf
-    min_wavelength: float = -np.inf
-    max_wavelength: float = np.inf
+    min_redshift: float | Literal["inf", "-inf"] = -np.inf
+    max_redshift: float | Literal["inf", "-inf"] = np.inf
+    min_phase: float | Literal["inf", "-inf"] = -np.inf
+    max_phase: float | Literal["inf", "-inf"] = np.inf
+    min_wavelength: float | Literal["inf", "-inf"] = -np.inf
+    max_wavelength: float | Literal["inf", "-inf"] = np.inf
 
     # === Model Validators ===
     # --- Before ---
+    @classmethod
+    @model_validator(mode="before")
+    def _validate_bounds(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for var in ["redshift", "phase", "wavelength"]:
+                min_bound = data.get(f"min_{var}")
+                if min_bound == "inf":
+                    min_bound = np.inf
+                elif min_bound == "-inf":
+                    min_bound = -np.inf
+                max_bound = data.get(f"max_{var}")
+                if max_bound == "inf":
+                    max_bound = np.inf
+                elif max_bound == "-inf":
+                    max_bound = -np.inf
+                if max_bound <= min_bound:
+                    err = f"`max_{var}`: {max_bound} is not strictly greater than `min_{var}`: {min_bound}"
+                    cls._raise(err)
+                data[f"min_{var}"] = min_bound
+                data[f"max_{var}"] = max_bound
+        return data
+
     # --- After ---
     @model_validator(mode="after")
     def _validate_paths(self) -> Self:
@@ -138,27 +179,6 @@ class DataConfig(StepConfig):
         salt_path = resolve_path(Path(self.salt_model), relative_path=self.paths.base)
         if salt_path.exists():
             self.salt_model = salt_path
-        return self
-
-    @model_validator(mode="after")
-    def _validate_max_phase(self) -> Self:
-        if self.max_phase <= self.min_phase:
-            err = f"`max_phase`: {self.max_phase} is not strictly greater than `min_phase`: {self.min_phase}"
-            self._raise(err)
-        return self
-
-    @model_validator(mode="after")
-    def _validate_max_redshift(self) -> Self:
-        if self.max_redshift <= self.min_redshift:
-            err = f"`max_redshift`: {self.max_redshift} is not strictly greater than `min_redshift`: {self.min_redshift}"
-            self._raise(err)
-        return self
-
-    @model_validator(mode="after")
-    def _validate_max_wavelength(self) -> Self:
-        if self.max_wavelength <= self.min_wavelength:
-            err = f"`max_wavelength`: {self.max_wavelength} is not strictly greater than `min_wavelength`: {self.min_wavelength}"
-            self._raise(err)
         return self
 
     # === Field Validators ===

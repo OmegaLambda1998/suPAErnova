@@ -35,7 +35,7 @@ class Step:
             __name__.split(".")[:-1]
         )  # Remove the last duplicated part
         for _, module, is_pkg in pkgutil.iter_modules([str(Path(__file__).parent)]):
-            if is_pkg and module not in {"nflow", "posterior"}:
+            if is_pkg and module != "posterior":
                 importlib.import_module(f"{base_name}.{module}")
 
     # === Instance Methods ===
@@ -61,97 +61,94 @@ class Step:
         self.seed: int = config.seed
         self.rng = np.random.default_rng(self.seed)
         self.set_seed()
-        self.is_setup: bool = False
-        self.is_loaded: bool = False
-        self.is_saved: bool = False
+
+        self.is_setup = False
+        self.is_completed = False
+        self.is_loaded = False
+        self.has_results = False
+        self.was_analysed = False
 
     @abstractmethod
-    def _setup(self, *_args: "Any", **_kwargs: "Any") -> None:
+    def _setup(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
     def setup(self, *args: "Any", **kwargs: "Any") -> None:
-        self.set_seed()
-        self.log.info(f"Setting up {self.name}")
-        self._setup(*args, **kwargs)
-        self.is_setup = True
-        self.log.info(f"Finished setting up {self.name}")
+        if not self.is_setup:
+            self.set_seed()
+            self.log.info(f"Setting up {self.name}")
+            self._setup(*args, **kwargs)
+            self.log.info(f"Finished setting up {self.name}")
 
     @abstractmethod
-    def _completed(self) -> bool:
+    def _completed(self, *args: "Any", **kwargs: "Any") -> bool:
         pass
 
     @callback
     def completed(self, *args: "Any", **kwargs: "Any") -> bool:
-        self.set_seed()
-        if not self.is_setup:
+        if not self.is_completed:
+            self.set_seed()
             self.setup(*args, **kwargs)
-        self.log.debug(f"Checking if {self.name} has completed")
-        completed = self._completed()
-        self.log.debug(f"{self.name} has {'' if completed else 'not '}completed")
-        self.is_completed = completed
-        return completed
+            self.log.debug(f"Checking if {self.name} has completed")
+            self.is_completed = self._completed(*args, **kwargs)
+            self.log.debug(
+                f"{self.name} has {'' if self.is_completed else 'not '}completed"
+            )
+        return self.is_completed
 
     @abstractmethod
-    def _load(self) -> None:
+    def _load(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
     def load(self, *args: "Any", **kwargs: "Any") -> None:
-        self.set_seed()
-        if not self.is_setup:
-            self.setup(*args, **kwargs)
-        if self.completed(*args, **kwargs):
-            self.log.info(f"Loading {self.name}")
-            self._load()
-            self.is_loaded = True
-            self.log.info(f"Finished loading {self.name}")
-        else:
-            self.run(*args, *kwargs)
+        if not self.is_loaded:
+            if self.completed(*args, **kwargs):
+                self.set_seed()
+                self.log.info(f"Loading {self.name}")
+                self._load(*args, **kwargs)
+                self.log.info(f"Finished loading {self.name}")
+            else:
+                self.set_seed()
+                self.run(*args, *kwargs)
 
     @abstractmethod
-    def _run(self) -> None:
+    def _run(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
     def run(self, *args: "Any", **kwargs: "Any") -> None:
-        self.set_seed()
-        if not self.is_setup:
-            self.setup(*args, **kwargs)
-        if self.force or not self.completed(*args, **kwargs):
+        if not self.is_loaded and (self.force or not self.completed(*args, **kwargs)):
+            self.set_seed()
             self.log.info(f"Running {self.name}")
-            self._run()
-            self.is_loaded = True
+            self._run(*args, **kwargs)
             self.log.info(f"Finished running {self.name}")
-        else:
-            self.load(*args, **kwargs)
 
     @abstractmethod
-    def _result(self) -> None:
+    def _result(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
     def result(self, *args: "Any", **kwargs: "Any") -> None:
-        self.set_seed()
-        if not self.is_loaded:
+        if not self.has_results:
+            self.set_seed()
             self.load(*args, **kwargs)
-        self.log.info(f"Saving {self.name} results")
-        self._result()
-        self.is_saved = True
-        self.log.info(f"Finished saving {self.name} results")
+            self.log.info(f"Gathering {self.name} results")
+            self._result(*args, **kwargs)
+            self.log.info(f"Finished gathering {self.name} results")
 
     @abstractmethod
-    def _analyse(self) -> None:
+    def _analyse(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
     def analyse(self, *args: "Any", **kwargs: "Any") -> None:
-        self.set_seed()
-        if not self.is_saved:
+        if not self.was_analysed:
+            self.set_seed()
             self.result(*args, **kwargs)
-        self.log.info(f"Analysing {self.name}")
-        self._analyse()
-        self.log.info(f"Finished analysing {self.name}")
+            self.log.info(f"Analysing {self.name}")
+            self._analyse(*args, **kwargs)
+            self.log.info(f"Finished analysing {self.name}")
 
     def set_seed(self, seed: int = 0) -> None:
         seed = self.seed + seed
