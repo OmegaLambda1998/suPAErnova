@@ -521,7 +521,7 @@ class PAE(Step):
                     for opts in self.analysis.plot_residual:
                         o = opts.model_copy(deep=True)
                         if o.name is None:
-                            o.name = "residual"
+                            o.name = "comparison"
                         self.log.debug(f"Plotting {o.name}")
                         if o.savepath is None:
                             o.savepath = (
@@ -533,12 +533,14 @@ class PAE(Step):
                         o.savepath.mkdir(parents=True, exist_ok=True)
                         if o.plot_kwargs is None:
                             o.plot_kwargs = {
-                                "label": f"{dt}{self.name}_{stage.name} ({results.loss:.2E}, {results.pred_loss:.2E})",
+                                "label": f"{dt}{self.name}_{stage.name}\n({results.loss:.2E})",
+                                "title": f"{dt}{self.name}_{stage.name} {o.name}",
                             }
 
+                        data = getattr(self, f"{dt}data").model_copy(deep=True)
                         wl, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask = (
                             SpectraPlotter.prep(
-                                getattr(self, f"{dt}data").model_copy(deep=True),
+                                data,
                                 o,
                                 mask=input_mask,
                                 sn_mask=input_sn_mask,
@@ -550,8 +552,10 @@ class PAE(Step):
                         o.base_amp = amplitude
                         o.base_sigma = sigma
                         o.base_mask = np.logical_not(mask)
-                        data = getattr(self, f"{dt}data").model_copy(deep=True)
+
                         data.amplitude = results.output_amp
+                        data.sigma *= 0
+
                         SpectraPlotter.plot_residual(
                             data,
                             o,
@@ -582,9 +586,10 @@ class PAE(Step):
                         if o.plot_kwargs is None:
                             o.plot_kwargs = {"title": f"{dt}{self.name}_{stage.name}"}
 
+                        data = getattr(self, f"{dt}data").model_copy(deep=True)
                         wl, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask = (
                             SpectraPlotter.prep(
-                                getattr(self, f"{dt}data").model_copy(deep=True),
+                                data,
                                 o,
                                 mask=input_mask,
                                 sn_mask=input_sn_mask,
@@ -626,7 +631,7 @@ class PAE(Step):
                 for opts in self.analysis.plot_residual:
                     o = opts.model_copy(deep=True)
                     if o.name is None:
-                        o.name = "residual"
+                        o.name = "comparison"
                     self.log.debug(f"Plotting {o.name}")
                     if o.savepath is None:
                         o.savepath = self.paths.plots / dt[:-1] / str(self.model.seed)
@@ -634,8 +639,9 @@ class PAE(Step):
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {}
                     o.plot_kwargs["label"] = (
-                        f"{dt}{self.name}_{self.run_stages[0].name} ({results.loss:.2E}, {results.pred_loss:.2E})",
+                        f"{dt}{self.name}_{self.run_stages[0].name}\n({results.loss:.2E})",
                     )
+                    o.plot_kwargs["title"] = f"{dt}{self.name} {o.name}"
                     savepath = (o.savepath or Path()) / f"{o.name}.{o.ext}"
                     if not savepath.exists():
                         input_mask = results.input_mask
@@ -643,9 +649,10 @@ class PAE(Step):
                         input_spec_mask = results.input_spec_mask
                         input_wl_mask = results.input_wl_mask
 
+                        data = getattr(self, f"{dt}data").model_copy(deep=True)
                         wl, amplitude, sigma, mask, _sn_mask, _spec_mask, _wl_mask = (
                             SpectraPlotter.prep(
-                                getattr(self, f"{dt}data").model_copy(deep=True),
+                                data,
                                 o,
                                 mask=input_mask,
                                 sn_mask=input_sn_mask,
@@ -657,8 +664,10 @@ class PAE(Step):
                         o.base_amp = amplitude
                         o.base_sigma = sigma
                         o.base_mask = np.logical_not(mask)
-                        data = getattr(self, f"{dt}data").model_copy(deep=True)
+
                         data.amplitude = results.output_amp
+                        data.sigma *= 0
+
                         fig, ax = SpectraPlotter.plot_residual(
                             data,
                             o,
@@ -674,6 +683,8 @@ class PAE(Step):
                             input_sn_mask = results.input_sn_mask
                             input_spec_mask = results.input_spec_mask
                             input_wl_mask = results.input_wl_mask
+                            data = getattr(self, f"{dt}data").model_copy(deep=True)
+
                             (
                                 wl,
                                 amplitude,
@@ -683,7 +694,7 @@ class PAE(Step):
                                 _spec_mask,
                                 _wl_mask,
                             ) = SpectraPlotter.prep(
-                                getattr(self, f"{dt}data").model_copy(deep=True),
+                                data,
                                 o,
                                 mask=input_mask,
                                 sn_mask=input_sn_mask,
@@ -694,10 +705,12 @@ class PAE(Step):
                             o.base_amp = amplitude
                             o.base_sigma = sigma
                             o.base_mask = np.logical_not(mask)
-                            data = getattr(self, f"{dt}data").model_copy(deep=True)
+
                             data.amplitude = results.output_amp
+                            data.sigma *= 0
+
                             o.plot_kwargs["label"] = (
-                                f"{dt}{self.name}_{stage.name} ({results.loss:.2E}, {results.pred_loss:.2E})"
+                                f"{dt}{self.name}_{stage.name}\n({results.loss:.2E})"
                             )
                             o.plot_base = False
 
@@ -929,9 +942,10 @@ class PAEStep(Model):
                     if variant.analysis.plot_residual is not None:
                         for opts in variant.analysis.plot_residual:
                             o = opts.model_copy(deep=True)
-                            o.name = f"{stage.name} {dt[:-1]} residual"
+                            o.name = f"{stage.name} {dt[:-1]} comparison"
                             o.plot_kwargs = {
-                                "label": f"{variant.name} ({results.loss:.2E}, {results.pred_loss:.2E})",
+                                "label": f"{variant.name}\n({results.loss:.2E})",
+                                "title": f"{variant.name} {o.name}",
                             }
 
                             name = f"{dt[:-1]}/{stage.stage}/{o.name}.{o.ext}"
@@ -942,6 +956,7 @@ class PAEStep(Model):
                             ax = self.plots[name]["ax"]
                             o.plot_base = self.plots[name]["base"]
 
+                            data = getattr(variant, f"{dt}data").model_copy(deep=True)
                             (
                                 wl,
                                 amplitude,
@@ -951,7 +966,7 @@ class PAEStep(Model):
                                 _spec_mask,
                                 _wl_mask,
                             ) = SpectraPlotter.prep(
-                                getattr(variant, f"{dt}data").model_copy(deep=True),
+                                data,
                                 o,
                                 mask=input_mask,
                                 sn_mask=input_sn_mask,
@@ -962,8 +977,10 @@ class PAEStep(Model):
                             o.base_amp = amplitude
                             o.base_sigma = sigma
                             o.base_mask = np.logical_not(mask)
-                            data = getattr(variant, f"{dt}data").model_copy(deep=True)
+
                             data.amplitude = results.output_amp
+                            data.sigma *= 0
+
                             fig, ax = SpectraPlotter.plot_residual(
                                 data,
                                 o,

@@ -111,6 +111,7 @@ class DataConfig(StepConfig):
     # === Class Variables ===
     # === Class Methods ===
     # === Field Variables ===
+    # --- Previous Stages ---
     # --- Required ---
     data_dir: Path
     meta: Path

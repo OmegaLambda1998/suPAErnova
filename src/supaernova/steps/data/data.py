@@ -283,7 +283,7 @@ class Data(Step):
                 self.analysis.plot_residual = [self.analysis.plot_residual]
             for opts in self.analysis.plot_residual:
                 if opts.name is None:
-                    opts.name = "residual"
+                    opts.name = "comparison"
                 self.log.debug(f"Plotting {opts.name}")
                 if opts.savepath is None:
                     opts.savepath = self.paths.plots / str(self.seed)

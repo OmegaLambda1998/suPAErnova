@@ -189,7 +189,7 @@ class SpectraPlotter(Plotter):
         cbar.set_label("Normalised Phase")
         ax.set_xlabel("Wavelength [Å]")
         ax.set_ylabel("Amplitude")
-        ax.legend()
+        ax.legend(bbox_to_anchor=(1.0, 1.0))
         ax.set_title((config.plot_kwargs or {}).get("title", config.name.capitalize()))
         if save:
             fig = Plotter.save(fig, savepath)
@@ -284,16 +284,9 @@ class SpectraPlotter(Plotter):
                 **kwargs,
             )
 
-        y_min, y_max = ax.get_ylim()
-        y_min = max(y_mean.min() * 0.9, y_min)
-        y_max = min(y_mean.max() * 1.1, y_max)
-        y_diff = max(abs(y_mean.min() - y_min), abs(y_mean.max() - y_max))
-        y_min = y_mean.min() - y_diff
-        y_max = y_mean.max() + y_diff
-        ax.set_ylim(y_min, y_max)
         ax.set_xlabel("Wavelength [Å]")
-        ax.set_ylabel("Mean Amplitude")
-        ax.legend()
+        ax.set_ylabel("Amplitude")
+        ax.legend(bbox_to_anchor=(1.0, 1.0))
         ax.set_title((config.plot_kwargs or {}).get("title", config.name.capitalize()))
         if save:
             fig = Plotter.save(fig, savepath)
@@ -349,25 +342,31 @@ class SpectraPlotter(Plotter):
         if fig is None:
             fig = Plotter.figure(fig)
         if ax is None:
-            spectra_ax = Plotter.axis(fig, 211)
-            residual_ax = Plotter.axis(fig, 212, sharex=spectra_ax)
+            spectra_ax = Plotter.axis(fig, 311)
+            residual_ax = Plotter.axis(fig, 312, sharex=spectra_ax)
+            pull_ax = Plotter.axis(fig, 313, sharex=residual_ax)
             spectra_ax.tick_params("x", labelbottom=False)
+            residual_ax.tick_params("x", labelbottom=False)
             fig.subplots_adjust(wspace=0, hspace=0)
-            ax = [spectra_ax, residual_ax]
+            ax = [spectra_ax, residual_ax, pull_ax]
         else:
-            spectra_ax, residual_ax = ax
+            spectra_ax, residual_ax, pull_ax = ax
 
         order = np.argsort(x)
         x = x[order]
-        y_mean = y.mean(axis=(0, 1))[order]
-        y_std = y.std(axis=(0, 1))[order]
-        yerr_mean = yerr.mean(axis=(0, 1))[order]
+        y = y[..., order]
+        yerr = yerr[..., order]
+        y_mean = y.mean(axis=(0, 1))
+        y_std = y.std(axis=(0, 1))
+        yerr_mean = yerr.mean(axis=(0, 1))
 
         order_prime = np.argsort(x_prime)
         x_prime = x_prime[order_prime]
-        y_prime_mean = y_prime.mean(axis=(0, 1))[order_prime]
-        y_prime_std = y_prime.std(axis=(0, 1))[order_prime]
-        yerr_prime_mean = yerr_prime.mean(axis=(0, 1))[order_prime]
+        y_prime = y_prime[..., order_prime]
+        yerr_prime = yerr_prime[..., order_prime]
+        y_prime_mean = y_prime.mean(axis=(0, 1))
+        y_prime_std = y_prime.std(axis=(0, 1))
+        yerr_prime_mean = yerr_prime.mean(axis=(0, 1))
 
         if config.plot_base:
             fig, spectra_ax, _ebar = Plotter.errorbar(
@@ -442,21 +441,14 @@ class SpectraPlotter(Plotter):
                 **kwargs,
             )
 
-        y_min, y_max = spectra_ax.get_ylim()
-        y_min = max(y_mean.min() * 0.9, y_min)
-        y_max = min(y_mean.max() * 1.1, y_max)
-        y_diff = max(abs(y_mean.min() - y_min), abs(y_mean.max() - y_max))
-        y_min = y_mean.min() - y_diff
-        y_max = y_mean.max() + y_diff
-        spectra_ax.set_ylim(y_min, y_max)
-        spectra_ax.set_ylabel("Mean Amplitude")
+        spectra_ax.set_ylabel("Amplitude")
 
         fig, residual_ax, _hline = Plotter.axhline(
             0, color="black", fig=fig, ax=residual_ax
         )
 
         y_residual = y - y_prime
-        y_residual_mean = y_residual.mean(axis=(0, 1))[order_prime]
+        y_residual_mean = y_residual.mean(axis=(0, 1))
 
         fig, residual_ax, ebar = Plotter.errorbar(
             x_prime,
@@ -464,27 +456,36 @@ class SpectraPlotter(Plotter):
             *args,
             fig=fig,
             ax=residual_ax,
-            # yerr=yerr_residual_mean,
             linestyle="-",
             **kwargs,
         )
 
-        y_min, y_max = residual_ax.get_ylim()
-        y_min = min(y_residual_mean.min() * 0.9, y_min)
-        y_max = max(y_residual_mean.max() * 1.1, y_max)
-        y_diff = max(
-            abs(y_residual_mean.min() - y_min), abs(y_residual_mean.max() - y_max)
+        residual_ax.set_ylabel("Residual")
+
+        fig, pull_ax, _hline = Plotter.axhline(0, color="black", fig=fig, ax=pull_ax)
+
+        y_pull = np.abs(y - y_prime) / np.sqrt(yerr * yerr + yerr_prime * yerr_prime)
+        y_pull_mean = y_pull.mean(axis=(0, 1))
+
+        fig, pull_ax, ebar = Plotter.errorbar(
+            x_prime,
+            y_pull_mean,
+            *args,
+            fig=fig,
+            ax=pull_ax,
+            linestyle="-",
+            **kwargs,
         )
-        y_min = y_residual_mean.min() - y_diff
-        y_max = y_residual_mean.max() + y_diff
-        residual_ax.set_ylim(y_min, y_max)
-        residual_ax.set_xlabel("Wavelength [Å]")
-        residual_ax.set_ylabel("Mean Residual")
+
+        pull_ax.set_xlabel("Wavelength [Å]")
+        pull_ax.set_ylabel("Abs Pull")
 
         spectra_ax.set_title(
             (config.plot_kwargs or {}).get("title", config.name.capitalize())
         )
-        spectra_ax.legend()
+        spectra_ax.legend(bbox_to_anchor=(1.0, 1.0))
+
+        fig.align_ylabels(ax)
 
         if save:
             fig = Plotter.save(fig, savepath)

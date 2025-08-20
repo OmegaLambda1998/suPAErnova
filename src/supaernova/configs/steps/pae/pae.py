@@ -162,6 +162,8 @@ class PAEConfig(BackendConfig):
     # === Class Variables ===
     # === Class Methods ===
     # === Field Variables ===
+    # --- Previous Stages ---
+    data: str | int = 0
     # --- Required ---
     physical_latents: bool
     seperate_latent_training: bool
@@ -171,10 +173,9 @@ class PAEConfig(BackendConfig):
 
     # --- Optional ---
     analysis: PAEStepAnalysis | None = None
-    data: str | int = 0
-    kfold: int = 0
     debug: bool = False
     profile: bool = False
+    kfold: int = 0
     architecture: Literal["dense", "convolutional"] = "dense"
     encode_dims: tuple[PositiveInt, ...] = (256, 128)
     decode_dims: tuple[PositiveInt, ...] = ()

@@ -280,7 +280,7 @@ class Plotter:
 
     @staticmethod
     def save(fig: "Figure", savepath: "Path", *, clear: bool = True) -> "Figure":
-        fig.savefig(savepath, transparent=True)
+        fig.savefig(savepath, transparent=True, bbox_inches="tight")
         if clear:
             fig, _ = Plotter.clear(fig=fig)
         return fig
