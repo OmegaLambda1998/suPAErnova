@@ -14,18 +14,29 @@ from supaernova.configs.steps.models import ModelConfig, BackendConfig
 from supaernova.analysis.distribution import DistributionPlot
 
 
+class NFlowModelResult(StepResult):
+    ind: "npt.NDArray[int]"
+    sn_name: "npt.NDArray[str]"
+    spectra_id: "npt.NDArray[str]"
+    z_latents: "npt.NDArray[float]"
+    u_latents: "npt.NDArray[float]"
+    u_to_z_latents: "npt.NDArray[float]"
+    log_prob: "npt.NDArray[float]"
+
+
 class NFlowStepResult(StepResult):
     # === Class Variables ===
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    ind: "npt.NDArray[np.int32]"
-    sn_name: "npt.NDArray[np.str_]"
-    spectra_id: "npt.NDArray[np.str_]"
-    z_latents: "npt.NDArray[np.float32]"
-    u_latents: "npt.NDArray[np.float32]"
-    u_to_z_latents: "npt.NDArray[np.float32]"
-    log_prob: "npt.NDArray[np.float32]"
+    models: dict[str, NFlowModelResult]
+    model: Any
+    min_redshift: float
+    max_redshift: float
+    min_phase: float
+    max_phase: float
+    min_wavelength: float
+    max_wavelength: float
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---
@@ -70,7 +81,7 @@ class NFlowConfig(BackendConfig):
     # --- Optional ---
     analysis: NFlowStepAnalysis | None = None
     data: str | int = 0
-    kfold: int | None = None
+    kfold: int = 0
     pae: str | int = 0
     debug: bool = False
     profile: bool = False

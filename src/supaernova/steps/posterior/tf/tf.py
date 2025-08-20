@@ -25,10 +25,10 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from supaernova.steps.pae.tf import PAE, TFPAEModel
-    from supaernova.steps.nflow.tf import NFlow, TFNFlowModel
+    from supaernova.steps.pae.tf import TFPAEModel
+    from supaernova.steps.nflow.tf import TFNFlowModel
     from supaernova.steps.posterior import Posterior
-    from supaernova.configs.steps.data import DataStepResult
+    from supaernova.configs.steps.data import SNPAEData
     from supaernova.configs.steps.posterior import PosteriorMAPStage
     from supaernova.configs.steps.posterior.tf import TFPosteriorConfig
 
@@ -58,32 +58,27 @@ class TFPosteriorModel(ks.Model):
         self.debug: bool = self.options.debug
         self.profile: bool = self.options.profile
 
-        self.data: DataStepResult = getattr(config, f"{self.subset}_data")
+        self.data: SNPAEData = getattr(config, f"{self.subset}_data")
         self.data_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_mask")
         self.sn_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_sn_mask")
         self.spec_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_spec_mask")
         self.wl_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_wl_mask")
 
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
-        vars(self)["pae_step"]: PAE = config.pae_step
         vars(self)["pae"]: TFPAEModel = config.pae
         self.pae.trainable = False
         self.pae.encoder.trainable = False
         self.pae.decoder.trainable = False
 
         # Equivalent to `self.nflow = ...` but avoids tf / ks from tracking self.nflow
-        vars(self)["nflow_step"]: NFlow = config.nflow_step
         vars(self)["nflow"]: TFNFlowModel = config.nflow
         self.nflow.trainable = False
         self.nflow.flow.trainable = False
 
-        self.sn_dim = self.data.time.shape[0]
-        self.spec_dim = self.data.time.shape[1]
+        self.sn_dim, self.spec_dim, self.wl_dim = self.data.amplitude.shape
 
         # MAP Variables
-        vars(self)["map"]: PosteriorMap = PosteriorMap(
-            self, self.nflow, self.pae, self.data
-        )
+        vars(self)["map"]: PosteriorMap = PosteriorMap(self)
         self.tolerance = self.options.tolerance
         self.x_tolerance = self.options.x_tolerance
         self.f_relative_tolerance = self.options.f_relative_tolerance
@@ -97,13 +92,15 @@ class TFPosteriorModel(ks.Model):
         )
         self.log_path: str = f"{'best' if self.save_best else 'latest'}_logs/"
 
-        inds = np.squeeze(self.sn_mask.astype(np.bool_), axis=(1, 2))
         self.recon_error, _recon_error_edges, self.recon_error_centers = (
             self.pae.recon_error((
-                tf.convert_to_tensor(self.data.time[inds], dtype=tf.float32),
-                tf.convert_to_tensor(self.data.amplitude[inds], dtype=tf.float32),
-                tf.convert_to_tensor(self.data.sigma[inds], dtype=tf.float32),
-                tf.convert_to_tensor(self.data.mask[inds], dtype=tf.int32),
+                tf.convert_to_tensor(self.data.time, dtype=tf.float32),
+                tf.convert_to_tensor(self.data.amplitude, dtype=tf.float32),
+                tf.convert_to_tensor(self.data.sigma, dtype=tf.float32),
+                tf.convert_to_tensor(self.data_mask, dtype=tf.int32),
+                tf.convert_to_tensor(self.sn_mask, dtype=tf.int32),
+                tf.convert_to_tensor(self.spec_mask, dtype=tf.int32),
+                tf.convert_to_tensor(self.wl_mask, dtype=tf.int32),
             ))
         )
 
@@ -211,6 +208,8 @@ class TFPosteriorModel(ks.Model):
             else sn_mask
         )
 
+        posterior_mask = input_mask * input_sn_mask * input_spec_mask * input_wl_mask
+
         # Determine the prior probability early to avoid exploring non-physical parameter spaces.
         log_prior = self.map.prior(input_position)
 
@@ -280,21 +279,46 @@ class TFPosteriorModel(ks.Model):
         synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (input_sigma**2))
 
         # Set missing values to 1 for all times
-        synth_sigma *= tf.cast(input_mask, tf.float32)
-        synth_sigma += 1 - tf.cast(input_mask, tf.float32)
+        synth_sigma *= tf.cast(posterior_mask, tf.float32)
+        synth_sigma += 1 - tf.cast(posterior_mask, tf.float32)
 
         # Create likelihood distribution
         likelihood = tfd.Independent(
             tfd.MultivariateNormalDiag(
-                loc=synth_amp * tf.cast(input_mask, tf.float32), scale_diag=synth_sigma
+                loc=synth_amp * tf.cast(posterior_mask, tf.float32),
+                scale_diag=synth_sigma,
             ),
             reinterpreted_batch_ndims=0,
         )
 
         # Determine the log likelihood
-        is_kept = tf.cast(tf.reduce_min(input_mask, axis=-1), tf.float32)
+
+        # ~(~input_mask & input_wl_mask)
+        # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
+        valid_wl_mask = tf.cast(
+            tf.logical_not(
+                tf.logical_and(
+                    tf.logical_not(tf.cast(posterior_mask, tf.bool)),
+                    tf.cast(input_wl_mask, tf.bool),
+                )
+            ),
+            tf.int32,
+        )
+
+        # Determine which spectra to keep
+        # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+        mask_spec = tf.cast(
+            tf.reduce_min(valid_wl_mask, axis=-1, keepdims=True),
+            tf.int32,
+        )
+
+        # Determine which SNe to keep
+        # Will mask out any SN with *no* unmasked spectra
+        mask_sn = tf.reduce_max(mask_spec, axis=-2)
+
         log_likelihood_num = tf.reduce_sum(
-            likelihood.log_prob(input_amp * tf.cast(input_mask, tf.float32)) * is_kept,
+            likelihood.log_prob(input_amp * tf.cast(posterior_mask, tf.float32))
+            * tf.cast(mask_sn, tf.float32),
             axis=1,
         )
         log_likelihood_sum = tf.reduce_sum(
@@ -477,8 +501,6 @@ class TFPosteriorModel(ks.Model):
     @tf.function
     def vals_and_grads(self, position):
         input_position = self.map.get_position(position)
-        # tf.print(f"{input_position = }")
-        # tf.debugging.check_numerics(input_position, f"{input_position = }")
         log_prob = self(
             (input_position, self.data.time, self.data.amplitude, self.data.sigma),
             training=False,
@@ -487,12 +509,8 @@ class TFPosteriorModel(ks.Model):
             spec_mask=self.spec_mask,
             wl_mask=self.wl_mask,
         )
-        # tf.print(f"{log_prob = }")
-        # tf.debugging.check_numerics(log_prob, f"{log_prob = }")
         return self._loss(tf.zeros_like(log_prob), log_prob)
 
-    # TODO: tf.function temporarily disabled until [#50765](https://github.com/tensorflow/tensorflow/issues/50765) resolved
-    # @tf.function
     def lbfgs(self):
         return tfp.optimizer.lbfgs_minimize(
             lambda x: tfp.math.value_and_gradient(
@@ -510,7 +528,7 @@ class TFPosteriorModel(ks.Model):
 
     def train_map(
         self,
-        stage: "PosteriorMapStage",
+        stage: "PosteriorMAPStage",
         chain: int,
         chain_total: int,
         *,
@@ -572,19 +590,15 @@ class TFPosteriorModel(ks.Model):
         else:
             initial_delta_m = self.map.delta_m.original
             delta_m = self.map.delta_m.current
-        self.map.delta_m.initial.assign(
-            tf.where(
-                tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
-                initial_delta_m,
-                self.map.delta_m.initial,
-            )
+        self.map.delta_m.initial = tf.where(
+            tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
+            initial_delta_m,
+            self.map.delta_m.initial,
         )
-        self.map.delta_m.best.assign(
-            tf.where(
-                tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
-                delta_m,
-                self.map.delta_m.best,
-            )
+        self.map.delta_m.best = tf.where(
+            tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
+            delta_m,
+            self.map.delta_m.best,
         )
 
         if self.map.train_delta_p:
@@ -596,19 +610,15 @@ class TFPosteriorModel(ks.Model):
         else:
             initial_delta_p = self.map.delta_p.original
             delta_p = self.map.delta_p.current
-        self.map.delta_p.initial.assign(
-            tf.where(
-                tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
-                initial_delta_p,
-                self.map.delta_p.initial,
-            )
+        self.map.delta_p.initial = tf.where(
+            tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
+            initial_delta_p,
+            self.map.delta_p.initial,
         )
-        self.map.delta_p.best.assign(
-            tf.where(
-                tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
-                delta_p,
-                self.map.delta_p.best,
-            )
+        self.map.delta_p.best = tf.where(
+            tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
+            delta_p,
+            self.map.delta_p.best,
         )
 
         if self.map.train_bias:
@@ -620,19 +630,15 @@ class TFPosteriorModel(ks.Model):
         else:
             initial_bias = self.map.bias.original
             bias = self.map.bias.current
-        self.map.bias.initial.assign(
-            tf.where(
-                tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
-                bias,
-                self.map.bias.initial,
-            )
+        self.map.bias.initial = tf.where(
+            tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
+            bias,
+            self.map.bias.initial,
         )
-        self.map.bias.best.assign(
-            tf.where(
-                tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
-                bias,
-                self.map.bias.best,
-            )
+        self.map.bias.best = tf.where(
+            tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
+            bias,
+            self.map.bias.best,
         )
 
         if self.nflow.physical_latents:
@@ -644,46 +650,38 @@ class TFPosteriorModel(ks.Model):
         else:
             initial_u_delta_av = self.map.u_delta_av.original
             u_delta_av = self.map.u_delta_av.current
-        self.map.u_delta_av.initial.assign(
-            tf.where(
-                tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
-                initial_u_delta_av,
-                self.map.u_delta_av.initial,
-            )
+        self.map.u_delta_av.initial = tf.where(
+            tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
+            initial_u_delta_av,
+            self.map.u_delta_av.initial,
         )
-        self.map.u_delta_av.best.assign(
-            tf.where(
-                tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
-                u_delta_av,
-                self.map.u_delta_av.best,
-            )
+        self.map.u_delta_av.best = tf.where(
+            tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
+            u_delta_av,
+            self.map.u_delta_av.best,
         )
 
         initial_u_latents = self.map.position.current[:, ind:]
         u_latents = results.position[:, ind:]
         initial_position.append(initial_u_latents)
         current_position.append(u_latents)
-        self.map.u_latents.initial.assign(
-            tf.where(
-                tf.repeat(
-                    tf.expand_dims(improved, axis=-1),
-                    repeats=self.map.n_u_latents,
-                    axis=-1,
-                ),
-                initial_u_latents,
-                self.map.u_latents.initial,
-            )
+        self.map.u_latents.initial = tf.where(
+            tf.repeat(
+                tf.expand_dims(improved, axis=-1),
+                repeats=self.map.n_u_latents,
+                axis=-1,
+            ),
+            initial_u_latents,
+            self.map.u_latents.initial,
         )
-        self.map.u_latents.best.assign(
-            tf.where(
-                tf.repeat(
-                    tf.expand_dims(improved, axis=-1),
-                    repeats=self.map.n_u_latents,
-                    axis=-1,
-                ),
-                u_latents,
-                self.map.u_latents.best,
-            )
+        self.map.u_latents.best = tf.where(
+            tf.repeat(
+                tf.expand_dims(improved, axis=-1),
+                repeats=self.map.n_u_latents,
+                axis=-1,
+            ),
+            u_latents,
+            self.map.u_latents.best,
         )
 
         if self.nflow.physical_latents:
@@ -705,68 +703,56 @@ class TFPosteriorModel(ks.Model):
             initial_delta_av = self.map.delta_av.current
             delta_av = self.map.delta_av.current
 
-        self.map.z_latents.initial.assign(
-            tf.where(
-                tf.repeat(
-                    tf.expand_dims(improved, axis=-1),
-                    repeats=self.map.n_z_latents,
-                    axis=-1,
-                ),
-                initial_z_latents,
-                self.map.z_latents.initial,
-            )
+        self.map.z_latents.initial = tf.where(
+            tf.repeat(
+                tf.expand_dims(improved, axis=-1),
+                repeats=self.map.n_z_latents,
+                axis=-1,
+            ),
+            initial_z_latents,
+            self.map.z_latents.initial,
         )
-        self.map.z_latents.best.assign(
-            tf.where(
-                tf.repeat(
-                    tf.expand_dims(improved, axis=-1),
-                    repeats=self.map.n_z_latents,
-                    axis=-1,
-                ),
-                z_latents,
-                self.map.z_latents.best,
-            )
+        self.map.z_latents.best = tf.where(
+            tf.repeat(
+                tf.expand_dims(improved, axis=-1),
+                repeats=self.map.n_z_latents,
+                axis=-1,
+            ),
+            z_latents,
+            self.map.z_latents.best,
         )
 
-        self.map.delta_av.initial.assign(
-            tf.where(
-                tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
-                initial_delta_av,
-                self.map.delta_av.initial,
-            )
+        self.map.delta_av.initial = tf.where(
+            tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
+            initial_delta_av,
+            self.map.delta_av.initial,
         )
-        self.map.delta_av.best.assign(
-            tf.where(
-                tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
-                delta_av,
-                self.map.delta_av.best,
-            )
+        self.map.delta_av.best = tf.where(
+            tf.repeat(tf.expand_dims(improved, axis=-1), repeats=1, axis=-1),
+            delta_av,
+            self.map.delta_av.best,
         )
 
         initial_position = tf.concat(initial_position, axis=-1)
         current_position = tf.concat(current_position, axis=-1)
 
-        self.map.position.initial.assign(
-            tf.where(
-                tf.repeat(
-                    tf.expand_dims(improved, axis=-1),
-                    repeats=initial_position.shape[-1],
-                    axis=-1,
-                ),
-                initial_position,
-                self.map.position.initial,
-            )
+        self.map.position.initial = tf.where(
+            tf.repeat(
+                tf.expand_dims(improved, axis=-1),
+                repeats=initial_position.shape[-1],
+                axis=-1,
+            ),
+            initial_position,
+            self.map.position.initial,
         )
-        self.map.position.best.assign(
-            tf.where(
-                tf.repeat(
-                    tf.expand_dims(improved, axis=-1),
-                    repeats=current_position.shape[-1],
-                    axis=-1,
-                ),
-                current_position,
-                self.map.position.best,
-            )
+        self.map.position.best = tf.where(
+            tf.repeat(
+                tf.expand_dims(improved, axis=-1),
+                repeats=current_position.shape[-1],
+                axis=-1,
+            ),
+            current_position,
+            self.map.position.best,
         )
 
         if savepath is not None:
@@ -839,68 +825,76 @@ class TFPosteriorModel(ks.Model):
                 )
                 return
         self.log.debug("Running HMC")
-
         initial_position = self.map.position.best
-        tf.summary.experimental.set_step(0)
         summary_writer = None
         if self.profile and savepath is not None:
             log_dir = savepath.parent / self.log_path / savepath.stem / "hmc"
             summary_writer = tf.summary.create_file_writer(str(log_dir))
 
-        pae_stds = self.pae_step.results[self.subset][
-            str(self.pae_step.run_stages[-1].stage)
-        ].latents.std(axis=-1)
-        nflow_stds = self.nflow_step.results[self.subset].u_latents.std(axis=0)
-        stds = []
-        if self.map.train_delta_m:
-            stds.append(pae_stds[-2:-1].astype(np.float32))
-        if self.map.train_delta_p:
-            stds.append(pae_stds[-1:].astype(np.float32))
-        if self.nflow.physical_latents:
-            stds.append(nflow_stds[0:1].astype(np.float32))
-        stds.append(nflow_stds[1:].astype(np.float32))
-        stds = tf.concat(stds, axis=0)
+        stds = tf.math.reduce_std(self.map.position.original, axis=0)
+
         step_size = tf.repeat(
             tf.expand_dims(stds, axis=0), repeats=initial_position.shape[0], axis=0
         )
 
         progress = tqdm(
             total=self.n_samples + 1,
-            leave=True,
         )
+
+        tf.summary.experimental.set_step(tf.Variable(tf.constant(0, dtype=tf.int64)))
 
         @tf.function
         def unnormalized_posterior_log_prob(*pos):
             input_position = self.map.get_position(*pos)
-            return self(
+            log_prob = self(
                 (input_position, self.data.time, self.data.amplitude, self.data.sigma),
                 training=False,
-                mask=self.data.mask,
+                mask=self.data_mask,
+                sn_mask=self.sn_mask,
+                spec_mask=self.spec_mask,
+                wl_mask=self.wl_mask,
             )
 
-        @tf.py_function(Tout=[])
-        def update_progress(state) -> None:
-            log_prob = unnormalized_posterior_log_prob(state)
-            progress.set_description(
-                "Burnin" if tf.summary.experimental.get_step() <= 1 else "Run"
-            )
-            progress.update()
-
-            tf.summary.experimental.set_step(tf.summary.experimental.get_step() + 1)
             if summary_writer is not None:
                 with summary_writer.as_default():
-                    lp = log_prob.numpy()
-                    lp = lp[lp != -np.inf]
-                    tf.summary.scalar("min_log_prob", np.nanmin(lp))
-                    tf.summary.scalar("mean_log_prob", np.nanmean(lp))
-                    tf.summary.scalar("max_log_prob", np.nanmax(lp))
+                    tf.summary.experimental.set_step(
+                        tf.summary.experimental.get_step().assign_add(
+                            tf.constant(1, dtype=tf.int64)
+                        )
+                    )
+                    lp_min = tf.reduce_min(
+                        tf.where(
+                            tf.math.is_finite(log_prob), log_prob, tf.constant(np.inf)
+                        )
+                    )
+                    lp_mean = tf.experimental.numpy.nanmean(
+                        tf.where(
+                            tf.math.is_finite(log_prob), log_prob, tf.constant(np.nan)
+                        )
+                    )
+                    lp_max = tf.reduce_max(
+                        tf.where(
+                            tf.math.is_finite(log_prob), log_prob, tf.constant(-np.inf)
+                        )
+                    )
+                    tf.summary.scalar("min_log_prob", lp_min)
+                    tf.summary.scalar("mean_log_prob", lp_mean)
+                    tf.summary.scalar("max_log_prob", lp_max)
 
+            return log_prob
+
+        @tf.py_function(Tout=[])
+        def update_progress() -> None:
+            progress.update()
+
+        @tf.function
         def trace_fn(state, pkr):
-            update_progress(state)
+            update_progress()
             step_size = pkr.inner_results.step_size
             is_accepted = pkr.inner_results.is_accepted
             return [step_size, is_accepted]
 
+        @tf.function
         def sample_chain():
             sampler = tfp.mcmc.NoUTurnSampler(
                 target_log_prob_fn=unnormalized_posterior_log_prob,

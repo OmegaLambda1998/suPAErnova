@@ -4,27 +4,23 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .analysis import Plotter, AbstractPlot
+from .spectra import SpectraPlot
+from .analysis import Plotter
 
 if TYPE_CHECKING:
-    from supaernova.configs.steps.steps import AbstractStepResult
-    from supaernova.configs.steps.posterior import (
-        PosteriorStepResult,
-    )
+    from supaernova.configs.steps.steps import StepResult
 
     from .analysis import Axis, Figure
 
 
-class DistributionPlot(AbstractPlot):
+class DistributionPlot(SpectraPlot):
     labels: "dict[str | int, str | dict[str | int, str]] | None" = None
     mean: bool = False
 
 
 class DistributionPlotter(Plotter):
     @staticmethod
-    def prep_from_result(
-        data: "AbstractStepResult", config: DistributionPlot
-    ) -> pd.DataFrame:
+    def prep_from_result(data: "StepResult", config: DistributionPlot) -> pd.DataFrame:
         return pd.DataFrame({
             label: getattr(data, key) for (key, label) in (config.labels or {}).items()
         })
@@ -37,7 +33,7 @@ class DistributionPlotter(Plotter):
 
     @staticmethod
     def plot_corner(
-        data: "AbstractStepResult | np.ndarray | list[AbstractStepResult] | list[np.ndarray] | dict[str, Any]",
+        data: "StepResult | np.ndarray | list[StepResult] | list[np.ndarray] | dict[str, Any]",
         config: "DistributionPlot",
         *,
         fig: "Figure | None" = None,

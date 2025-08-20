@@ -8,6 +8,10 @@ Fn = Callable[..., Any]
 type ConfigInputObject[T: Fn] = str | Path | T
 
 
+def pp(expression):
+    return __import__("pprint").pprint(expression)
+
+
 def deepmerge(d1, d2):
     out = d1.copy()
     for k, v in d2.items():

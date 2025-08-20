@@ -18,7 +18,7 @@ from pydantic import (
 
 from supaernova.configs.base import BaseConfig
 from supaernova.analysis.spectra import ResidualPlot
-from supaernova.configs.steps.data import DataStepConfig, DataStepResult
+from supaernova.configs.steps.data import SNPAEData, DataStepConfig
 from supaernova.configs.steps.steps import StepResult, StepAnalysis
 from supaernova.configs.steps.models import ModelConfig, BackendConfig
 from supaernova.analysis.distribution import DistributionPlot
@@ -42,26 +42,26 @@ class PAEStage(BaseConfig):
     learning_rate_decay_rate: PositiveFloat
     learning_rate_weight_decay_rate: PositiveFloat
 
-    data: DataStepResult
+    data: SNPAEData
     mask: npt.NDArray[bool]
     sn_mask: npt.NDArray[bool]
     spec_mask: npt.NDArray[bool]
     wl_mask: npt.NDArray[bool]
 
-    train_data: DataStepResult
+    train_data: SNPAEData
     train_mask: npt.NDArray[bool]
     train_sn_mask: npt.NDArray[bool]
     train_spec_mask: npt.NDArray[bool]
     train_wl_mask: npt.NDArray[bool]
 
-    test_data: DataStepResult
+    test_data: SNPAEData
     test_mask: npt.NDArray[bool]
     test_sn_mask: npt.NDArray[bool]
     test_spec_mask: npt.NDArray[bool]
     test_wl_mask: npt.NDArray[bool]
 
+    val_data: SNPAEData
     val_mask: npt.NDArray[bool]
-    val_data: DataStepResult
     val_sn_mask: npt.NDArray[bool]
     val_spec_mask: npt.NDArray[bool]
     val_wl_mask: npt.NDArray[bool]
@@ -79,32 +79,56 @@ class PAEStage(BaseConfig):
     # === Static Methods ===
 
 
-class PAEStepResult(StepResult):
+class PAEStageResult(StepResult):
     # === Class Variables ===
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
     stage: int
-    ind: npt.NDArray[np.int32]
+    ind: npt.NDArray[int]
     sn_name: npt.NDArray[str]
     spectra_id: npt.NDArray[str]
-    input_amp: npt.NDArray[np.float32]
-    input_d_amp: npt.NDArray[np.float32]
-    input_phase: npt.NDArray[np.float32]
-    input_mask: npt.NDArray[np.float32]
-    input_sn_mask: npt.NDArray[np.float32]
-    input_spec_mask: npt.NDArray[np.float32]
-    input_wl_mask: npt.NDArray[np.float32]
-    input_colourlaw: npt.NDArray[np.float32] | None
-    latents: npt.NDArray[np.float32]
-    output_amp: npt.NDArray[np.float32]
-    diff_amp: npt.NDArray[np.float32]
+    input_amp: npt.NDArray[float]
+    input_d_amp: npt.NDArray[float]
+    input_phase: npt.NDArray[float]
+    input_mask: npt.NDArray[float]
+    input_sn_mask: npt.NDArray[float]
+    input_spec_mask: npt.NDArray[float]
+    input_wl_mask: npt.NDArray[float]
+    input_colourlaw: npt.NDArray[float] | None
+    latents: npt.NDArray[float]
+    output_amp: npt.NDArray[float]
+    diff_amp: npt.NDArray[float]
     loss: float
     pred_loss: float
     model_loss: float
     resid_loss: float
     delta_loss: float
     cov_loss: float
+    # --- Optional ---
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
+
+
+class PAEStepResult(StepResult):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
+    model: Any
+    stages: dict[str, dict[str, PAEStageResult]]
+    min_redshift: float
+    max_redshift: float
+    min_phase: float
+    max_phase: float
+    min_wavelength: float
+    max_wavelength: float
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---
@@ -196,13 +220,13 @@ class PAEConfig(BackendConfig):
     loss_decorrelate_dust: bool = True
     loss_clip_delta: PositiveFloat = 25
     delta_av_epochs: PositiveInt = 2000
-    delta_av_patience: PositiveFloat | PositiveInt = 0.25
+    delta_av_patience: PositiveFloat | PositiveInt = 0.35
     delta_av_lr: PositiveFloat = 0.005
     delta_av_lr_decay_steps: PositiveInt = 300
     delta_av_lr_decay_rate: PositiveFloat = 0.95
     delta_av_lr_weight_decay_rate: PositiveFloat = 0.0001
     zs_epochs: PositiveInt = 2000
-    zs_patience: PositiveFloat | PositiveInt = 0.25
+    zs_patience: PositiveFloat | PositiveInt = 0.30
     zs_lr: PositiveFloat = 0.005
     zs_lr_decay_steps: PositiveInt = 300
     zs_lr_decay_rate: PositiveFloat = 0.95
@@ -214,13 +238,13 @@ class PAEConfig(BackendConfig):
     delta_m_lr_decay_rate: PositiveFloat = 0.95
     delta_m_lr_weight_decay_rate: PositiveFloat = 0.0001
     delta_p_epochs: PositiveInt = 5000
-    delta_p_patience: PositiveFloat | PositiveInt = 0.25
+    delta_p_patience: PositiveFloat | PositiveInt = 0.2
     delta_p_lr: PositiveFloat = 0.001
     delta_p_lr_decay_steps: PositiveInt = 300
     delta_p_lr_decay_rate: PositiveFloat = 0.95
     delta_p_lr_weight_decay_rate: PositiveFloat = 0.0001
     final_epochs: PositiveFloat = 5000
-    final_patience: PositiveFloat | PositiveInt = 0.25
+    final_patience: PositiveFloat | PositiveInt = 1.0
     final_lr: PositiveFloat = 0.001
     final_lr_decay_steps: PositiveInt = 300
     final_lr_decay_rate: PositiveFloat = 0.95

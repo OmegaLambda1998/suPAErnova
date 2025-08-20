@@ -37,10 +37,10 @@ class Data(Step):
         self.meta: Path = self.options.meta
         self.idr: Path = self.options.idr
         self.mask: Path = self.options.mask
-        self.colourlaw: npt.NDArray[np.float64] | None
         self.train_frac: float = self.options.train_frac
 
         # --- Optional ---
+        self.colourlaw: npt.NDArray[float] | None
         self.cosmological_model: cosmo.FLRW
         self.salt_model: sncosmo.SALT2Source | sncosmo.SALT3Source
         self.min_redshift: float = self.options.min_redshift
@@ -63,21 +63,19 @@ class Data(Step):
         self.n_kfolds: int
 
         # === Run Variables ===
-        self.wavelength: npt.NDArray[np.float32]
-        self.nspectra_per_sn: npt.NDArray[np.int32]
-
-        # === Result Variables ===
-        self.results: DataStepResult
         self.sne: SNeDataFrame  # Created in self.load_sne
         self.data: SNPAEData  # Created in self.prepare_data_arrays
         self.train_data: list[SNPAEData]  # Created in self.split_train_test
         self.test_data: list[SNPAEData]  # Created in self.split_train_test
-
         # Data Dimensions
         self.sn_dim: int  # Created in self.get_dims
         self.nspectra_per_sn: npt.NDArray[int]  # Created in self.get_dims
         self.spec_dim: int  # Created in self.get_dims
+        self.wavelength: npt.NDArray[float]
         self.wl_dim: int  # Created in self.get_dims
+
+        # === Result Variables ===
+        self.results: DataStepResult
 
         # === Analysis Variables ===
         self.analysis: DataStepAnalysis = self.options.analysis or DataStepAnalysis()
@@ -160,8 +158,6 @@ class Data(Step):
 
     @override
     def _load(self, *args: "Any", **kwargs: "Any") -> None:
-        results = {}
-
         # Load SNe DataFrames
         self.log.debug(f"Loading SNe dataframe from {self.out_sne}")
         self.sne = pd.read_pickle(self.out_sne)
@@ -172,30 +168,24 @@ class Data(Step):
         # Open the file, read each key into a dictionary, then close the file
         self.log.debug(f"Loading data arrays from {self.out_data}")
         with np.load(self.out_data, allow_pickle=True) as io:
-            data = dict(io.items())
-        results["data"] = SNPAEData.model_validate(data)
+            self.data = dict(io.items())
 
         # Load in training and testing data
         self.log.debug(f"Loading training data arrays from {self.out_train}")
-        training_data = []
+        self.train_data = []
         for train_data in self.out_train.iterdir():
             if train_data.is_file():
                 with np.load(train_data, allow_pickle=True) as io:
                     data = dict(io.items())
-                training_data.append(SNPAEData.model_validate(data))
-        results["train_data"] = training_data
+                self.train_data.append(SNPAEData.model_validate(data))
 
         self.log.debug(f"Loading testing data arrays from {self.out_test}")
-        testing_data = []
+        self.test_data = []
         for test_data in self.out_test.iterdir():
             if test_data.is_file():
                 with np.load(test_data, allow_pickle=True) as io:
                     data = dict(io.items())
-                testing_data.append(SNPAEData.model_validate(data))
-        results["test_data"] = testing_data
-
-        self.results = DataStepResult.model_validate(results)
-
+                self.test_data.append(SNPAEData.model_validate(data))
         self.is_loaded = True
 
     @override
@@ -205,15 +195,28 @@ class Data(Step):
         self.get_dims()
         self.prepare_data_arrays()
         self.split_train_test()
-        results = {}
-        results["data"] = self.data
-        results["train_data"] = self.train_data
-        results["test_data"] = self.test_data
-        self.results = DataStepResult.model_validate(results)
         self.is_loaded = True
 
     @override
     def _result(self, *args: "Any", **kwargs: "Any") -> None:
+        results = {}
+        results["data"] = SNPAEData.model_validate(self.data)
+        results["dir"] = self.data_dir
+        results["train_data"] = self.train_data
+        results["test_data"] = self.test_data
+        results["colourlaw"] = self.colourlaw
+        results["min_redshift"] = self.min_redshift
+        results["max_redshift"] = self.max_redshift
+        results["min_phase"] = self.min_phase
+        results["max_phase"] = self.max_phase
+        results["min_wavelength"] = self.min_wavelength
+        results["max_wavelength"] = self.max_wavelength
+        results["train_frac"] = self.train_frac
+        results["sn_dim"] = self.sn_dim
+        results["spec_dim"] = self.spec_dim
+        results["wl_dim"] = self.wl_dim
+        self.results = DataStepResult.model_validate(results)
+
         if self.force or not self.out_sne.exists():
             self.log.debug(f"Saving SNe DataFrame to {self.out_sne}")
             self.sne.to_pickle(self.out_sne)
@@ -290,6 +293,52 @@ class Data(Step):
                 SpectraPlotter.plot_residual(self.results.data, opts)
 
         self.was_analysed = True
+
+    @override
+    def _clear(
+        self,
+        *args: "Any",
+        setup: bool = False,
+        load: bool = False,
+        result: bool = False,
+        analyse: bool = False,
+        complete: bool = False,
+        **kwargs: "Any",
+    ) -> None:
+        if not any((setup, load, result, analyse, complete)):
+            setup = True
+            load = True
+            result = True
+            analyse = True
+
+        if setup:
+            self.clear_attributes(["colourlaw", "cosmological_model", "salt_model"])
+
+        if load:
+            self.clear_attributes([
+                "sne",
+                "data",
+                "train_data",
+                "test_data",
+                "nspectra_per_sn",
+                "wavelength",
+            ])
+
+        if result:
+            self.clear_attributes("results")
+
+        if analyse:
+            self.analysis = self.options.analysis or DataStepAnalysis()
+
+        super()._clear(
+            *args,
+            setup=setup,
+            load=load,
+            result=result,
+            analyse=analyse,
+            complete=complete,
+            **kwargs,
+        )
 
     #
     # === DataStep Specific Functions ===
@@ -421,14 +470,14 @@ class Data(Step):
         self.log.debug("Calculating SALT fluxes")
 
         def get_salt_flux(
-            wavelength: "npt.NDArray[np.float32]",
+            wavelength: "npt.NDArray[float]",
             tobs: float = 0.0,
             z: float = 0.0,
             x0: float = 1.0,
             x1: float = 0.0,
             c: float = 0.0,
             zref: float = 0.05,
-        ) -> "npt.NDArray[np.float32]":
+        ) -> "npt.NDArray[float]":
             self.salt_model.set(x0=x0, x1=x1, c=c)
             return (
                 self.salt_model.flux(phase=tobs, wave=wavelength)
@@ -463,7 +512,7 @@ class Data(Step):
         self.nspectra_per_sn = np.array(
             [len(spectra) for spectra in self.sne["spectra"]],
         )
-        self.spec_dim = self.nspectra_per_sn.max()
+        self.spec_dim = int(self.nspectra_per_sn.max())
         self.log.debug(
             f"Maximum number of observations for any given SN: {self.spec_dim}",
         )
@@ -584,7 +633,7 @@ class Data(Step):
             arr: "npt.NDArray[T]",
             min_val: "T | npt.NDArray[T]",
             max_val: "T | npt.NDArray[T]",
-        ) -> "npt.NDArray[np.bool_]":
+        ) -> "npt.NDArray[bool]":
             if not isinstance(min_val, np.ndarray):
                 min_val = cast("npt.NDArray[T]", np.array(min_val))
             if not isinstance(max_val, np.ndarray):
@@ -824,7 +873,7 @@ class DataStep(Variant):
                     base_sigma = self.bases[name]["sigma"]
                     base_mask = self.bases[name]["mask"]
                     if base_amp is None:
-                        wl, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask = (
+                        wl, amplitude, sigma, mask, _sn_mask, _spec_mask, _wl_mask = (
                             SpectraPlotter.prep(
                                 self.variants[opts.base].results.data, opts
                             )
@@ -832,7 +881,7 @@ class DataStep(Variant):
                         base_wl = wl
                         base_amp = amplitude
                         base_sigma = sigma
-                        base_mask = np.logical_not(mask * sn_mask * spec_mask * wl_mask)
+                        base_mask = np.logical_not(mask)
                     self.bases[name]["wl"] = base_wl
                     self.bases[name]["amp"] = base_amp
                     self.bases[name]["sigma"] = base_sigma
@@ -875,9 +924,10 @@ class DataStep(Variant):
                     self.plots[name]["ax"] = ax
                     self.plots[name]["base"] = False
 
-            # self._init_variants(
-            #     variants=self.variant_configs[variant.name],
-            # )
+                    opts.base_wl = None
+                    opts.base_amp = None
+                    opts.base_sigma = None
+                    opts.base_mask = None
 
     @override
     @callback

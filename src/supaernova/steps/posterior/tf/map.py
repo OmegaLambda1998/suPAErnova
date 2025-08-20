@@ -1,6 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -17,40 +17,48 @@ if TYPE_CHECKING:
     from supaernova.steps.pae.tf import TFPAEModel
     from supaernova.steps.nflow.tf import TFNFlowModel
     from supaernova.steps.posterior import TFPosteriorModel
-    from supaernova.configs.steps.data import DataStepResult
+    from supaernova.configs.steps.data import SNPAEData
     from supaernova.configs.steps.posterior import PosteriorMAPStage
 
 
 class PosteriorMapValue(tf.Module):
-    def __init__(self, initial: tf.Variable) -> None:
-        self.original: tf.Variable = initial
-        self.initial: tf.Variable = initial
-        self.current: tf.Variable = initial
-        self.best: tf.Variable = initial
+    map_keys = {"original", "initial", "current", "best"}
+
+    def __init__(self, initial: tf.Tensor) -> None:
+        self.original: tf.Variable = tf.Variable(tf.identity(initial))
+        self.initial: tf.Variable = tf.Variable(tf.identity(initial))
+        self.current: tf.Variable = tf.Variable(tf.identity(initial))
+        self.best: tf.Variable = tf.Variable(tf.identity(initial))
+
+    def __setattr__(self, key: str, val: Any) -> None:
+        if key in self.map_keys:
+            val = tf.identity(val)
+            if hasattr(self, key):
+                getattr(self, key).assign(val)
+                return
+            val = tf.Variable(val)
+        super().__setattr__(key, val)
 
 
 class PosteriorMap(tf.Module):
     def __init__(
         self,
         config: "TFPosteriorModel",
-        nflow: "TFNFlowModel",
-        pae: "TFPAEModel",
-        data: "DataStepResult",
     ) -> None:
         self.random_initial_positions: bool = config.options.random_initial_positions
         # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
-        vars(self)["nflow"]: TFNFlowModel = nflow
-        vars(self)["pae"]: TFPAEModel = pae
-        self.data: DataStepResult = data
+        vars(self)["nflow"]: TFNFlowModel = config.nflow
+        vars(self)["pae"]: TFPAEModel = config.pae
+        self.data: SNPAEData = config.data
 
         self.data_mask: npt.NDArray[bool] = config.data_mask
         self.sn_mask: npt.NDArray[bool] = config.sn_mask
         self.spec_mask: npt.NDArray[bool] = config.spec_mask
         self.wl_mask: npt.NDArray[bool] = config.wl_mask
 
-        self.sn_dim = self.data.amplitude.shape[0]
-        self.spec_dim = self.data.amplitude.shape[1]
-        self.wl_dim = self.data.amplitude.shape[2]
+        self.sn_dim = config.sn_dim
+        self.spec_dim = config.spec_dim
+        self.wl_dim = config.wl_dim
         self.n_u_latents = self.nflow.n_u_latents
         self.n_flow_latents = self.nflow.n_flow_latents
         self.n_z_latents = self.pae.n_z_latents
@@ -137,30 +145,30 @@ class PosteriorMap(tf.Module):
             self.n_pos += 1
 
         self.u_delta_av: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, 1)))
+            np.inf * tf.ones((self.sn_dim, 1))
         )
         self.u_latents: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, self.n_u_latents)))
+            np.inf * tf.ones((self.sn_dim, self.n_u_latents))
         )
         self.z_latents: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, self.n_z_latents)))
+            np.inf * tf.ones((self.sn_dim, self.n_z_latents))
         )
 
         self.delta_av: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, 1)))
+            np.inf * tf.ones((self.sn_dim, 1))
         )
         self.delta_m: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, 1)))
+            np.inf * tf.ones((self.sn_dim, 1))
         )
         self.delta_p: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, 1)))
+            np.inf * tf.ones((self.sn_dim, 1))
         )
 
         self.bias: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, 1)))
+            np.inf * tf.ones((self.sn_dim, 1))
         )
         self.position: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, self.n_pos)))
+            np.inf * tf.ones((self.sn_dim, self.n_pos))
         )
 
         self.labels: list[str] = []
@@ -469,14 +477,14 @@ class PosteriorMap(tf.Module):
         position.append(u_latents)
         position = tf.concat(position, axis=-1)
 
-        self.u_delta_av.current = tf.Variable(u_delta_av)
-        self.u_latents.current = tf.Variable(u_latents)
-        self.z_latents.current = tf.Variable(z_latents)
-        self.delta_av.current = tf.Variable(delta_av)
-        self.delta_m.current = tf.Variable(delta_m)
-        self.delta_p.current = tf.Variable(delta_p)
-        self.bias.current = tf.Variable(bias)
-        self.position.current = tf.Variable(position)
+        self.u_delta_av.current = u_delta_av
+        self.u_latents.current = u_latents
+        self.z_latents.current = z_latents
+        self.delta_av.current = delta_av
+        self.delta_m.current = delta_m
+        self.delta_p.current = delta_p
+        self.bias.current = bias
+        self.position.current = position
 
         if stage.init:
             self.u_delta_av.original = self.u_delta_av.current

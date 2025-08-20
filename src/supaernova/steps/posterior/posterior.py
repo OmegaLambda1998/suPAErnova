@@ -1,13 +1,13 @@
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, Any, ClassVar, override
 import importlib
 
 import numpy as np
 import pandas as pd
 
 from supaernova.steps import Step
+from supaernova.steps.data import SNPAEData, DataStepResult
 from supaernova.steps.models import Model
 from supaernova.analysis.spectra import SpectraPlotter
-from supaernova.configs.steps.data import DataStepResult
 from supaernova.analysis.dispersion import DispersionPlotter
 from supaernova.analysis.distribution import DistributionPlotter
 from supaernova.configs.steps.posterior import (
@@ -22,9 +22,9 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from supaernova.steps.pae import PAE, PAEModel
-    from supaernova.steps.data import Data
-    from supaernova.steps.nflow import NFlow, NFlowModel
+    from supaernova.steps.pae import PAEModel, PAEStepResult
+    from supaernova.steps.nflow import NFlowModel, NFlowStepResult
+    from supaernova.configs.steps.data import DataStepResult
     from supaernova.configs.steps.posterior import PosteriorStepConfig
 
     from .tf import TFPosteriorModel
@@ -37,36 +37,38 @@ class Posterior(Step):
         super().__init__(config)
 
         # === Previous Step Variables ===
-        self.data_step: Data
-        self.kfold: int
-        self.pae_step: PAE
+        self.kfold: int = self.options.kfold
         self.pae: PAEModel
-        self.nflow_step: NFlow
         self.nflow: NFlowModel
+        self.data_dir: Path
 
-        self.data: DataStepResult
+        self.data: SNPAEData
         self.mask: npt.NDArray[bool]
         self.sn_mask: npt.NDArray[bool]
         self.spec_mask: npt.NDArray[bool]
         self.wl_mask: npt.NDArray[bool]
 
-        self.train_data: DataStepResult
+        self.train_data: SNPAEData
         self.train_mask: npt.NDArray[bool]
         self.train_sn_mask: npt.NDArray[bool]
         self.train_spec_mask: npt.NDArray[bool]
         self.train_wl_mask: npt.NDArray[bool]
 
-        self.test_data: DataStepResult
+        self.test_data: SNPAEData
         self.test_mask: npt.NDArray[bool]
         self.test_sn_mask: npt.NDArray[bool]
         self.test_spec_mask: npt.NDArray[bool]
         self.test_wl_mask: npt.NDArray[bool]
 
-        self.val_data: DataStepResult
+        self.val_data: SNPAEData
         self.val_mask: npt.NDArray[bool]
         self.val_sn_mask: npt.NDArray[bool]
         self.val_spec_mask: npt.NDArray[bool]
         self.val_wl_mask: npt.NDArray[bool]
+
+        self.sn_dim: int
+        self.spec_dim: int
+        self.wl_dim: int
 
         # === Config Variables ===
         # --- Required ---
@@ -92,6 +94,33 @@ class Posterior(Step):
         self.tolerance: float = self.options.tolerance
         self.target_acceptance_rate: float = self.options.target_acceptance_rate
         self.random_initial_positions: bool = self.options.random_initial_positions
+
+        self.min_redshift: float
+        self.max_redshift: float
+        self.min_train_redshift: float
+        self.max_train_redshift: float
+        self.min_test_redshift: float
+        self.max_test_redshift: float
+        self.min_val_redshift: float
+        self.max_val_redshift: float
+
+        self.min_phase: float
+        self.max_phase: float
+        self.min_train_phase: float
+        self.max_train_phase: float
+        self.min_test_phase: float
+        self.max_test_phase: float
+        self.min_val_phase: float
+        self.max_val_phase: float
+
+        self.min_wavelength: float
+        self.max_wavelength: float
+        self.min_train_wavelength: float
+        self.max_train_wavelength: float
+        self.min_test_wavelength: float
+        self.max_test_wavelength: float
+        self.min_val_wavelength: float
+        self.max_val_wavelength: float
 
         self.u_delta_av_min: float = self.options.u_delta_av_min
         self.u_delta_av_max: float = self.options.u_delta_av_max
@@ -156,38 +185,45 @@ class Posterior(Step):
         )
 
     @override
-    def _setup(self, *, data: "Data", pae: "PAE", nflow: "NFlow") -> None:
+    def _setup(
+        self,
+        *args: Any,
+        data: "DataStepResult",
+        pae: "PAEStepResult",
+        nflow: "NFlowStepResult",
+        **kwargs: Any,
+    ) -> None:
         # === Previous Step Variables ===
-        self.data_step = data
+        self.data_dir = data.dir
         self.data = data.data
-        self.pae_step = pae
-        self.pae_step.load()
-        self.pae = self.pae_step.model
-        self.nflow_step = nflow
-        self.nflow_step.load()
-        self.nflow = self.nflow_step.model
-        self.kfold = self.options.kfold or self.pae_step.kfold
+        self.pae = pae.model
+        self.nflow = nflow.model
         self.train_data = data.train_data[self.kfold % len(data.train_data)]
         self.test_data = data.test_data[self.kfold % len(data.test_data)]
         self.val_data = self.test_data
+
+        self.sn_dim = data.sn_dim
+        self.spec_dim = data.spec_dim
+        self.wl_dim = data.wl_dim
+
         if self.validation_frac > 0:
-            ind_split = int(self.data_step.sn_dim * self.validation_frac)
-            self.val_data = DataStepResult.model_validate({
+            ind_split = int(data.sn_dim * self.validation_frac)
+            self.val_data = SNPAEData.model_validate({
                 k: v[-ind_split:] for k, v in self.train_data.model_dump().items()
             })
-            self.train_data = DataStepResult.model_validate({
+            self.train_data = SNPAEData.model_validate({
                 k: v[:-ind_split] for k, v in self.train_data.model_dump().items()
             })
 
         self.min_redshift = self.options.min_redshift or max(
-            self.nflow_step.min_redshift,
-            self.pae_step.min_redshift,
-            self.data_step.min_redshift,
+            nflow.min_redshift,
+            pae.min_redshift,
+            data.min_redshift,
         )
         self.max_redshift = self.options.max_redshift or min(
-            self.nflow_step.max_redshift,
-            self.pae_step.max_redshift,
-            self.data_step.max_redshift,
+            nflow.max_redshift,
+            pae.max_redshift,
+            data.max_redshift,
         )
         self.min_train_redshift = self.options.min_train_redshift or self.min_redshift
         self.max_train_redshift = self.options.max_train_redshift or self.max_redshift
@@ -197,10 +233,10 @@ class Posterior(Step):
         self.max_val_redshift = self.options.max_val_redshift or self.max_redshift
 
         self.min_phase = self.options.min_phase or max(
-            self.nflow_step.min_phase, self.pae_step.min_phase, self.data_step.min_phase
+            nflow.min_phase, pae.min_phase, data.min_phase
         )
         self.max_phase = self.options.max_phase or min(
-            self.nflow_step.max_phase, self.pae_step.max_phase, self.data_step.max_phase
+            nflow.max_phase, pae.max_phase, data.max_phase
         )
         self.min_train_phase = self.options.min_train_phase or self.min_phase
         self.max_train_phase = self.options.max_train_phase or self.max_phase
@@ -210,14 +246,14 @@ class Posterior(Step):
         self.max_val_phase = self.options.max_val_phase or self.max_phase
 
         self.min_wavelength = self.options.min_wavelength or max(
-            self.nflow_step.min_wavelength,
-            self.pae_step.min_wavelength,
-            self.data_step.min_wavelength,
+            nflow.min_wavelength,
+            pae.min_wavelength,
+            data.min_wavelength,
         )
         self.max_wavelength = self.options.max_wavelength or min(
-            self.nflow_step.max_wavelength,
-            self.pae_step.max_wavelength,
-            self.data_step.max_wavelength,
+            nflow.max_wavelength,
+            pae.max_wavelength,
+            data.max_wavelength,
         )
         self.min_train_wavelength = (
             self.options.min_train_wavelength or self.min_wavelength
@@ -288,8 +324,10 @@ class Posterior(Step):
             self.map_stage_final,
         ]
 
+        self.is_setup = True
+
     @override
-    def _completed(self) -> bool:
+    def _completed(self, *args: Any, **kwargs: Any) -> bool:
         for subset in self.subsets:
             for seed in self.seeds:
                 self.options.subset = subset
@@ -305,7 +343,7 @@ class Posterior(Step):
         return True
 
     @override
-    def _load(self) -> None:
+    def _load(self, *args: Any, **kwargs: Any) -> None:
         models = {}
         for subset in self.subsets:
             models[subset] = {}
@@ -323,8 +361,10 @@ class Posterior(Step):
                 models[subset][seed] = self.model
         self.models = models
 
+        self.is_loaded = True
+
     @override
-    def _run(self) -> None:
+    def _run(self, *args: Any, **kwargs: Any) -> None:
         models = {}
         for subset in self.subsets:
             models[subset] = {}
@@ -350,8 +390,10 @@ class Posterior(Step):
                 models[subset][seed] = self.model
         self.models = models
 
+        self.is_loaded = True
+
     @override
-    def _result(self) -> None:
+    def _result(self, *args: Any, **kwargs: Any) -> None:
         results = {}
         for subset in self.subsets:
             results[subset] = {}
@@ -359,7 +401,7 @@ class Posterior(Step):
                 self.options.subset = subset
                 self.options.seed = seed
                 model = self.models[subset][seed]
-                data = getattr(self.data_step, f"{subset}_data")[self.kfold]
+                data = getattr(self, f"{subset}_data")
 
                 map_results = {
                     "chain_min": model.map.chain_min.numpy(),
@@ -405,8 +447,10 @@ class Posterior(Step):
 
         self.results = results
 
+        self.has_results = True
+
     @override
-    def _analyse(self) -> None:
+    def _analyse(self, *args: Any, **kwargs: Any) -> None:
         for subset in self.subsets:
             subset_map_init_results = {}
             subset_map_best_results = {}
@@ -425,7 +469,7 @@ class Posterior(Step):
                 map_best_results = []
                 map_labels = {}
                 ind = 0
-                if self.nflow_step.physical_latents:
+                if self.nflow.physical_latents:
                     map_init_results.append(results.map.init_u_delta_av)
                     map_best_results.append(results.map.best_u_delta_av)
                     map_labels[0] = "μΔAᵥ"
@@ -435,7 +479,7 @@ class Posterior(Step):
                     ind += 1
                 map_init_results.append(results.map.init_u_latents)
                 map_best_results.append(results.map.best_u_latents)
-                if self.pae_step.physical_latents:
+                if self.pae.physical_latents:
                     map_init_results.append(results.map.init_delta_av)
                     map_best_results.append(results.map.best_delta_av)
                     map_labels[ind] = "ΔAᵥ"
@@ -445,7 +489,7 @@ class Posterior(Step):
                     ind += 1
                 map_init_results.append(results.map.init_z_latents)
                 map_best_results.append(results.map.best_z_latents)
-                if self.pae_step.physical_latents:
+                if self.pae.physical_latents:
                     map_init_results.extend((
                         results.map.init_delta_m,
                         results.map.init_delta_p,
@@ -471,7 +515,7 @@ class Posterior(Step):
                 if model.map.train_delta_p:
                     hmc_labels[hmc_ind] = "Δp"
                     hmc_ind += 1
-                if self.nflow_step.physical_latents:
+                if self.nflow.physical_latents:
                     hmc_labels[hmc_ind] = "μΔAᵥ"
                     hmc_ind += 1
                 for i in range(model.map.n_u_latents):
@@ -500,8 +544,8 @@ class Posterior(Step):
                         fig, ax = SpectraPlotter.plot_summary(data, o, save=False)
 
                         pae_data = data.model_copy(deep=True)
-                        pae_results = self.pae_step.results[subset][
-                            str(self.pae_step.run_stages[-1].stage)
+                        pae_results = self.pae.results.stages[subset][
+                            str(self.pae.run_stages[-1].stage)
                         ]
                         pae_data.amplitude = pae_results.output_amp
 
@@ -742,20 +786,12 @@ class Posterior(Step):
                     if o.savepath is None:
                         o.savepath = self.paths.plots / str(self.seeds[0]) / subset
                     o.savepath.mkdir(parents=True, exist_ok=True)
-                    data = (
-                        self.data_step.train_data[
-                            self.kfold % len(self.data_step.train_data)
-                        ]
-                        if subset == "train"
-                        else self.data_step.test_data[
-                            self.kfold % len(self.data_step.train_data)
-                        ]
-                    )
+                    data = self.train_data if subset == "train" else self.test_data
                     hmc = list(self.results[subset].values())
 
                     twins = None
                     if o.twins is not None:
-                        twins_path = self.data_step.data_dir / o.twins
+                        twins_path = self.data_dir / o.twins
                         if twins_path.exists():
                             twins = pd.read_csv(twins_path, delimiter=",")
                         else:
@@ -767,7 +803,7 @@ class Posterior(Step):
                     if o.legacy is not None:
                         legacy_data = {}
                         for p in o.legacy:
-                            legacy_path = self.data_step.data_dir / p
+                            legacy_path = self.data_dir / p
                             if legacy_path.exists():
                                 l_d = np.load(legacy_path, allow_pickle=True).item()
                                 for k, v in l_d.items():
@@ -794,11 +830,81 @@ class Posterior(Step):
                         data, hmc, o, twins=twins, legacy=legacy_data
                     )
 
+        self.was_analysed = True
+
+    @override
+    def _clear(
+        self,
+        *args: "Any",
+        setup: bool = False,
+        load: bool = False,
+        result: bool = False,
+        analyse: bool = False,
+        complete: bool = False,
+        **kwargs: "Any",
+    ) -> None:
+        if not any((setup, load, result, analyse, complete)):
+            setup = True
+            load = True
+            result = True
+            analyse = True
+
+        if setup:
+            self.clear_attributes([
+                "data",
+                "pae",
+                "nflow",
+                "mask",
+                "sn_mask",
+                "spec_mask",
+                "wl_mask",
+                "train_data",
+                "train_mask",
+                "train_sn_mask",
+                "train_spec_mask",
+                "train_wl_mask",
+                "test_data",
+                "test_mask",
+                "test_sn_mask",
+                "test_spec_mask",
+                "test_wl_mask",
+                "val_data",
+                "val_mask",
+                "val_sn_mask",
+                "val_spec_mask",
+                "val_wl_mask",
+                "map_stage_init",
+                "map_stage_early",
+                "map_stage_mid",
+                "map_stage_final",
+                "map_stages",
+            ])
+
+        if load:
+            self.clear_attributes("model")
+            self.clear_attributes("models")
+
+        if result:
+            self.clear_attributes("results")
+
+        if analyse:
+            self.analysis = self.options.analysis or PosteriorStepAnalysis()
+
+        super()._clear(
+            *args,
+            setup=setup,
+            load=load,
+            result=result,
+            analyse=analyse,
+            complete=complete,
+            **kwargs,
+        )
+
     # === Instance Methods ===
 
     def setup_data_masks(self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
-            data: DataStepResult = getattr(self, f"{mask_type}data")
+            data: SNPAEData = getattr(self, f"{mask_type}data")
             mask = data.mask
 
             min_redshift: float = getattr(self, f"min_{mask_type}redshift")

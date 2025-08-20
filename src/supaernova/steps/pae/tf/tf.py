@@ -140,7 +140,6 @@ class TFPAEEncoder(ks.layers.Layer):
         self.repeat_latent_layer = ks.layers.RepeatVector(spec_dim, name="PAEERepeat")
 
     @override
-    @tf.function
     def call(
         self,
         inputs: tf.Tensor,
@@ -327,7 +326,7 @@ class TFPAEDecoder(ks.layers.Layer):
         )
         self.batch_normalisation: bool = options.batch_normalisation
 
-        self.colourlaw: npt.NDArray[np.float64] | None
+        self.colourlaw: npt.NDArray[float] | None
 
         # --- Layers ---
         self.decode_spec_layer: ks.layers.Dense
@@ -394,7 +393,6 @@ class TFPAEDecoder(ks.layers.Layer):
         )
 
     @override
-    @tf.function
     def call(
         self,
         inputs: tf.Tensor,
@@ -697,7 +695,6 @@ class TFPAEModel(ks.Model):
         return metrics
 
     @override
-    @tf.function
     def call(
         self,
         inputs: tf.Tensor,
@@ -1000,7 +997,6 @@ class TFPAEModel(ks.Model):
         return total_loss
 
     @override
-    @tf.function
     def train_step(
         self, data: tuple["np.ndarray | tf.Tensor", ...], *, dummy: bool = False
     ) -> dict[str, tf.Tensor | dict[str, tf.Tensor]]:
@@ -1057,7 +1053,6 @@ class TFPAEModel(ks.Model):
         return {m.name: m.result() for m in self.metrics}
 
     @override
-    @tf.function
     def test_step(
         self, data: tuple["np.ndarray | tf.Tensor"]
     ) -> dict[str, tf.Tensor | dict[str, tf.Tensor]]:
@@ -1328,12 +1323,13 @@ class TFPAEModel(ks.Model):
                     wl_mask=wl_mask,
                     testing=True,
                 )
-                self.log.debug("Trainable variables:")
-                for var in self.trainable_variables:
-                    self.log.debug(f"{var.name}: {var.shape}")
-                self.summary(
-                    print_fn=self.log.debug, show_trainable=True
-                )  # Will show number of parameters
+                if self.stage.debug:
+                    self.log.debug("Trainable variables:")
+                    for var in self.trainable_variables:
+                        self.log.debug(f"{var.name}: {var.shape}")
+                    self.summary(
+                        print_fn=self.log.debug, show_trainable=True
+                    )  # Will show number of parameters
             self.built = True
 
     def get_loss(self, loss: str):
@@ -1465,7 +1461,6 @@ class TFPAEModel(ks.Model):
 
             self.encoder.moving_means.assign(latents_mean)
 
-    @tf.function
     def prep_data_per_epoch(
         self, data: tuple["np.ndarray | tf.Tensor", ...]
     ) -> tuple[
@@ -1560,10 +1555,20 @@ class TFPAEModel(ks.Model):
         return (phase, amplitude, d_amplitude, mask, sn_mask, spec_mask, wl_mask)
 
     def recon_error(
-        self, data: tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]
+        self,
+        data: tuple[
+            tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor
+        ],
     ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        (phase, amp_true, d_amp, mask) = data
-        _, amp_pred = self((phase, amp_true), training=False, mask=mask)
+        (phase, amp_true, d_amp, mask, sn_mask, spec_mask, wl_mask) = data
+        _, amp_pred = self(
+            (phase, amp_true),
+            training=False,
+            mask=mask,
+            sn_mask=sn_mask,
+            spec_mask=spec_mask,
+            wl_mask=wl_mask,
+        )
         wl_dim = tf.shape(mask)[-1]
 
         outlier_cut = 100
@@ -1574,7 +1579,8 @@ class TFPAEModel(ks.Model):
         num_time_bins = tf.cast(((time_max - time_min) // time_bin_width) + 2, tf.int32)
 
         # Mask to keep only spectra with any valid data
-        has_valid_data = tf.reduce_max(mask, axis=-1) == 1
+        recon_mask = mask * sn_mask * spec_mask * wl_mask
+        has_valid_data = tf.cast(tf.reduce_max(recon_mask, axis=-1), tf.bool)
 
         # Bin edges and centers
         time_bin_edges = tf.linspace(
@@ -1588,13 +1594,13 @@ class TFPAEModel(ks.Model):
         amp_true = tf.boolean_mask(amp_true, has_valid_data)
         amp_pred = tf.boolean_mask(amp_pred, has_valid_data)
         d_amp = tf.boolean_mask(d_amp, has_valid_data)
-        mask = tf.boolean_mask(mask, has_valid_data)
+        recon_mask = tf.boolean_mask(recon_mask, has_valid_data)
         phase = tf.boolean_mask(phase, has_valid_data)
 
         amp_true = tf.reshape(amp_true, [-1, wl_dim])
         amp_pred = tf.reshape(amp_pred, [-1, wl_dim])
         d_amp = tf.reshape(d_amp, [-1, wl_dim])
-        mask = tf.reshape(mask, [-1, wl_dim])
+        recon_mask = tf.reshape(recon_mask, [-1, wl_dim])
 
         amp_true = tf.clip_by_value(amp_true, 1e-3, tf.float32.max)
         amp_pred = tf.clip_by_value(amp_pred, 1e-3, tf.float32.max)
@@ -1619,7 +1625,7 @@ class TFPAEModel(ks.Model):
         for bin_id in tf.unstack(unique_bins):
             in_bin_idx = tf.where(bin_indices == bin_id)[:, 0]
             bin_error = tf.gather(error, in_bin_idx)
-            bin_mask = tf.gather(mask, in_bin_idx)
+            bin_mask = tf.gather(recon_mask, in_bin_idx)
 
             upper_clip = tfp.stats.percentile(bin_error, outlier_cut, axis=0)
             clip_mask = tf.cast(bin_error > upper_clip, tf.int32)

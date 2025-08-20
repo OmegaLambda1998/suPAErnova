@@ -1,5 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 import sys
+from time import time
 from typing import TYPE_CHECKING
 from pathlib import Path
 import traceback
@@ -104,7 +105,6 @@ def main(
 ) -> None:
     log = setup_logging(__name__, verbose=verbose)
     log.info("Started SuPAErnova")
-
     try:
         # Setup context based on logging verbosity
         #   If verbose, redirect logging stdout through tqdm
@@ -121,7 +121,18 @@ def main(
                 plot_path=plot_path,
                 log_path=log_path,
             )
+            start_time = time()
             config.run()
+            end_time = time()
+            exec_time = end_time - start_time
+            unit = "s"
+            if exec_time > 60:
+                exec_time /= 60
+                unit = "m"
+            if exec_time > 60:
+                exec_time /= 60
+                unit = "h"
+            log.info(f"SuPAErnovae took {exec_time:.2f}{unit}")
     except ValidationError as e:
         log.error(e)  # noqa: TRY400
         sys.exit(1)

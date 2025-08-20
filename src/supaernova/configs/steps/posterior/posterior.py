@@ -80,22 +80,22 @@ class PosteriorStepMAPResult(StepResult):
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    chain_min: npt.NDArray[np.int32]
+    chain_min: npt.NDArray[int]
     converged: npt.NDArray[bool]
     num_evaluations: int
-    negative_log_prob: npt.NDArray[np.float32]
-    init_u_delta_av: npt.NDArray[np.float32]
-    init_u_latents: npt.NDArray[np.float32]
-    init_delta_av: npt.NDArray[np.float32]
-    init_delta_m: npt.NDArray[np.float32]
-    init_delta_p: npt.NDArray[np.float32]
-    init_z_latents: npt.NDArray[np.float32]
-    best_u_delta_av: npt.NDArray[np.float32]
-    best_u_latents: npt.NDArray[np.float32]
-    best_delta_av: npt.NDArray[np.float32]
-    best_delta_m: npt.NDArray[np.float32]
-    best_delta_p: npt.NDArray[np.float32]
-    best_z_latents: npt.NDArray[np.float32]
+    negative_log_prob: npt.NDArray[float]
+    init_u_delta_av: npt.NDArray[float]
+    init_u_latents: npt.NDArray[float]
+    init_delta_av: npt.NDArray[float]
+    init_delta_m: npt.NDArray[float]
+    init_delta_p: npt.NDArray[float]
+    init_z_latents: npt.NDArray[float]
+    best_u_delta_av: npt.NDArray[float]
+    best_u_latents: npt.NDArray[float]
+    best_delta_av: npt.NDArray[float]
+    best_delta_m: npt.NDArray[float]
+    best_delta_p: npt.NDArray[float]
+    best_z_latents: npt.NDArray[float]
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---
@@ -112,15 +112,15 @@ class PosteriorStepHMCResult(StepResult):
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    samples: npt.NDArray[np.float32]
-    step_sizes_final: npt.NDArray[np.float32]
-    is_accepted: npt.NDArray[np.float32]
-    u_delta_av: npt.NDArray[np.float32]
-    u_latents: npt.NDArray[np.float32]
-    delta_av: npt.NDArray[np.float32]
-    z_latents: npt.NDArray[np.float32]
-    delta_m: npt.NDArray[np.float32]
-    delta_p: npt.NDArray[np.float32]
+    samples: npt.NDArray[float]
+    step_sizes_final: npt.NDArray[float]
+    is_accepted: npt.NDArray[float]
+    u_delta_av: npt.NDArray[float]
+    u_latents: npt.NDArray[float]
+    delta_av: npt.NDArray[float]
+    z_latents: npt.NDArray[float]
+    delta_m: npt.NDArray[float]
+    delta_p: npt.NDArray[float]
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---
@@ -137,7 +137,7 @@ class PosteriorStepResult(StepResult):
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    ind: npt.NDArray[np.int32]
+    ind: npt.NDArray[int]
     sn_name: npt.NDArray[str]
     spectra_id: npt.NDArray[str]
     map: PosteriorStepMAPResult
@@ -191,7 +191,7 @@ class PosteriorConfig(BackendConfig):
     # --- Optional ---
     analysis: PosteriorStepAnalysis | None = None
     data: str | int = 0
-    kfold: int | None = None
+    kfold: int = 0
     validation_frac: Annotated[float, Field(ge=0, le=1)]
     pae: str | int = 0
     nflow: str | int = 0

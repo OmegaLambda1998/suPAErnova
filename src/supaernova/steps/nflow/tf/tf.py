@@ -524,12 +524,13 @@ class TFNFlowModel(ks.Model):
             )
             self(train_data, training=False)
 
-            self.log.debug("Trainable variables:")
-            for var in self.trainable_variables:
-                self.log.debug(f"{var.name}: {var.shape}")
-            self.summary(
-                print_fn=self.log.debug, show_trainable=True
-            )  # Will show number of parameters
+            if self.debug:
+                self.log.debug("Trainable variables:")
+                for var in self.trainable_variables:
+                    self.log.debug(f"{var.name}: {var.shape}")
+                self.summary(
+                    print_fn=self.log.debug, show_trainable=True
+                )  # Will show number of parameters
 
             self.built = True
 

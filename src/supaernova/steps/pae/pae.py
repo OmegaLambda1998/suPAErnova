@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, override
 from pathlib import Path
 import importlib
 
@@ -9,8 +9,14 @@ from supaernova.steps import Step
 from supaernova.analysis import Plotter
 from supaernova.steps.models import Model
 from supaernova.analysis.spectra import SpectraPlotter
-from supaernova.configs.steps.pae import PAEStage, PAEStepResult, PAEStepAnalysis
-from supaernova.configs.steps.data import DataStepResult
+from supaernova.configs.callbacks import callback
+from supaernova.configs.steps.pae import (
+    PAEStage,
+    PAEStepResult,
+    PAEStageResult,
+    PAEStepAnalysis,
+)
+from supaernova.configs.steps.data import SNPAEData
 from supaernova.analysis.distribution import DistributionPlotter
 
 if TYPE_CHECKING:
@@ -19,8 +25,8 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from supaernova.steps.data import Data
     from supaernova.configs.steps.pae import PAEStepConfig
+    from supaernova.configs.steps.data import DataStepResult
 
     from .tf import TFPAEModel
 
@@ -33,27 +39,27 @@ class PAE(Step):
 
         # === Previous Step Variables ===
         self.kfold: int = self.options.kfold
-        self.colourlaw: npt.NDArray[np.float64] | None
+        self.colourlaw: npt.NDArray[float] | None
 
-        self.data: DataStepResult
+        self.data: SNPAEData
         self.mask: npt.NDArray[bool]
         self.sn_mask: npt.NDArray[bool]
         self.spec_mask: npt.NDArray[bool]
         self.wl_mask: npt.NDArray[bool]
 
-        self.train_data: DataStepResult
+        self.train_data: SNPAEData
         self.train_mask: npt.NDArray[bool]
         self.train_sn_mask: npt.NDArray[bool]
         self.train_spec_mask: npt.NDArray[bool]
         self.train_wl_mask: npt.NDArray[bool]
 
-        self.test_data: DataStepResult
+        self.test_data: SNPAEData
         self.test_mask: npt.NDArray[bool]
         self.test_sn_mask: npt.NDArray[bool]
         self.test_spec_mask: npt.NDArray[bool]
         self.test_wl_mask: npt.NDArray[bool]
 
-        self.val_data: DataStepResult
+        self.val_data: SNPAEData
         self.val_mask: npt.NDArray[bool]
         self.val_sn_mask: npt.NDArray[bool]
         self.val_spec_mask: npt.NDArray[bool]
@@ -144,26 +150,26 @@ class PAE(Step):
         self.analysis: PAEStepAnalysis = self.options.analysis or PAEStepAnalysis()
 
     @override
-    def _setup(self, *, data_step: "Data") -> None:
+    def _setup(self, *args: Any, data: "DataStepResult", **kwargs: Any) -> None:
         super()._setup()
         # === Previous Step Variables ===
-        self.data = data_step.data
-        self.colourlaw = data_step.colourlaw
-        self.train_data = data_step.train_data[self.kfold % len(data_step.train_data)]
-        self.test_data = data_step.test_data[self.kfold % len(data_step.test_data)]
+        self.data = data.data
+        self.colourlaw = data.colourlaw
+        self.train_data = data.train_data[self.kfold % len(data.train_data)]
+        self.test_data = data.test_data[self.kfold % len(data.test_data)]
         self.val_data = self.test_data
         if self.validation_frac > 0:
-            ind_split = int(data_step.sn_dim * self.validation_frac)
-            self.val_data = DataStepResult.model_validate({
+            ind_split = int(data.sn_dim * self.validation_frac)
+            self.val_data = SNPAEData.model_validate({
                 k: v[-ind_split:] for k, v in self.train_data.model_dump().items()
             })
-            self.train_data = DataStepResult.model_validate({
+            self.train_data = SNPAEData.model_validate({
                 k: v[:-ind_split] for k, v in self.train_data.model_dump().items()
             })
 
         # --- Bounds ---
-        self.min_redshift = self.options.min_redshift or data_step.min_redshift
-        self.max_redshift = self.options.max_redshift or data_step.max_redshift
+        self.min_redshift = self.options.min_redshift or data.min_redshift
+        self.max_redshift = self.options.max_redshift or data.max_redshift
         self.min_train_redshift = self.options.min_train_redshift or self.min_redshift
         self.max_train_redshift = self.options.max_train_redshift or self.max_redshift
         self.min_test_redshift = self.options.min_test_redshift or self.min_redshift
@@ -171,8 +177,8 @@ class PAE(Step):
         self.min_val_redshift = self.options.min_val_redshift or self.min_redshift
         self.max_val_redshift = self.options.max_val_redshift or self.max_redshift
 
-        self.min_phase = self.options.min_phase or data_step.min_phase
-        self.max_phase = self.options.max_phase or data_step.max_phase
+        self.min_phase = self.options.min_phase or data.min_phase
+        self.max_phase = self.options.max_phase or data.max_phase
         self.min_train_phase = self.options.min_train_phase or self.min_phase
         self.max_train_phase = self.options.max_train_phase or self.max_phase
         self.min_test_phase = self.options.min_test_phase or self.min_phase
@@ -180,8 +186,8 @@ class PAE(Step):
         self.min_val_phase = self.options.min_val_phase or self.min_phase
         self.max_val_phase = self.options.max_val_phase or self.max_phase
 
-        self.min_wavelength = self.options.min_wavelength or data_step.min_wavelength
-        self.max_wavelength = self.options.max_wavelength or data_step.max_wavelength
+        self.min_wavelength = self.options.min_wavelength or data.min_wavelength
+        self.max_wavelength = self.options.max_wavelength or data.max_wavelength
         self.min_train_wavelength = (
             self.options.min_train_wavelength or self.min_wavelength
         )
@@ -202,15 +208,13 @@ class PAE(Step):
         # === Config Variables ===
         # --- Required ---
         n_batches = self.options.n_batches
-        self.batch_size = max(
-            int(data_step.train_frac * data_step.sn_dim / n_batches), 1
-        )
+        self.batch_size = max(int(data.train_frac * data.sn_dim / n_batches), 1)
 
         # === Setup Variables ===
         # Data Dimensions
-        self.sn_dim = data_step.sn_dim
-        self.spec_dim = data_step.spec_dim
-        self.wl_dim = data_step.wl_dim
+        self.sn_dim = data.sn_dim
+        self.spec_dim = data.spec_dim
+        self.wl_dim = data.wl_dim
 
         # PAEStages
         stage_data = {
@@ -329,8 +333,10 @@ class PAE(Step):
         if not self.seperate_latent_training:
             self.run_stages = [self.stage_final]
 
+        self.is_setup = True
+
     @override
-    def _completed(self) -> bool:
+    def _completed(self, *args: Any, **kwargs: Any) -> bool:
         final_savepath = self.paths.results / self.model.name / self.model.ckpt_path
         if not (final_savepath.exists() and any(final_savepath.iterdir())):
             self.log.debug(
@@ -340,7 +346,7 @@ class PAE(Step):
         return True
 
     @override
-    def _load(self) -> None:
+    def _load(self, *args: Any, **kwargs: Any) -> None:
         final_stage = self.run_stages[-1]
         final_stage.prev_stage = None
         self.model.stage = final_stage
@@ -349,8 +355,10 @@ class PAE(Step):
         self.log.debug(f"Loading final PAE model weights from {final_loadpath}")
         self.model.load_checkpoint(final_loadpath, reset_weights=False)
 
+        self.is_loaded = True
+
     @override
-    def _run(self) -> None:
+    def _run(self, *args: Any, **kwargs: Any) -> None:
         savepath: Path | None = None
         for i, stage in enumerate(self.run_stages):
             self.model = self.model.__class__(self)
@@ -379,8 +387,18 @@ class PAE(Step):
         self.log.debug(f"Loading final PAE model weights from {final_loadpath}")
         self.model.load_checkpoint(final_loadpath, reset_weights=False)
 
+        self.is_loaded = True
+
     @override
-    def _result(self) -> None:
+    def _result(self, *args: Any, **kwargs: Any) -> None:
+        pae_results = {}
+        pae_results["min_redshift"] = self.min_redshift
+        pae_results["max_redshift"] = self.max_redshift
+        pae_results["min_phase"] = self.min_phase
+        pae_results["max_phase"] = self.max_phase
+        pae_results["min_wavelength"] = self.min_wavelength
+        pae_results["max_wavelength"] = self.max_wavelength
+
         final_stage = self.run_stages[-1]
         final_stage.prev_stage = None
         self.model.stage = final_stage
@@ -389,11 +407,13 @@ class PAE(Step):
         self.log.debug(f"Loading final PAE model weights from {final_loadpath}")
         self.model.load_checkpoint(final_loadpath, reset_weights=False)
 
+        pae_results["model"] = self.model
+
         self.log.debug("Calculating PAE results")
-        dt_results: dict[str, dict[str, PAEStepResult]] = {}
-        for dt in ["train_", "test_", ""]:
+        dt_results: dict[str, dict[str, PAEStageResult]] = {}
+        for dt in ["train_", "test_"]:
             data = getattr(self, f"{dt}data")
-            model_results: dict[str, PAEStepResult] = {}
+            model_results: dict[str, PAEStageResult] = {}
             for stage in self.run_stages:
                 self.model = self.model.__class__(self)
                 savepath = (
@@ -463,13 +483,18 @@ class PAE(Step):
                     "delta_loss": delta_loss,
                     "cov_loss": cov_loss,
                 }
-                stage_results = PAEStepResult.model_validate(results)
+                stage_results = PAEStageResult.model_validate(results)
                 model_results[str(stage.stage)] = stage_results
             dt_results[dt[:-1]] = model_results
-        self.results = dt_results
+
+        pae_results["stages"] = dt_results
+
+        self.results = PAEStepResult.model_validate(pae_results)
+
+        self.has_results = True
 
     @override
-    def _analyse(self) -> None:
+    def _analyse(self, *args: Any, **kwargs: Any) -> None:
         labels = {}
         ind = 0
         if self.physical_latents:
@@ -481,9 +506,15 @@ class PAE(Step):
             labels[ind] = f"z{i + 1}"
             ind += 1
 
-        for dt in ["train_", "test_", ""]:
+        for dt in ["train_", "test_"]:
             for stage in self.run_stages:
-                results = self.results[dt[:-1]][str(stage.stage)]
+                results = self.results.stages[dt[:-1]][str(stage.stage)]
+
+                input_mask = results.input_mask
+                input_sn_mask = results.input_sn_mask
+                input_spec_mask = results.input_spec_mask
+                input_wl_mask = results.input_wl_mask
+
                 if self.analysis.plot_residual is not None:
                     if not isinstance(self.analysis.plot_residual, list):
                         self.analysis.plot_residual = [self.analysis.plot_residual]
@@ -504,11 +535,6 @@ class PAE(Step):
                             o.plot_kwargs = {
                                 "label": f"{dt}{self.name}_{stage.name} ({results.loss:.2E}, {results.pred_loss:.2E})",
                             }
-
-                        input_mask = results.input_mask
-                        input_sn_mask = results.input_sn_mask
-                        input_spec_mask = results.input_spec_mask
-                        input_wl_mask = results.input_wl_mask
 
                         wl, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask = (
                             SpectraPlotter.prep(
@@ -554,8 +580,34 @@ class PAE(Step):
                             )
                         o.savepath.mkdir(parents=True, exist_ok=True)
                         if o.plot_kwargs is None:
-                            o.plot_kwargs = {"title": f"{dt}{self.name}{stage.name}"}
-                        chains = results.latents[:, : stage.stage]
+                            o.plot_kwargs = {"title": f"{dt}{self.name}_{stage.name}"}
+
+                        wl, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask = (
+                            SpectraPlotter.prep(
+                                getattr(self, f"{dt}data").model_copy(deep=True),
+                                o,
+                                mask=input_mask,
+                                sn_mask=input_sn_mask,
+                                spec_mask=input_spec_mask,
+                                wl_mask=input_wl_mask,
+                            )
+                        )
+
+                        # ~(~input_mask & input_wl_mask)
+                        # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
+                        valid_wl_mask = np.logical_not(
+                            np.logical_and(np.logical_not(input_mask), input_wl_mask)
+                        )
+
+                        # Determine which spectra to keep
+                        # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+                        mask_spec = np.min(valid_wl_mask, axis=-1, keepdims=True)
+
+                        # Determine which SNe to keep
+                        # Will mask out any SN with *no* unmasked spectra
+                        mask_sn = np.max(mask_spec, axis=-2)[:, 0]
+
+                        chains = results.latents[:, : stage.stage][mask_sn]
 
                         DistributionPlotter.plot_corner(
                             chains,
@@ -568,7 +620,7 @@ class PAE(Step):
                         )
 
             if self.analysis.plot_residual is not None:
-                results = self.results[dt[:-1]][str(self.run_stages[0].stage)]
+                results = self.results.stages[dt[:-1]][str(self.run_stages[0].stage)]
                 if not isinstance(self.analysis.plot_residual, list):
                     self.analysis.plot_residual = [self.analysis.plot_residual]
                 for opts in self.analysis.plot_residual:
@@ -582,7 +634,7 @@ class PAE(Step):
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {}
                     o.plot_kwargs["label"] = (
-                        f"{dt}{self.name}{self.run_stages[0].name} ({results.loss:.2E}, {results.pred_loss:.2E})",
+                        f"{dt}{self.name}_{self.run_stages[0].name} ({results.loss:.2E}, {results.pred_loss:.2E})",
                     )
                     savepath = (o.savepath or Path()) / f"{o.name}.{o.ext}"
                     if not savepath.exists():
@@ -617,7 +669,7 @@ class PAE(Step):
                             wl_mask=input_wl_mask,
                         )
                         for stage in self.run_stages[1:]:
-                            results = self.results[dt[:-1]][str(stage.stage)]
+                            results = self.results.stages[dt[:-1]][str(stage.stage)]
                             input_mask = results.input_mask
                             input_sn_mask = results.input_sn_mask
                             input_spec_mask = results.input_spec_mask
@@ -645,7 +697,7 @@ class PAE(Step):
                             data = getattr(self, f"{dt}data").model_copy(deep=True)
                             data.amplitude = results.output_amp
                             o.plot_kwargs["label"] = (
-                                f"{dt}{self.name}{stage.name} ({results.loss:.2E}, {results.pred_loss:.2E})"
+                                f"{dt}{self.name}_{stage.name} ({results.loss:.2E}, {results.pred_loss:.2E})"
                             )
                             o.plot_base = False
 
@@ -683,8 +735,35 @@ class PAE(Step):
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {"title": f"{dt}{self.name}"}
 
+                    wl, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask = (
+                        SpectraPlotter.prep(
+                            getattr(self, f"{dt}data").model_copy(deep=True),
+                            o,
+                            mask=input_mask,
+                            sn_mask=input_sn_mask,
+                            spec_mask=input_spec_mask,
+                            wl_mask=input_wl_mask,
+                        )
+                    )
+
+                    # ~(~input_mask & input_wl_mask)
+                    # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
+                    valid_wl_mask = np.logical_not(
+                        np.logical_and(np.logical_not(input_mask), input_wl_mask)
+                    )
+
+                    # Determine which spectra to keep
+                    # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+                    mask_spec = np.min(valid_wl_mask, axis=-1, keepdims=True)
+
+                    # Determine which SNe to keep
+                    # Will mask out any SN with *no* unmasked spectra
+                    mask_sn = np.max(mask_spec, axis=-2)[:, 0]
+
                     chains = {
-                        stage.name: self.results[dt[:-1]][str(stage.stage)].latents
+                        stage.name: self.results.stages[dt[:-1]][
+                            str(stage.stage)
+                        ].latents[mask_sn]
                         for stage in self.run_stages
                     }
 
@@ -698,11 +777,80 @@ class PAE(Step):
                         bins=self.sn_dim,
                     )
 
+        self.was_analysed = True
+
+    @override
+    def _clear(
+        self,
+        *args: "Any",
+        setup: bool = False,
+        load: bool = False,
+        result: bool = False,
+        analyse: bool = False,
+        complete: bool = False,
+        **kwargs: "Any",
+    ) -> None:
+        if not any((setup, load, result, analyse, complete)):
+            setup = True
+            load = True
+            result = True
+            analyse = True
+
+        if setup:
+            self.clear_attributes([
+                "data",
+                "mask",
+                "sn_mask",
+                "spec_mask",
+                "wl_mask",
+                "train_data",
+                "train_mask",
+                "train_sn_mask",
+                "train_spec_mask",
+                "train_wl_mask",
+                "test_data",
+                "test_mask",
+                "test_sn_mask",
+                "test_spec_mask",
+                "test_wl_mask",
+                "val_data",
+                "val_mask",
+                "val_sn_mask",
+                "val_spec_mask",
+                "val_wl_mask",
+                "colourlaw",
+                "stage_delta_av",
+                "stage_zs",
+                "stage_delta_m",
+                "stage_delta_p",
+                "stage_final",
+                "run_stages",
+            ])
+
+        if load:
+            self.clear_attributes("model")
+
+        if result:
+            self.clear_attributes("results")
+
+        if analyse:
+            self.analysis = self.options.analysis or PAEStepAnalysis()
+
+        super()._clear(
+            *args,
+            setup=setup,
+            load=load,
+            result=result,
+            analyse=analyse,
+            complete=complete,
+            **kwargs,
+        )
+
     # === Instance Methods ===
 
     def setup_data_masks(self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
-            data: DataStepResult = getattr(self, f"{mask_type}data")
+            data: SNPAEData = getattr(self, f"{mask_type}data")
             min_redshift: float = getattr(self, f"min_{mask_type}redshift")
             max_redshift: float = getattr(self, f"max_{mask_type}redshift")
             redshift_mask = (
@@ -738,6 +886,116 @@ class PAEStep(Model):
     model_backend: "ClassVar[dict[str, Callable[[], type[PAEModel]]]]" = {
         "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFPAEModel,
     }
+
+    def __init__(self, config: "PAEStepConfig") -> None:
+        super().__init__(config)
+        self.plots = {}
+        self.bases = {}
+
+    @override
+    def _analyse(
+        self, *args: "Any", variants: str | list[str] | None = None, **kwargs: "Any"
+    ) -> None:
+        if variants is None:
+            return
+        if not isinstance(variants, list):
+            variants = [variants]
+
+        for variant_name in variants:
+            variant = self.variants[variant_name]
+
+            super()._analyse(*args, **{**kwargs, "variants": [variant_name]})
+
+            labels = {}
+            ind = 0
+            if variant.physical_latents:
+                labels[0] = "ΔAᵥ"
+                ind = 1
+                labels[variant.n_pae_latents - 2] = "Δℳ"
+                labels[variant.n_pae_latents - 1] = "Δp"
+            for i in range(variant.n_z_latents):
+                labels[ind] = f"z{i + 1}"
+                ind += 1
+
+            for dt in ["train_", "test_"]:
+                for stage in variant.run_stages:
+                    results = variant.results.stages[dt[:-1]][str(stage.stage)]
+
+                    input_mask = results.input_mask
+                    input_sn_mask = results.input_sn_mask
+                    input_spec_mask = results.input_spec_mask
+                    input_wl_mask = results.input_wl_mask
+
+                    if variant.analysis.plot_residual is not None:
+                        for opts in variant.analysis.plot_residual:
+                            o = opts.model_copy(deep=True)
+                            o.name = f"{stage.name} {dt[:-1]} residual"
+                            o.plot_kwargs = {
+                                "label": f"{variant.name} ({results.loss:.2E}, {results.pred_loss:.2E})",
+                            }
+
+                            name = f"{dt[:-1]}/{stage.stage}/{o.name}.{o.ext}"
+                            self.plots[name] = self.plots.get(
+                                name, {"fig": None, "ax": None, "base": True}
+                            )
+                            fig = self.plots[name]["fig"]
+                            ax = self.plots[name]["ax"]
+                            o.plot_base = self.plots[name]["base"]
+
+                            (
+                                wl,
+                                amplitude,
+                                sigma,
+                                mask,
+                                _sn_mask,
+                                _spec_mask,
+                                _wl_mask,
+                            ) = SpectraPlotter.prep(
+                                getattr(variant, f"{dt}data").model_copy(deep=True),
+                                o,
+                                mask=input_mask,
+                                sn_mask=input_sn_mask,
+                                spec_mask=input_spec_mask,
+                                wl_mask=input_wl_mask,
+                            )
+                            o.base_wl = wl
+                            o.base_amp = amplitude
+                            o.base_sigma = sigma
+                            o.base_mask = np.logical_not(mask)
+                            data = getattr(variant, f"{dt}data").model_copy(deep=True)
+                            data.amplitude = results.output_amp
+                            fig, ax = SpectraPlotter.plot_residual(
+                                data,
+                                o,
+                                mask=input_mask,
+                                sn_mask=input_sn_mask,
+                                spec_mask=input_spec_mask,
+                                wl_mask=input_wl_mask,
+                                fig=fig,
+                                ax=ax,
+                                save=False,
+                                force=True,
+                            )
+
+                            self.plots[name]["fig"] = fig
+                            self.plots[name]["ax"] = ax
+                            self.plots[name]["base"] = False
+
+    @override
+    @callback
+    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
+        super().analyse(*args, **kwargs)
+        if len(self.variants) > 1:
+            for name, opts in self.plots.items():
+                savepath = self.paths.plots / name
+                savepath.parent.mkdir(parents=True, exist_ok=True)
+                if savepath.exists():
+                    continue
+                self.log.debug(f"Plotting {name}")
+                fig = opts["fig"]
+                ax = opts["ax"]
+                fig = Plotter.save(fig, savepath)
+                Plotter.close(fig, ax)
 
 
 PAEStep.register_step(PAE)

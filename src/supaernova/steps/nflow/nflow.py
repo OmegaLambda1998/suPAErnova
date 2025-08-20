@@ -1,12 +1,16 @@
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, Any, ClassVar, override
 import importlib
 
 import numpy as np
 
 from supaernova.steps import Step
 from supaernova.steps.models import Model
-from supaernova.configs.steps.data import DataStepResult
-from supaernova.configs.steps.nflow import NFlowStepResult, NFlowStepAnalysis
+from supaernova.configs.steps.data import SNPAEData
+from supaernova.configs.steps.nflow import (
+    NFlowStepResult,
+    NFlowModelResult,
+    NFlowStepAnalysis,
+)
 from supaernova.analysis.distribution import DistributionPlotter
 
 if TYPE_CHECKING:
@@ -15,8 +19,9 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from supaernova.steps.pae import PAE, PAEModel
-    from supaernova.steps.data import Data
+    from supaernova.steps.pae import PAEModel
+    from supaernova.configs.steps.pae import PAEStepResult
+    from supaernova.configs.steps.data import DataStepResult
     from supaernova.configs.steps.nflow import NFlowStepConfig
 
     from .tf import TFNFlowModel
@@ -32,30 +37,28 @@ class NFlow(Step):
         super().__init__(config)
 
         # === Previous Step Variables ===
-        self.data_step: Data
-        self.kfold: int
-        self.pae_step: PAE
+        self.kfold = self.options.kfold
         self.pae: PAEModel
 
-        self.data: DataStepResult
+        self.data: SNPAEData
         self.mask: npt.NDArray[bool]
         self.sn_mask: npt.NDArray[bool]
         self.spec_mask: npt.NDArray[bool]
         self.wl_mask: npt.NDArray[bool]
 
-        self.train_data: DataStepResult
+        self.train_data: SNPAEData
         self.train_mask: npt.NDArray[bool]
         self.train_sn_mask: npt.NDArray[bool]
         self.train_spec_mask: npt.NDArray[bool]
         self.train_wl_mask: npt.NDArray[bool]
 
-        self.test_data: DataStepResult
+        self.test_data: SNPAEData
         self.test_mask: npt.NDArray[bool]
         self.test_sn_mask: npt.NDArray[bool]
         self.test_spec_mask: npt.NDArray[bool]
         self.test_wl_mask: npt.NDArray[bool]
 
-        self.val_data: DataStepResult
+        self.val_data: SNPAEData
         self.val_mask: npt.NDArray[bool]
         self.val_sn_mask: npt.NDArray[bool]
         self.val_spec_mask: npt.NDArray[bool]
@@ -118,41 +121,35 @@ class NFlow(Step):
         self.analysis: NFlowStepAnalysis = self.options.analysis or NFlowStepAnalysis()
 
     @override
-    def _setup(self, *, data: "Data", pae: "PAE") -> None:
+    def _setup(
+        self, *args: Any, data: "DataStepResult", pae: "PAEStepResult", **kwargs: Any
+    ) -> None:
         super()._setup()
         # === Previous Step Variables ===
-        self.data_step = data
         self.data = data.data
-        self.pae_step = pae
-        self.pae_step.load()
-        self.pae = self.pae_step.model
-        self.kfold = self.options.kfold or self.pae_step.kfold
+        self.pae = pae.model
         self.train_data = data.train_data[self.kfold % len(data.train_data)]
         self.test_data = data.test_data[self.kfold % len(data.test_data)]
         self.val_data = self.test_data
         if self.validation_frac > 0:
-            ind_split = int(self.data_step.sn_dim * self.validation_frac)
-            self.val_data = DataStepResult.model_validate({
+            ind_split = int(data.sn_dim * self.validation_frac)
+            self.val_data = SNPAEData.model_validate({
                 k: v[-ind_split:] for k, v in self.train_data.model_dump().items()
             })
-            self.train_data = DataStepResult.model_validate({
+            self.train_data = SNPAEData.model_validate({
                 k: v[:-ind_split] for k, v in self.train_data.model_dump().items()
             })
 
         self.batch_size = max(
-            int(
-                self.data_step.train_frac
-                * self.data_step.sn_dim
-                / self.options.n_batches
-            ),
+            int(data.train_frac * data.sn_dim / self.options.n_batches),
             1,
         )
 
         self.min_redshift = self.options.min_redshift or max(
-            self.pae_step.min_redshift, self.data_step.min_redshift
+            pae.min_redshift, data.min_redshift
         )
         self.max_redshift = self.options.max_redshift or min(
-            self.pae_step.max_redshift, self.data_step.max_redshift
+            pae.max_redshift, data.max_redshift
         )
         self.min_train_redshift = self.options.min_train_redshift or self.min_redshift
         self.max_train_redshift = self.options.max_train_redshift or self.max_redshift
@@ -161,12 +158,8 @@ class NFlow(Step):
         self.min_val_redshift = self.options.min_val_redshift or self.min_redshift
         self.max_val_redshift = self.options.max_val_redshift or self.max_redshift
 
-        self.min_phase = self.options.min_phase or max(
-            self.pae_step.min_phase, self.data_step.min_phase
-        )
-        self.max_phase = self.options.max_phase or min(
-            self.pae_step.max_phase, self.data_step.max_phase
-        )
+        self.min_phase = self.options.min_phase or max(pae.min_phase, data.min_phase)
+        self.max_phase = self.options.max_phase or min(pae.max_phase, data.max_phase)
         self.min_train_phase = self.options.min_train_phase or self.min_phase
         self.max_train_phase = self.options.max_train_phase or self.max_phase
         self.min_test_phase = self.options.min_test_phase or self.min_phase
@@ -175,10 +168,10 @@ class NFlow(Step):
         self.max_val_phase = self.options.max_val_phase or self.max_phase
 
         self.min_wavelength = self.options.min_wavelength or max(
-            self.pae_step.min_wavelength, self.data_step.min_wavelength
+            pae.min_wavelength, data.min_wavelength
         )
         self.max_wavelength = self.options.max_wavelength or min(
-            self.pae_step.max_wavelength, self.data_step.max_wavelength
+            pae.max_wavelength, data.max_wavelength
         )
         self.min_train_wavelength = (
             self.options.min_train_wavelength or self.min_wavelength
@@ -197,8 +190,10 @@ class NFlow(Step):
 
         self.setup_data_masks()
 
+        self.is_setup = True
+
     @override
-    def _completed(self) -> bool:
+    def _completed(self, *args: Any, **kwargs: Any) -> bool:
         self.savepath = self.paths.results / self.model.name
         savepath = self.savepath / self.model.ckpt_path
 
@@ -210,21 +205,35 @@ class NFlow(Step):
         return True
 
     @override
-    def _load(self) -> None:
+    def _load(self, *args: Any, **kwargs: Any) -> None:
         self.log.debug(f"Loading final NFlow model weights from {self.savepath}")
         self.model.load_checkpoint(self.savepath)
 
-    @override
-    def _run(self) -> None:
-        self.model.train_model(savepath=self.savepath)
+        self.is_loaded = True
 
     @override
-    def _result(self) -> None:
+    def _run(self, *args: Any, **kwargs: Any) -> None:
+        self.model.train_model(savepath=self.savepath)
+
+        self.is_loaded = True
+
+    @override
+    def _result(self, *args: Any, **kwargs: Any) -> None:
+        nflow_results = {}
+        nflow_results["min_redshift"] = self.min_redshift
+        nflow_results["max_redshift"] = self.max_redshift
+        nflow_results["min_phase"] = self.min_phase
+        nflow_results["max_phase"] = self.max_phase
+        nflow_results["min_wavelength"] = self.min_wavelength
+        nflow_results["max_wavelength"] = self.max_wavelength
+
         self.log.debug(f"Saving final NFlow model weights to {self.savepath}")
         self.model.save_checkpoint(self.savepath)
 
+        nflow_results["model"] = self.model
+
         dt_results: dict[str, NFlowStepResult] = {}
-        for dt in ["train_", "test_", ""]:
+        for dt in ["train_", "test_"]:
             data = getattr(self, f"{dt}data")
             mask = getattr(self.model, f"{dt}mask")
             z_latents = getattr(self.model, f"{dt}latents")
@@ -245,12 +254,15 @@ class NFlow(Step):
                 "log_prob": -log_prob.numpy(),
             }
 
-            dt_results[dt[:-1]] = NFlowStepResult.model_validate(model_results)
+            dt_results[dt[:-1]] = NFlowModelResult.model_validate(model_results)
 
-        self.results = dt_results
+        nflow_results["models"] = dt_results
+        self.results = NFlowStepResult.model_validate(nflow_results)
+
+        self.has_results = True
 
     @override
-    def _analyse(self) -> None:
+    def _analyse(self, *args: Any, **kwargs: Any) -> None:
         z_labels = {}
         u_labels = {}
         labels = {}
@@ -266,24 +278,18 @@ class NFlow(Step):
             labels[ind] = f"z/μ{i + 1}"
             ind += 1
 
-        for dt in ["train_", "test_", ""]:
-            results = self.results[dt[:-1]]
+        for dt in ["train_", "test_"]:
+            results = self.results.models[dt[:-1]]
             gaussian = self.rng.normal(0, 1, (results.u_latents.size**2, ind))
 
-            mask = np.repeat(
-                np.logical_not(getattr(self.model, f"{dt}mask").numpy()),
-                self.model.n_flow_latents,
-                axis=-1,
-            )
+            mask = getattr(self.model, f"{dt}mask")[:, 0].numpy().astype(bool)
+
             u_latents = self.model.z_to_u(results.z_latents, permute=True).numpy()
             z_latents = self.model.u_to_z(u_latents, permute=True).numpy()
 
-            z = np.ma.masked_array(results.z_latents, mask)
-            z = results.z_latents
-            z_to_u = np.ma.masked_array(u_latents, mask)
-            z_to_u = u_latents
-            u_to_z = np.ma.masked_array(z_latents, mask)
-            u_to_z = z_latents
+            z = results.z_latents[mask]
+            z_to_u = u_latents[mask]
+            u_to_z = z_latents[mask]
 
             if self.analysis.plot_u_latents is not None:
                 if not isinstance(self.analysis.plot_u_latents, list):
@@ -380,8 +386,7 @@ class NFlow(Step):
                             results.z_latents, step, permute=True
                         )
 
-                        step_u_latents = np.ma.masked_array(step_latents.numpy(), mask)
-                        step_u_latents = step_latents.numpy()
+                        step_u_latents = step_latents.numpy()[mask]
 
                         if is_shift:
                             continue
@@ -422,11 +427,74 @@ class NFlow(Step):
                             },
                         )
 
+        self.was_analysed = True
+
+    @override
+    def _clear(
+        self,
+        *args: "Any",
+        setup: bool = False,
+        load: bool = False,
+        result: bool = False,
+        analyse: bool = False,
+        complete: bool = False,
+        **kwargs: "Any",
+    ) -> None:
+        if not any((setup, load, result, analyse, complete)):
+            setup = True
+            load = True
+            result = True
+            analyse = True
+
+        if setup:
+            self.clear_attributes([
+                "data",
+                "pae",
+                "mask",
+                "sn_mask",
+                "spec_mask",
+                "wl_mask",
+                "train_data",
+                "train_mask",
+                "train_sn_mask",
+                "train_spec_mask",
+                "train_wl_mask",
+                "test_data",
+                "test_mask",
+                "test_sn_mask",
+                "test_spec_mask",
+                "test_wl_mask",
+                "val_data",
+                "val_mask",
+                "val_sn_mask",
+                "val_spec_mask",
+                "val_wl_mask",
+            ])
+
+        if load:
+            self.clear_attributes("model")
+
+        if result:
+            self.clear_attributes("results")
+
+        if analyse:
+            self.analysis = self.options.analysis or NFlowStepAnalysis()
+
+        super()._clear(
+            *args,
+            setup=setup,
+            load=load,
+            result=result,
+            analyse=analyse,
+            complete=complete,
+            **kwargs,
+        )
+
     # === Instance Methods ===
 
     def setup_data_masks(self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
-            data: DataStepResult = getattr(self, f"{mask_type}data")
+            data: SNPAEData = getattr(self, f"{mask_type}data")
             mask = data.mask
 
             min_redshift: float = getattr(self, f"min_{mask_type}redshift")

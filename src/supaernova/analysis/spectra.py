@@ -26,7 +26,7 @@ class SpectraPlot(AbstractPlot):
 
 
 class ResidualPlot(SpectraPlot):
-    base: str
+    base: str = ""
     base_wl: np.ndarray | None = None
     base_amp: np.ndarray | None = None
     base_sigma: np.ndarray | None = None
@@ -48,18 +48,18 @@ class SpectraPlotter(Plotter):
         data: "DataStepResult",
         config: "SpectraPlot",
         *,
-        mask: "npt.NDArray[np.float32] | None" = None,
-        sn_mask: "npt.NDArray[np.float32] | None" = None,
-        spec_mask: "npt.NDArray[np.float32] | None" = None,
-        wl_mask: "npt.NDArray[np.float32] | None" = None,
+        mask: "npt.NDArray[float] | None" = None,
+        sn_mask: "npt.NDArray[float] | None" = None,
+        spec_mask: "npt.NDArray[float] | None" = None,
+        wl_mask: "npt.NDArray[float] | None" = None,
     ) -> tuple[
-        "npt.NDArray[np.float32]",
-        "npt.NDArray[np.float32]",
-        "npt.NDArray[np.float32]",
-        "npt.NDArray[np.int32]",
-        "npt.NDArray[np.int32]",
-        "npt.NDArray[np.int32]",
-        "npt.NDArray[np.int32]",
+        "npt.NDArray[float]",
+        "npt.NDArray[float]",
+        "npt.NDArray[float]",
+        "npt.NDArray[int]",
+        "npt.NDArray[int]",
+        "npt.NDArray[int]",
+        "npt.NDArray[int]",
     ]:
         wl = data.wavelength.copy()
         amplitude = data.amplitude.copy()
@@ -109,10 +109,10 @@ class SpectraPlotter(Plotter):
         ax: "Axis | None" = None,
         force: bool = False,
         save: bool = True,
-        mask: "npt.NDArray[np.float32] | None" = None,
-        sn_mask: "npt.NDArray[np.float32] | None" = None,
-        spec_mask: "npt.NDArray[np.float32] | None" = None,
-        wl_mask: "npt.NDArray[np.float32] | None" = None,
+        mask: "npt.NDArray[float] | None" = None,
+        sn_mask: "npt.NDArray[float] | None" = None,
+        spec_mask: "npt.NDArray[float] | None" = None,
+        wl_mask: "npt.NDArray[float] | None" = None,
         **kwargs: "Any",
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
@@ -206,10 +206,10 @@ class SpectraPlotter(Plotter):
         ax: "Axis | None" = None,
         force: bool = False,
         save: bool = True,
-        mask: "npt.NDArray[np.float32] | None" = None,
-        sn_mask: "npt.NDArray[np.float32] | None" = None,
-        spec_mask: "npt.NDArray[np.float32] | None" = None,
-        wl_mask: "npt.NDArray[np.float32] | None" = None,
+        mask: "npt.NDArray[float] | None" = None,
+        sn_mask: "npt.NDArray[float] | None" = None,
+        spec_mask: "npt.NDArray[float] | None" = None,
+        wl_mask: "npt.NDArray[float] | None" = None,
         **kwargs: "Any",
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
@@ -310,10 +310,10 @@ class SpectraPlotter(Plotter):
         ax: "Axis | None" = None,
         force: bool = False,
         save: bool = True,
-        mask: "npt.NDArray[np.float32] | None" = None,
-        sn_mask: "npt.NDArray[np.float32] | None" = None,
-        spec_mask: "npt.NDArray[np.float32] | None" = None,
-        wl_mask: "npt.NDArray[np.float32] | None" = None,
+        mask: "npt.NDArray[float] | None" = None,
+        sn_mask: "npt.NDArray[float] | None" = None,
+        spec_mask: "npt.NDArray[float] | None" = None,
+        wl_mask: "npt.NDArray[float] | None" = None,
         **kwargs: "Any",
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"

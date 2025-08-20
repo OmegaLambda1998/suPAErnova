@@ -1,15 +1,15 @@
 # Copyright 2025 Patrick Armstrong
-import gc
+from time import time
 from typing import Self
 from functools import cached_property
 
 from pydantic import computed_field, model_validator
 
 from supaernova.steps import Step
-from supaernova.steps.pae import PAEStepResult
-from supaernova.steps.data import DataStepResult
-from supaernova.steps.nflow import NFlowStepResult
-from supaernova.steps.posterior import PosteriorStepResult
+from supaernova.steps.pae import PAEStep
+from supaernova.steps.data import DataStep
+from supaernova.steps.nflow import NFlowStep
+from supaernova.steps.posterior import PosteriorStep
 
 from .input import InputConfig
 from .steps import StepConfig, StepResult
@@ -46,10 +46,10 @@ class RunConfig(InputConfig):
         ]
 
     # Steps
-    data_step: DataStepResult | None = None
-    pae_step: PAEStepResult | None = None
-    nflow_step: NFlowStepResult | None = None
-    posterior_step: PosteriorStepResult | None = None
+    data_step: DataStep | None = None
+    pae_step: PAEStep | None = None
+    nflow_step: NFlowStep | None = None
+    posterior_step: PosteriorStep | None = None
 
     @computed_field
     @cached_property
@@ -91,7 +91,7 @@ class RunConfig(InputConfig):
     # --- Before ---
     # --- After ---
     # === Instance Methods ===
-    def require(self, step_name: str) -> StepResult:
+    def require(self, step_name: str) -> Step:
         step = getattr(self, step_name + "_step")
         if step is None:
             err = f"{step_name} has not yet run"
@@ -101,12 +101,25 @@ class RunConfig(InputConfig):
     def run(self) -> None:
         for step in self.steps:
             if not step.skip:
+                self.log.info(f"Executing {step.name}")
+                start_time = time()
                 args = []
                 kwargs = {
                     required_step: self.require(required_step)
                     for required_step in step.options.required_steps
                 }
                 step.analyse(*args, **kwargs)
-                setattr(self, step.id + "_step", step.results)
+                setattr(self, step.id + "_step", step)
+                step.clear(*args, **kwargs)
+                end_time = time()
+                exec_time = end_time - start_time
+                unit = "s"
+                if exec_time > 60:
+                    exec_time /= 60
+                    unit = "m"
+                if exec_time > 60:
+                    exec_time /= 60
+                    unit = "h"
+                self.log.info(f"{step.name} took {exec_time:.2f}{unit}")
 
     # === Static Methods ===

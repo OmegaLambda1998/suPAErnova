@@ -22,30 +22,30 @@ class SNPAEData(StepResult):
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    ind: "npt.NDArray[np.int32]"
-    nspectra: "npt.NDArray[np.int32]"
-    sn_name: "npt.NDArray[np.str_]"
-    dphase: "npt.NDArray[np.float32]"
-    redshift: "npt.NDArray[np.float32]"
-    x0: "npt.NDArray[np.float32]"
-    x1: "npt.NDArray[np.float32]"
-    c: "npt.NDArray[np.float32]"
-    mb: "npt.NDArray[np.float32]"
-    hubble_residual: "npt.NDArray[np.float32]"
-    luminosity_distance: "npt.NDArray[np.float32]"
-    spectra_id: "npt.NDArray[np.str_]"
-    phase: "npt.NDArray[np.float32]"
-    wl_mask_min: "npt.NDArray[np.float32]"
-    wl_mask_max: "npt.NDArray[np.float32]"
-    amplitude: "npt.NDArray[np.float32]"
-    sigma: "npt.NDArray[np.float32]"
-    salt_flux: "npt.NDArray[np.float32]"
-    wavelength: "npt.NDArray[np.float32]"
-    mask: "npt.NDArray[np.int32]"
-    sn_mask: "npt.NDArray[np.int32]"
-    spec_mask: "npt.NDArray[np.int32]"
-    wl_mask: "npt.NDArray[np.int32]"
-    time: "npt.NDArray[np.float32]"
+    ind: "npt.NDArray[int]"
+    nspectra: "npt.NDArray[int]"
+    sn_name: "npt.NDArray[str]"
+    dphase: "npt.NDArray[float]"
+    redshift: "npt.NDArray[float]"
+    x0: "npt.NDArray[float]"
+    x1: "npt.NDArray[float]"
+    c: "npt.NDArray[float]"
+    mb: "npt.NDArray[float]"
+    hubble_residual: "npt.NDArray[float]"
+    luminosity_distance: "npt.NDArray[float]"
+    spectra_id: "npt.NDArray[str]"
+    phase: "npt.NDArray[float]"
+    wl_mask_min: "npt.NDArray[float]"
+    wl_mask_max: "npt.NDArray[float]"
+    amplitude: "npt.NDArray[float]"
+    sigma: "npt.NDArray[float]"
+    salt_flux: "npt.NDArray[float]"
+    wavelength: "npt.NDArray[float]"
+    mask: "npt.NDArray[int]"
+    sn_mask: "npt.NDArray[int]"
+    spec_mask: "npt.NDArray[int]"
+    wl_mask: "npt.NDArray[int]"
+    time: "npt.NDArray[float]"
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---
@@ -63,8 +63,20 @@ class DataStepResult(StepResult):
     # === Field Variables ===
     # --- Required ---
     data: SNPAEData
+    dir: Path
     train_data: list[SNPAEData]
     test_data: list[SNPAEData]
+    colourlaw: npt.NDArray[float] | None
+    min_redshift: float
+    max_redshift: float
+    min_phase: float
+    max_phase: float
+    min_wavelength: float
+    max_wavelength: float
+    train_frac: float
+    sn_dim: int
+    spec_dim: int
+    wl_dim: int
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---

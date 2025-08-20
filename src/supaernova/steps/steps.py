@@ -105,6 +105,7 @@ class Step:
         if not self.is_loaded:
             if self.completed(*args, **kwargs):
                 self.set_seed()
+                self.setup(*args, **kwargs)
                 self.log.info(f"Loading {self.name}")
                 self._load(*args, **kwargs)
                 self.log.info(f"Finished loading {self.name}")
@@ -120,6 +121,7 @@ class Step:
     def run(self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_loaded and (self.force or not self.completed(*args, **kwargs)):
             self.set_seed()
+            self.setup(*args, **kwargs)
             self.log.info(f"Running {self.name}")
             self._run(*args, **kwargs)
             self.log.info(f"Finished running {self.name}")
@@ -149,6 +151,62 @@ class Step:
             self.log.info(f"Analysing {self.name}")
             self._analyse(*args, **kwargs)
             self.log.info(f"Finished analysing {self.name}")
+
+    def clear_attributes(self, attributes: str | list[str]) -> None:
+        if not isinstance(attributes, list):
+            attributes = [attributes]
+        for attr in attributes:
+            if hasattr(self, attr):
+                delattr(self, attr)
+
+    @abstractmethod
+    def _clear(
+        self,
+        *args: "Any",
+        setup: bool = False,
+        load: bool = False,
+        result: bool = False,
+        analyse: bool = False,
+        complete: bool = False,
+        **kwargs: "Any",
+    ) -> None:
+        if complete:
+            setup = True
+            load = True
+            result = True
+            analyse = True
+        if setup:
+            self.is_setup = False
+        if load:
+            self.is_loaded = False
+        if result:
+            self.has_results = False
+        if analyse:
+            self.was_analysed = False
+
+    @callback
+    def clear(
+        self,
+        *args: "Any",
+        setup: bool = False,
+        load: bool = False,
+        result: bool = False,
+        analyse: bool = False,
+        complete: bool = False,
+        **kwargs: "Any",
+    ) -> None:
+        self.set_seed()
+        self.log.info(f"Clearing {self.name}")
+        self._clear(
+            *args,
+            setup=setup,
+            load=load,
+            result=result,
+            analyse=analyse,
+            complete=complete,
+            **kwargs,
+        )
+        self.log.info(f"Finished clearing {self.name}")
 
     def set_seed(self, seed: int = 0) -> None:
         seed = self.seed + seed
