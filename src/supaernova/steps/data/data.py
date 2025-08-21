@@ -278,10 +278,10 @@ class Data(Step):
                     opts.plot_kwargs = {"label": self.name}
                 SpectraPlotter.plot_summary(self.results.data, opts)
 
-        if self.analysis.plot_residual is not None:
-            if not isinstance(self.analysis.plot_residual, list):
-                self.analysis.plot_residual = [self.analysis.plot_residual]
-            for opts in self.analysis.plot_residual:
+        if self.analysis.plot_comparison is not None:
+            if not isinstance(self.analysis.plot_comparison, list):
+                self.analysis.plot_comparison = [self.analysis.plot_comparison]
+            for opts in self.analysis.plot_comparison:
                 if opts.name is None:
                     opts.name = "comparison"
                 self.log.debug(f"Plotting {opts.name}")
@@ -290,7 +290,7 @@ class Data(Step):
                 opts.savepath.mkdir(parents=True, exist_ok=True)
                 if opts.plot_kwargs is None:
                     opts.plot_kwargs = {"label": self.name}
-                SpectraPlotter.plot_residual(self.results.data, opts)
+                SpectraPlotter.plot_comparison(self.results.data, opts)
 
         self.was_analysed = True
 
@@ -860,10 +860,12 @@ class DataStep(Variant):
             variants = [variants]
         for variant_name in variants:
             variant = self.variants[variant_name]
-            if variant.analysis.plot_residual is not None:
-                if not isinstance(variant.analysis.plot_residual, list):
-                    variant.analysis.plot_residual = [variant.analysis.plot_residual]
-                for opts in variant.analysis.plot_residual:
+            if variant.analysis.plot_comparison is not None:
+                if not isinstance(variant.analysis.plot_comparison, list):
+                    variant.analysis.plot_comparison = [
+                        variant.analysis.plot_comparison
+                    ]
+                for opts in variant.analysis.plot_comparison:
                     name = f"{opts.name}.{opts.ext}"
                     self.bases[name] = self.bases.get(
                         name, {"wl": None, "amp": None, "sigma": None, "mask": None}
@@ -907,8 +909,8 @@ class DataStep(Variant):
                     self.plots[name]["fig"] = fig
                     self.plots[name]["ax"] = ax
 
-            if variant.analysis.plot_residual is not None:
-                for opts in variant.analysis.plot_residual:
+            if variant.analysis.plot_comparison is not None:
+                for opts in variant.analysis.plot_comparison:
                     o = opts.model_copy(deep=True)
                     name = f"{o.name}.{o.ext}"
                     self.plots[name] = self.plots.get(
@@ -917,7 +919,7 @@ class DataStep(Variant):
                     fig = self.plots[name]["fig"]
                     ax = self.plots[name]["ax"]
                     o.plot_base = self.plots[name]["base"]
-                    fig, ax = SpectraPlotter.plot_residual(
+                    fig, ax = SpectraPlotter.plot_comparison(
                         variant.results.data, o, fig=fig, ax=ax, save=False, force=True
                     )
                     self.plots[name]["fig"] = fig

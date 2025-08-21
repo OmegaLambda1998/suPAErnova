@@ -75,9 +75,9 @@ class Posterior(Step):
         self.iterations: int
         self.validation_frac: float = self.options.validation_frac
         self.seeds: list[int] = [self.seed + i for i in range(self.options.iterations)]
-        self.n_chains_early: int = self.options.n_chains_early
-        self.n_chains_mid: int = self.options.n_chains_mid
-        self.n_chains_final: int = self.options.n_chains_final
+        self.n_random_chains: int = self.options.n_random_chains
+        self.n_delta_m_chains: int = self.options.n_delta_m_chains
+        self.n_delta_av_chains: int = self.options.n_delta_av_chains
         self.n_burnin: int
         self.n_samples: int
         self.n_leapfrog: int
@@ -168,9 +168,9 @@ class Posterior(Step):
 
         # MAPStages
         self.map_stage_init: PosteriorMAPStage
-        self.map_stage_early: PosteriorMAPStage
-        self.map_stage_mid: PosteriorMAPStage
-        self.map_stage_final: PosteriorMAPStage
+        self.map_stage_random: PosteriorMAPStage
+        self.map_stage_delta_m: PosteriorMAPStage
+        self.map_stage_delta_av: PosteriorMAPStage
         self.map_stages: list[PosteriorMAPStage]
 
         # === Run Variables ===
@@ -280,11 +280,11 @@ class Posterior(Step):
             "n_chains": 1,
             "init": True,
         })
-        self.map_stage_early = PosteriorMAPStage.model_validate({
+        self.map_stage_random = PosteriorMAPStage.model_validate({
             "stage": 1,
             "name": "random",
             "fname": "random",
-            "n_chains": self.n_chains_early,
+            "n_chains": self.n_random_chains,
             "init_u_delta_av": "random",
             "init_latents": "u_random",
             "init_delta_av": "data",
@@ -292,11 +292,11 @@ class Posterior(Step):
             "init_delta_p": "random",
             "init_bias": "current",
         })
-        self.map_stage_mid = PosteriorMAPStage.model_validate({
+        self.map_stage_delta_m = PosteriorMAPStage.model_validate({
             "stage": 2,
             "name": "delta_m",
             "fname": "delta_m",
-            "n_chains": self.n_chains_mid,
+            "n_chains": self.n_delta_m_chains,
             "init_u_delta_av": "constant",
             "init_latents": "u_constant",
             "init_delta_av": "data",
@@ -304,11 +304,11 @@ class Posterior(Step):
             "init_delta_p": "random",
             "init_bias": "current",
         })
-        self.map_stage_final = PosteriorMAPStage.model_validate({
+        self.map_stage_delta_av = PosteriorMAPStage.model_validate({
             "stage": 3,
             "name": "delta_av",
             "fname": "delta_av",
-            "n_chains": self.n_chains_final,
+            "n_chains": self.n_delta_av_chains,
             "init_u_delta_av": "data",
             "init_latents": "z_constant",
             "init_delta_av": "scale",
@@ -319,9 +319,9 @@ class Posterior(Step):
 
         self.map_stages = [
             self.map_stage_init,
-            self.map_stage_early,
-            self.map_stage_mid,
-            self.map_stage_final,
+            self.map_stage_random,
+            self.map_stage_delta_m,
+            self.map_stage_delta_av,
         ]
 
         self.is_setup = True
@@ -457,9 +457,9 @@ class Posterior(Step):
             subset_map_labels = {}
             subset_hmc_samples = {}
             subset_hmc_labels = {}
+            self.options.subset = subset
 
             for seed in self.seeds:
-                self.options.subset = subset
                 self.options.seed = seed
 
                 model = self.models[subset][seed]
@@ -475,7 +475,7 @@ class Posterior(Step):
                     map_labels[0] = "μΔAᵥ"
                     ind = 1
                 for i in range(model.map.n_u_latents):
-                    map_labels[ind] = f"μ{i}"
+                    map_labels[ind] = f"μ{i + 1}"
                     ind += 1
                 map_init_results.append(results.map.init_u_latents)
                 map_best_results.append(results.map.best_u_latents)
@@ -485,7 +485,7 @@ class Posterior(Step):
                     map_labels[ind] = "ΔAᵥ"
                     ind += 1
                 for i in range(model.map.n_z_latents):
-                    map_labels[ind] = f"z{i}"
+                    map_labels[ind] = f"z{i + 1}"
                     ind += 1
                 map_init_results.append(results.map.init_z_latents)
                 map_best_results.append(results.map.best_z_latents)
@@ -519,131 +519,8 @@ class Posterior(Step):
                     hmc_labels[hmc_ind] = "μΔAᵥ"
                     hmc_ind += 1
                 for i in range(model.map.n_u_latents):
-                    hmc_labels[hmc_ind + i] = f"μ{i}"
+                    hmc_labels[hmc_ind + i] = f"μ{i + 1}"
                 subset_hmc_labels[seed] = hmc_labels
-
-                if self.analysis.plot_spectra is not None:
-                    if not isinstance(self.analysis.plot_spectra, list):
-                        self.analysis.plot_spectra = [self.analysis.plot_spectra]
-                    for opts in self.analysis.plot_spectra:
-                        o = opts.model_copy(deep=True)
-                        if o.name is None:
-                            o.name = "summary"
-                        self.log.debug(f"Plotting {o.name}")
-                        if o.savepath is None:
-                            o.savepath = (
-                                self.paths.plots
-                                / str(self.seeds[0])
-                                / subset
-                                / str(seed)
-                            )
-                        o.savepath.mkdir(parents=True, exist_ok=True)
-
-                        data = model.data
-
-                        fig, ax = SpectraPlotter.plot_summary(data, o, save=False)
-
-                        pae_data = data.model_copy(deep=True)
-                        pae_results = self.pae.results.stages[subset][
-                            str(self.pae.run_stages[-1].stage)
-                        ]
-                        pae_data.amplitude = pae_results.output_amp
-
-                        fig, ax = SpectraPlotter.plot_summary(
-                            pae_data, o, fig=fig, ax=ax, save=False
-                        )
-
-                        map_data = data.model_copy(deep=True)
-
-                        decoder_inputs = np.concatenate(
-                            (
-                                data.time[..., :1],
-                                np.repeat(
-                                    results.map.best_delta_av[:, np.newaxis, :],
-                                    data.time.shape[1],
-                                    axis=1,
-                                ),
-                                np.repeat(
-                                    results.map.best_z_latents[:, np.newaxis, :],
-                                    data.time.shape[1],
-                                    axis=1,
-                                ),
-                                np.repeat(
-                                    results.map.best_delta_m[:, np.newaxis, :],
-                                    data.time.shape[1],
-                                    axis=1,
-                                ),
-                                np.repeat(
-                                    results.map.best_delta_p[:, np.newaxis, :],
-                                    data.time.shape[1],
-                                    axis=1,
-                                ),
-                            ),
-                            axis=-1,
-                        )
-                        map_amp = model.map.pae.decoder(decoder_inputs, mask=data.mask)
-
-                        if model.map.train_delta_m and not model.pae.physical_latents:
-                            map_amp *= results.map.best_delta_m
-
-                        if model.map.train_bias:
-                            map_amp += results.map.best_bias
-
-                        map_data.amplitude = map_amp.numpy()
-
-                        fig, ax = SpectraPlotter.plot_summary(
-                            map_data, o, fig=fig, ax=ax, save=False
-                        )
-
-                        posterior_data = data.model_copy(deep=True)
-
-                        decoder_inputs = np.concatenate(
-                            (
-                                data.time,
-                                np.repeat(
-                                    np.mean(results.hmc.delta_av, axis=0)[
-                                        :, np.newaxis, :
-                                    ],
-                                    data.time.shape[1],
-                                    axis=1,
-                                ),
-                                np.repeat(
-                                    np.mean(results.hmc.z_latents, axis=0)[
-                                        :, np.newaxis, :
-                                    ],
-                                    data.time.shape[1],
-                                    axis=1,
-                                ),
-                                np.repeat(
-                                    np.mean(results.hmc.delta_m, axis=0)[
-                                        :, np.newaxis, :
-                                    ],
-                                    data.time.shape[1],
-                                    axis=1,
-                                ),
-                                np.repeat(
-                                    np.mean(results.hmc.delta_p, axis=0)[
-                                        :, np.newaxis, :
-                                    ],
-                                    data.time.shape[1],
-                                    axis=1,
-                                ),
-                            ),
-                            axis=-1,
-                        )
-                        posterior_amp = model.map.pae.decoder(
-                            decoder_inputs, mask=data.mask
-                        )
-
-                        if model.map.train_delta_m and not model.pae.physical_latents:
-                            map_amp *= results.hmc.delta_m
-
-                        if model.map.train_bias:
-                            map_amp += results.hmc.bias
-
-                        posterior_data.amplitude = posterior_amp.numpy()
-
-                        SpectraPlotter.plot_summary(posterior_data, o, fig=fig, ax=ax)
 
                 if self.analysis.plot_map_init is not None:
                     if not isinstance(self.analysis.plot_map_init, list):
@@ -654,6 +531,7 @@ class Posterior(Step):
                             o.labels = map_labels
                         if o.name is None:
                             o.name = "map_init"
+                        self.log.debug(f"Plotting {o.name}")
                         if o.savepath is None:
                             o.savepath = (
                                 self.paths.plots
@@ -677,6 +555,7 @@ class Posterior(Step):
                             o.labels = map_labels
                         if o.name is None:
                             o.name = "map_best"
+                        self.log.debug(f"Plotting {o.name}")
                         if o.savepath is None:
                             o.savepath = (
                                 self.paths.plots
@@ -700,6 +579,7 @@ class Posterior(Step):
                             o.labels = hmc_labels
                         if o.name is None:
                             o.name = "hmc"
+                        self.log.debug(f"Plotting {o.name}")
                         if o.savepath is None:
                             o.savepath = (
                                 self.paths.plots
@@ -717,118 +597,133 @@ class Posterior(Step):
                             statistics="max_central",
                         )
 
+                if self.analysis.plot_dispersion is not None:
+                    if not isinstance(self.analysis.plot_dispersion, list):
+                        self.analysis.plot_dispersion = [self.analysis.plot_dispersion]
+                    for opts in self.analysis.plot_dispersion:
+                        o = opts.model_copy(deep=True)
+                        if o.subset != subset:
+                            continue
+                        if o.name is None:
+                            o.name = "dispersion"
+                        self.log.debug(f"Plotting {o.name}")
+                        if o.savepath is None:
+                            o.savepath = (
+                                self.paths.plots
+                                / str(self.seeds[0])
+                                / subset
+                                / str(seed)
+                            )
+                        o.savepath.mkdir(parents=True, exist_ok=True)
+
+                        data = getattr(self, f"{o.subset}_data").model_copy(deep=True)
+                        mask = getattr(self, f"{o.subset}_mask")
+                        sn_mask = getattr(self, f"{o.subset}_sn_mask")
+                        spec_mask = getattr(self, f"{o.subset}_spec_mask")
+                        wl_mask = getattr(self, f"{o.subset}_wl_mask")
+
+                        twins = None
+                        if o.twins is not None:
+                            twins_path = self.data_dir / o.twins
+                            twins = pd.read_csv(twins_path, header=0)
+
+                        legacy_keys = {
+                            ("names", 0),
+                            ("redshift", 0),
+                            ("amplitude_mcmc", 0),
+                            ("amplitude_mcmc_err", 0),
+                            ("mask", 0),
+                        }
+                        legacy = {}
+                        for path in o.legacy or []:
+                            legacy_path = self.data_dir / path
+                            legacy_data = np.load(legacy_path, allow_pickle=True).item()
+                            legacy = {
+                                k: (
+                                    legacy_data[k]
+                                    if k not in legacy
+                                    else np.concatenate(
+                                        (legacy[k], legacy_data[k]), axis=axis
+                                    )
+                                )
+                                for (k, axis) in legacy_keys
+                            }
+
+                        if len(legacy) == 0:
+                            legacy = None
+
+                        DispersionPlotter.plot_dispersion(
+                            data,
+                            list(self.results[subset].values()),
+                            o,
+                            twins=twins,
+                            legacy=legacy,
+                            mask=mask,
+                            sn_mask=sn_mask,
+                            spec_mask=spec_mask,
+                            wl_mask=wl_mask,
+                        )
+
             # === Subset Plots ===
 
-            if self.analysis.plot_map_init is not None:
-                if not isinstance(self.analysis.plot_map_init, list):
-                    self.analysis.plot_map_init = [self.analysis.plot_map_init]
-                for opts in self.analysis.plot_map_init:
-                    o = opts.model_copy(deep=True)
-                    if o.labels is None:
-                        o.labels = subset_map_labels
-                    if o.name is None:
-                        o.name = "map_init"
-                    if o.savepath is None:
-                        o.savepath = self.paths.plots / str(self.seeds[0]) / subset
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    DistributionPlotter.plot_corner(
-                        subset_map_init_results,
-                        o,
-                        statistics="max_central",
-                    )
+            if len(self.seeds) > 1:
+                if self.analysis.plot_map_init is not None:
+                    if not isinstance(self.analysis.plot_map_init, list):
+                        self.analysis.plot_map_init = [self.analysis.plot_map_init]
+                    for opts in self.analysis.plot_map_init:
+                        o = opts.model_copy(deep=True)
+                        if o.labels is None:
+                            o.labels = subset_map_labels
+                        if o.name is None:
+                            o.name = "map_init"
+                        self.log.debug(f"Plotting {o.name}")
+                        if o.savepath is None:
+                            o.savepath = self.paths.plots / str(self.seeds[0]) / subset
+                        o.savepath.mkdir(parents=True, exist_ok=True)
+                        DistributionPlotter.plot_corner(
+                            subset_map_init_results,
+                            o,
+                            statistics="max_central",
+                        )
 
-            if self.analysis.plot_map_best is not None:
-                if not isinstance(self.analysis.plot_map_best, list):
-                    self.analysis.plot_map_best = [self.analysis.plot_map_best]
-                for opts in self.analysis.plot_map_best:
-                    o = opts.model_copy(deep=True)
-                    if o.labels is None:
-                        o.labels = subset_map_labels
-                    if o.name is None:
-                        o.name = "map_best"
-                    if o.savepath is None:
-                        o.savepath = self.paths.plots / str(self.seeds[0]) / subset
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    DistributionPlotter.plot_corner(
-                        subset_map_best_results,
-                        o,
-                        statistics="max_central",
-                    )
+                if self.analysis.plot_map_best is not None:
+                    if not isinstance(self.analysis.plot_map_best, list):
+                        self.analysis.plot_map_best = [self.analysis.plot_map_best]
+                    for opts in self.analysis.plot_map_best:
+                        o = opts.model_copy(deep=True)
+                        if o.labels is None:
+                            o.labels = subset_map_labels
+                        if o.name is None:
+                            o.name = "map_best"
+                        self.log.debug(f"Plotting {o.name}")
+                        if o.savepath is None:
+                            o.savepath = self.paths.plots / str(self.seeds[0]) / subset
+                        o.savepath.mkdir(parents=True, exist_ok=True)
+                        DistributionPlotter.plot_corner(
+                            subset_map_best_results,
+                            o,
+                            statistics="max_central",
+                        )
 
-            if self.analysis.plot_hmc is not None:
-                if not isinstance(self.analysis.plot_hmc, list):
-                    self.analysis.plot_hmc = [self.analysis.plot_hmc]
-                for opts in self.analysis.plot_hmc:
-                    o = opts.model_copy(deep=True)
-                    if o.labels is None:
-                        o.labels = subset_hmc_labels
-                    if o.name is None:
-                        o.name = "hmc"
-                    if o.savepath is None:
-                        o.savepath = self.paths.plots / str(self.seeds[0]) / subset
-                    o.mean = False
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    DistributionPlotter.plot_corner(
-                        subset_hmc_samples,
-                        o,
-                        statistics="max_central",
-                    )
-
-            if self.analysis.plot_dispersion is not None:
-                if not isinstance(self.analysis.plot_dispersion, list):
-                    self.analysis.plot_dispersion = [self.analysis.plot_dispersion]
-                for opts in self.analysis.plot_dispersion:
-                    o = opts.model_copy(deep=True)
-                    if o.subset != subset:
-                        continue
-                    if o.name is None:
-                        o.name = "dispersion"
-                    if o.savepath is None:
-                        o.savepath = self.paths.plots / str(self.seeds[0]) / subset
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    data = self.train_data if subset == "train" else self.test_data
-                    hmc = list(self.results[subset].values())
-
-                    twins = None
-                    if o.twins is not None:
-                        twins_path = self.data_dir / o.twins
-                        if twins_path.exists():
-                            twins = pd.read_csv(twins_path, delimiter=",")
-                        else:
-                            self.log.error(
-                                f"{twins_path} does not exist, can not load twins data."
-                            )
-
-                    legacy_data = None
-                    if o.legacy is not None:
-                        legacy_data = {}
-                        for p in o.legacy:
-                            legacy_path = self.data_dir / p
-                            if legacy_path.exists():
-                                l_d = np.load(legacy_path, allow_pickle=True).item()
-                                for k, v in l_d.items():
-                                    if k not in legacy_data:
-                                        legacy_data[k] = v
-                                    else:
-                                        found = False
-                                        for dim in range(len(v.shape)):
-                                            if (
-                                                not found
-                                                and legacy_data[k].shape[dim]
-                                                != v.shape[dim]
-                                            ):
-                                                legacy_data[k] = np.concatenate(
-                                                    (legacy_data[k], v), axis=dim
-                                                )
-                                                found = True
-                            else:
-                                self.log.error(
-                                    f"{legacy_path} does not exist, can not load legacy data."
-                                )
-
-                    DispersionPlotter.plot_dispersion(
-                        data, hmc, o, twins=twins, legacy=legacy_data
-                    )
+                if self.analysis.plot_hmc is not None:
+                    if not isinstance(self.analysis.plot_hmc, list):
+                        self.analysis.plot_hmc = [self.analysis.plot_hmc]
+                    for opts in self.analysis.plot_hmc:
+                        o = opts.model_copy(deep=True)
+                        if o.labels is None:
+                            o.labels = subset_hmc_labels
+                        if o.name is None:
+                            o.name = "hmc"
+                        self.log.debug(f"Plotting {o.name}")
+                        if o.savepath is None:
+                            o.savepath = self.paths.plots / str(self.seeds[0]) / subset
+                        o.savepath.mkdir(parents=True, exist_ok=True)
+                        o.mean = False
+                        DistributionPlotter.plot_corner(
+                            subset_hmc_samples,
+                            o,
+                            statistics="max_central",
+                        )
 
         self.was_analysed = True
 
@@ -874,9 +769,9 @@ class Posterior(Step):
                 "val_spec_mask",
                 "val_wl_mask",
                 "map_stage_init",
-                "map_stage_early",
-                "map_stage_mid",
-                "map_stage_final",
+                "map_stage_random",
+                "map_stage_delta_m",
+                "map_stage_delta_av",
                 "map_stages",
             ])
 

@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from supaernova.configs.steps.data import DataStepResult
+    from supaernova.configs.steps.data import SNPAEData
 
     from .analysis import Axis, Figure
 
@@ -25,7 +25,7 @@ class SpectraPlot(AbstractPlot):
     ) = None
 
 
-class ResidualPlot(SpectraPlot):
+class ComparisonPlot(SpectraPlot):
     base: str = ""
     base_wl: np.ndarray | None = None
     base_amp: np.ndarray | None = None
@@ -45,7 +45,7 @@ CONSTRAINTS = {
 class SpectraPlotter(Plotter):
     @staticmethod
     def prep(
-        data: "DataStepResult",
+        data: "SNPAEData",
         config: "SpectraPlot",
         *,
         mask: "npt.NDArray[float] | None" = None,
@@ -102,7 +102,7 @@ class SpectraPlotter(Plotter):
 
     @staticmethod
     def plot_spectra(
-        data: "DataStepResult",
+        data: "SNPAEData",
         config: "SpectraPlot",
         *args: "Any",
         fig: "Figure | None" = None,
@@ -199,7 +199,7 @@ class SpectraPlotter(Plotter):
 
     @staticmethod
     def plot_summary(
-        data: "DataStepResult",
+        data: "SNPAEData",
         config: "SpectraPlot",
         *args: "Any",
         fig: "Figure | None" = None,
@@ -295,9 +295,9 @@ class SpectraPlotter(Plotter):
         return fig, ax
 
     @staticmethod
-    def plot_residual(
-        data: "DataStepResult",
-        config: "ResidualPlot",
+    def plot_comparison(
+        data: "SNPAEData",
+        config: "ComparisonPlot",
         *args: "Any",
         fig: "Figure | None" = None,
         ax: "Axis | None" = None,
@@ -447,11 +447,28 @@ class SpectraPlotter(Plotter):
             0, color="black", fig=fig, ax=residual_ax
         )
 
-        y_residual = y - y_prime
+        # Restrict to overlap in x
+        x_min = max(x.min(), x_prime.min())
+        x_max = min(x.max(), x_prime.max())
+
+        mask_overlap = (x >= x_min) & (x <= x_max)
+        mask_overlap_prime = (x_prime >= x_min) & (x_prime <= x_max)
+
+        # Extract overlapping regions
+        x_common = x[mask_overlap]
+        y_common = y[..., mask_overlap]
+        yerr_common = yerr[..., mask_overlap]
+
+        x_prime_common = x_prime[mask_overlap_prime]
+        y_prime_common = y_prime[..., mask_overlap_prime]
+        yerr_prime_common = yerr_prime[..., mask_overlap_prime]
+
+        # Residual with masks respected
+        y_residual = y_common - y_prime_common
         y_residual_mean = y_residual.mean(axis=(0, 1))
 
         fig, residual_ax, ebar = Plotter.errorbar(
-            x_prime,
+            x_common,
             y_residual_mean,
             *args,
             fig=fig,
@@ -462,13 +479,15 @@ class SpectraPlotter(Plotter):
 
         residual_ax.set_ylabel("Residual")
 
-        fig, pull_ax, _hline = Plotter.axhline(0, color="black", fig=fig, ax=pull_ax)
+        # fig, pull_ax, _hline = Plotter.axhline(0, color="black", fig=fig, ax=pull_ax)
 
-        y_pull = np.abs(y - y_prime) / np.sqrt(yerr * yerr + yerr_prime * yerr_prime)
+        y_pull = np.abs(y_common - y_prime_common) / np.sqrt(
+            yerr_common * yerr_common + yerr_prime_common * yerr_prime_common
+        )
         y_pull_mean = y_pull.mean(axis=(0, 1))
 
         fig, pull_ax, ebar = Plotter.errorbar(
-            x_prime,
+            x_common,
             y_pull_mean,
             *args,
             fig=fig,

@@ -416,7 +416,7 @@ def pae_params(
     return {
         "name": "PaperParityPAE",
         "analysis": {
-            "plot_residual": {
+            "plot_comparison": {
                 "filter": {
                     "redshift": {"min": 0.02, "max": 1.0},
                     "phase": {"min": -10, "max": 40},

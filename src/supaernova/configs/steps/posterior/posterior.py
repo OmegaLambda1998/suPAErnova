@@ -18,7 +18,7 @@ from pydantic import (
 
 from supaernova.configs.base import BaseConfig
 from supaernova.configs.steps import StepResult, StepAnalysis
-from supaernova.analysis.spectra import SpectraPlot
+from supaernova.analysis.spectra import ComparisonPlot
 from supaernova.configs.steps.pae import PAEStepConfig
 from supaernova.configs.steps.data import DataStepConfig
 from supaernova.analysis.dispersion import DispersionPlot
@@ -163,7 +163,7 @@ class PosteriorStepAnalysis(StepAnalysis):
     plot_map_best: DistributionPlot | list[DistributionPlot] | None = None
     plot_hmc: DistributionPlot | list[DistributionPlot] | None = None
     plot_dispersion: DispersionPlot | list[DispersionPlot] | None = None
-    plot_spectra: SpectraPlot | list[SpectraPlot] | None = None
+    plot_comparison: ComparisonPlot | list[ComparisonPlot] | None = None
     # === Model Validators ===
     # --- Before ---
     # --- After ---
@@ -178,38 +178,69 @@ class PosteriorConfig(BackendConfig):
     # === Class Variables ===
     # === Class Methods ===
     # === Field Variables ===
+    # --- Previous Stages ---
+    data: str | int = 0
+    pae: str | int = 0
+    nflow: str | int = 0
     # --- Required ---
     iterations: int
-    n_chains_early: int
-    n_chains_mid: int
-    n_chains_final: int
-    n_burnin: PositiveInt
-    n_samples: PositiveInt
     train_delta_m: bool
     train_delta_p: bool
     train_bias: bool
-    # --- Optional ---
-    analysis: PosteriorStepAnalysis | None = None
-    data: str | int = 0
-    kfold: int = 0
     validation_frac: Annotated[float, Field(ge=0, le=1)]
-    pae: str | int = 0
-    nflow: str | int = 0
+    # - MAP -
+    n_random_chains: int
+    n_delta_m_chains: int
+    n_delta_av_chains: int
+    # - HMC -
+    n_burnin: PositiveInt
+    n_samples: PositiveInt
+    n_leapfrog: PositiveInt = 3
+    n_thinning: PositiveInt = 1
+    # --- Optional ---
     debug: bool = False
     profile: bool = False
+    analysis: PosteriorStepAnalysis | None = None
+    kfold: int = 0
     train_subset: bool = True
     test_subset: bool = True
     subset: Literal["train", "test"] = "train"
     save_best: bool = False
-    n_leapfrog: PositiveInt = 2
-    n_thinning: PositiveInt = 1
+
+    min_redshift: float | Literal["inf", "-inf"] | None = None
+    max_redshift: float | Literal["inf", "-inf"] | None = None
+    min_train_redshift: float | Literal["inf", "-inf"] | None = None
+    max_train_redshift: float | Literal["inf", "-inf"] | None = None
+    min_test_redshift: float | Literal["inf", "-inf"] | None = None
+    max_test_redshift: float | Literal["inf", "-inf"] | None = None
+    min_val_redshift: float | Literal["inf", "-inf"] | None = None
+    max_val_redshift: float | Literal["inf", "-inf"] | None = None
+    min_phase: float | Literal["inf", "-inf"] | None = None
+    max_phase: float | Literal["inf", "-inf"] | None = None
+    min_train_phase: float | Literal["inf", "-inf"] | None = None
+    max_train_phase: float | Literal["inf", "-inf"] | None = None
+    min_test_phase: float | Literal["inf", "-inf"] | None = None
+    max_test_phase: float | Literal["inf", "-inf"] | None = None
+    min_val_phase: float | Literal["inf", "-inf"] | None = None
+    max_val_phase: float | Literal["inf", "-inf"] | None = None
+    min_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_train_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_train_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_test_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_test_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_val_wavelength: float | Literal["inf", "-inf"] | None = None
+    max_val_wavelength: float | Literal["inf", "-inf"] | None = None
+
+    # - MAP -
+    random_initial_positions: bool = False
     tolerance: PositiveFloat = 1e-8
     x_tolerance: NonNegativeFloat = 1e-3
     f_relative_tolerance: NonNegativeFloat = 0
     f_absolute_tolerance: NonNegativeFloat = 0
     max_iterations: PositiveInt = 2500
     target_acceptance_rate: PositiveFloat = 0.651
-    random_initial_positions: bool = False
+
     u_delta_av_min: float = -np.inf
     u_delta_av_max: float = np.inf
     u_delta_av_start: float = -1.0
@@ -245,30 +276,7 @@ class PosteriorConfig(BackendConfig):
     bias_mean: float = 0.0
     bias_std: float = 1.0
 
-    min_redshift: float | Literal["inf", "-inf"] | None = None
-    max_redshift: float | Literal["inf", "-inf"] | None = None
-    min_train_redshift: float | Literal["inf", "-inf"] | None = None
-    max_train_redshift: float | Literal["inf", "-inf"] | None = None
-    min_test_redshift: float | Literal["inf", "-inf"] | None = None
-    max_test_redshift: float | Literal["inf", "-inf"] | None = None
-    min_val_redshift: float | Literal["inf", "-inf"] | None = None
-    max_val_redshift: float | Literal["inf", "-inf"] | None = None
-    min_phase: float | Literal["inf", "-inf"] | None = None
-    max_phase: float | Literal["inf", "-inf"] | None = None
-    min_train_phase: float | Literal["inf", "-inf"] | None = None
-    max_train_phase: float | Literal["inf", "-inf"] | None = None
-    min_test_phase: float | Literal["inf", "-inf"] | None = None
-    max_test_phase: float | Literal["inf", "-inf"] | None = None
-    min_val_phase: float | Literal["inf", "-inf"] | None = None
-    max_val_phase: float | Literal["inf", "-inf"] | None = None
-    min_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_wavelength: float | Literal["inf", "-inf"] | None = None
-    min_train_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_train_wavelength: float | Literal["inf", "-inf"] | None = None
-    min_test_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_test_wavelength: float | Literal["inf", "-inf"] | None = None
-    min_val_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_val_wavelength: float | Literal["inf", "-inf"] | None = None
+    # - HMC -
 
     # === Model Validators ===
     # --- Before ---

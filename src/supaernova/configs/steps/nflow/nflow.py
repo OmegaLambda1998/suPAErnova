@@ -72,28 +72,29 @@ class NFlowConfig(BackendConfig):
     # === Class Variables ===
     # === Class Methods ===
     # === Field Variables ===
+    # --- Previous Stages ---
+    data: str | int = 0
+    pae: str | int = 0
     # --- Required ---
     physical_latents: bool
+    n_layers: PositiveInt
+    n_hidden_units: PositiveInt
     validation_frac: Annotated[float, Field(ge=0, le=1)]
     n_batches: PositiveInt
-    n_hidden_units: PositiveInt
-    n_layers: PositiveInt
     # --- Optional ---
     analysis: NFlowStepAnalysis | None = None
-    data: str | int = 0
-    kfold: int = 0
-    pae: str | int = 0
     debug: bool = False
     profile: bool = False
+    kfold: int = 0
     save_best: bool = False
-    patience: PositiveFloat = 0.05
 
-    lr: PositiveFloat = 0.001
+    lr: PositiveFloat = 0.0001
     lr_decay_steps: PositiveFloat = 300
     lr_decay_rate: PositiveFloat = 0.95
     lr_weight_decay_rate: PositiveFloat = 0.0001
 
-    epochs: PositiveInt = 500
+    epochs: PositiveInt = 10000
+    patience: PositiveFloat = 0.05
     batch_normalisation: bool = False
 
     min_redshift: float | Literal["inf", "-inf"] | None = None

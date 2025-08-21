@@ -515,10 +515,10 @@ class PAE(Step):
                 input_spec_mask = results.input_spec_mask
                 input_wl_mask = results.input_wl_mask
 
-                if self.analysis.plot_residual is not None:
-                    if not isinstance(self.analysis.plot_residual, list):
-                        self.analysis.plot_residual = [self.analysis.plot_residual]
-                    for opts in self.analysis.plot_residual:
+                if self.analysis.plot_comparison is not None:
+                    if not isinstance(self.analysis.plot_comparison, list):
+                        self.analysis.plot_comparison = [self.analysis.plot_comparison]
+                    for opts in self.analysis.plot_comparison:
                         o = opts.model_copy(deep=True)
                         if o.name is None:
                             o.name = "comparison"
@@ -556,7 +556,7 @@ class PAE(Step):
                         data.amplitude = results.output_amp
                         data.sigma *= 0
 
-                        SpectraPlotter.plot_residual(
+                        SpectraPlotter.plot_comparison(
                             data,
                             o,
                             mask=input_mask,
@@ -624,11 +624,11 @@ class PAE(Step):
                             bins=self.sn_dim,
                         )
 
-            if self.analysis.plot_residual is not None:
+            if self.analysis.plot_comparison is not None:
                 results = self.results.stages[dt[:-1]][str(self.run_stages[0].stage)]
-                if not isinstance(self.analysis.plot_residual, list):
-                    self.analysis.plot_residual = [self.analysis.plot_residual]
-                for opts in self.analysis.plot_residual:
+                if not isinstance(self.analysis.plot_comparison, list):
+                    self.analysis.plot_comparison = [self.analysis.plot_comparison]
+                for opts in self.analysis.plot_comparison:
                     o = opts.model_copy(deep=True)
                     if o.name is None:
                         o.name = "comparison"
@@ -668,7 +668,7 @@ class PAE(Step):
                         data.amplitude = results.output_amp
                         data.sigma *= 0
 
-                        fig, ax = SpectraPlotter.plot_residual(
+                        fig, ax = SpectraPlotter.plot_comparison(
                             data,
                             o,
                             save=False,
@@ -714,7 +714,7 @@ class PAE(Step):
                             )
                             o.plot_base = False
 
-                            fig, ax = SpectraPlotter.plot_residual(
+                            fig, ax = SpectraPlotter.plot_comparison(
                                 data,
                                 o,
                                 fig=fig,
@@ -730,6 +730,7 @@ class PAE(Step):
                         Plotter.close(fig, ax)
 
             if self.analysis.plot_latents is not None:
+                results = self.results.stages[dt[:-1]][str(self.run_stages[0].stage)]
                 if not isinstance(self.analysis.plot_latents, list):
                     self.analysis.plot_latents = [self.analysis.plot_latents]
                 for opts in self.analysis.plot_latents:
@@ -747,10 +748,15 @@ class PAE(Step):
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {"title": f"{dt}{self.name}"}
+                    input_mask = results.input_mask
+                    input_sn_mask = results.input_sn_mask
+                    input_spec_mask = results.input_spec_mask
+                    input_wl_mask = results.input_wl_mask
 
+                    data = getattr(self, f"{dt}data").model_copy(deep=True)
                     wl, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask = (
                         SpectraPlotter.prep(
-                            getattr(self, f"{dt}data").model_copy(deep=True),
+                            data,
                             o,
                             mask=input_mask,
                             sn_mask=input_sn_mask,
@@ -939,13 +945,14 @@ class PAEStep(Model):
                     input_spec_mask = results.input_spec_mask
                     input_wl_mask = results.input_wl_mask
 
-                    if variant.analysis.plot_residual is not None:
-                        for opts in variant.analysis.plot_residual:
+                    if variant.analysis.plot_comparison is not None:
+                        for opts in variant.analysis.plot_comparison:
                             o = opts.model_copy(deep=True)
-                            o.name = f"{stage.name} {dt[:-1]} comparison"
+                            o.name = "comparison"
+                            self.log.debug(f"Plotting {o.name}")
                             o.plot_kwargs = {
                                 "label": f"{variant.name}\n({results.loss:.2E})",
-                                "title": f"{variant.name} {o.name}",
+                                "title": f"{self.name} {o.name}",
                             }
 
                             name = f"{dt[:-1]}/{stage.stage}/{o.name}.{o.ext}"
@@ -981,7 +988,7 @@ class PAEStep(Model):
                             data.amplitude = results.output_amp
                             data.sigma *= 0
 
-                            fig, ax = SpectraPlotter.plot_residual(
+                            fig, ax = SpectraPlotter.plot_comparison(
                                 data,
                                 o,
                                 mask=input_mask,
