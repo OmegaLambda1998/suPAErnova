@@ -1,8 +1,10 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import Any
+from typing import Self
 
 from pydantic import StrictBool
+
+from supaernova.typing import T, Config
 
 from .base import BaseConfig
 
@@ -12,9 +14,9 @@ class GlobalConfig(BaseConfig):
     # === Class Methods ===
     @classmethod
     def _default_config(
-        cls,
-        **input_config: dict[str, Any],
-    ) -> dict[str, Any]:
+        cls: type[Self],
+        **input_config: T,
+    ) -> Config[T]:
         return {
             "verbose": input_config.get("verbose", False),
             "force": input_config.get("force", False),

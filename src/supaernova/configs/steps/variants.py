@@ -1,4 +1,4 @@
-from typing import Any, ClassVar
+from typing import Any, Self, ClassVar
 
 from pydantic import (
     Field,
@@ -14,7 +14,7 @@ class VariantConfig(StepConfig):
 
     # === Class Methods ===
     @classmethod
-    def register_step(cls, variant_cls: type[StepConfig]) -> None:
+    def register_step(cls: type[Self], variant_cls: type[StepConfig]) -> None:
         cls.variant_steps[cls.id] = variant_cls
         super().register_step()
 
@@ -23,13 +23,13 @@ class VariantConfig(StepConfig):
     base: StepConfig
 
     # --- Optional ---
-    variants: list[StepConfig] | None = Field(None, validation_alias="variant")
+    variants: list[StepConfig] = Field([], validation_alias="variant")
 
     # === Model Validators ===
     # --- Before ---
     @model_validator(mode="before")
     @classmethod
-    def _prepare_configs(cls, data: Any, *, validate: bool = True) -> Any:
+    def _prepare_configs(cls: type[Self], data: Any, *, validate: bool = True) -> Any:
         if isinstance(data, dict):
             if "base" not in data:
                 err = f"No base {cls.id} config has been defined. Please define one in [{cls.id}.base]"

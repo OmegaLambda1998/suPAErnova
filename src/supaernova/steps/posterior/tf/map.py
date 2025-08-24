@@ -1,13 +1,7 @@
 # Copyright 2025 Patrick Armstrong
-import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self, ClassVar
 
 import numpy as np
-
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ["TF_DETERMINISTIC_OPS"] = "1"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
@@ -22,15 +16,15 @@ if TYPE_CHECKING:
 
 
 class PosteriorMapValue(tf.Module):
-    map_keys = {"original", "initial", "current", "best"}
+    map_keys: ClassVar[set[str]] = {"original", "initial", "current", "best"}
 
-    def __init__(self, initial: tf.Tensor) -> None:
+    def __init__(self: Self, initial: tf.Tensor) -> None:
         self.original: tf.Variable = tf.Variable(tf.identity(initial))
         self.initial: tf.Variable = tf.Variable(tf.identity(initial))
         self.current: tf.Variable = tf.Variable(tf.identity(initial))
         self.best: tf.Variable = tf.Variable(tf.identity(initial))
 
-    def __setattr__(self, key: str, val: Any) -> None:
+    def __setattr__(self: Self, key: str, val: Any) -> None:
         if key in self.map_keys:
             val = tf.identity(val)
             if hasattr(self, key):
@@ -42,13 +36,11 @@ class PosteriorMapValue(tf.Module):
 
 class PosteriorMap(tf.Module):
     def __init__(
-        self,
+        self: Self,
         config: "TFPosteriorModel",
     ) -> None:
         self.random_initial_positions: bool = config.options.random_initial_positions
         # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
-        vars(self)["nflow"]: TFNFlowModel = config.nflow
-        vars(self)["pae"]: TFPAEModel = config.pae
         self.data: SNPAEData = config.data
 
         self.data_mask: npt.NDArray[bool] = config.data_mask
@@ -59,11 +51,17 @@ class PosteriorMap(tf.Module):
         self.sn_dim = config.sn_dim
         self.spec_dim = config.spec_dim
         self.wl_dim = config.wl_dim
+
+        self.nflow: TFNFlowModel
+        vars(self)["nflow"] = config.nflow
         self.n_u_latents = self.nflow.n_u_latents
         self.n_flow_latents = self.nflow.n_flow_latents
+        self.n_pos = self.n_u_latents
+
+        self.pae: TFPAEModel
+        vars(self)["pae"] = config.pae
         self.n_z_latents = self.pae.n_z_latents
         self.n_pae_latents = self.pae.n_pae_latents
-        self.n_pos = self.n_u_latents
 
         # === Training ===
         self.chain_min = tf.Variable(tf.zeros(self.sn_dim, dtype=tf.int32))
@@ -184,7 +182,7 @@ class PosteriorMap(tf.Module):
             self.labels.append(f"μ{i}")
 
     def setup(
-        self,
+        self: Self,
         stage: "PosteriorMAPStage",
         chain: int,
     ) -> None:
@@ -519,7 +517,9 @@ class PosteriorMap(tf.Module):
             self.position.initial = self.position.current
             self.position.best = self.position.current
 
-    def get_position(self, position, best=False) -> tf.Tensor:
+    def get_position(
+        self: Self, position: tf.Tensor, *, best: bool = False
+    ) -> tf.Tensor:
         u_delta_av = self.u_delta_av.best if best else self.u_delta_av.current
         delta_m = self.delta_m.best if best else self.delta_m.current
         delta_p = self.delta_p.best if best else self.delta_p.current
@@ -550,7 +550,7 @@ class PosteriorMap(tf.Module):
 
         return tf.concat([delta_m, delta_p, bias, u_delta_av, u_latents], axis=-1)
 
-    def prior(self, position) -> tf.Tensor:
+    def prior(self: Self, position: tf.Tensor) -> tf.Tensor:
         log_prior = tf.zeros((position.shape[0],))
         inf_prior = -tf.ones_like(log_prior) * np.inf
 

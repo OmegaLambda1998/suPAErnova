@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, ClassVar, override
+from typing import TYPE_CHECKING, Any, Self, ClassVar, override
 import importlib
 
 import numpy as np
@@ -7,11 +7,12 @@ import pandas as pd
 from supaernova.steps import Step
 from supaernova.steps.data import SNPAEData, DataStepResult
 from supaernova.steps.models import Model
-from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis.dispersion import DispersionPlotter
 from supaernova.analysis.distribution import DistributionPlotter
 from supaernova.configs.steps.posterior import (
+    PosteriorConfig,
     PosteriorMAPStage,
+    PosteriorStepConfig,
     PosteriorStepResult,
     PosteriorStepAnalysis,
 )
@@ -25,22 +26,19 @@ if TYPE_CHECKING:
     from supaernova.steps.pae import PAEModel, PAEStepResult
     from supaernova.steps.nflow import NFlowModel, NFlowStepResult
     from supaernova.configs.steps.data import DataStepResult
-    from supaernova.configs.steps.posterior import PosteriorStepConfig
 
     from .tf import TFPosteriorModel
 
     PosteriorModel = TFPosteriorModel
 
 
-class Posterior(Step):
-    def __init__(self, config: "PosteriorStepConfig") -> None:
+class Posterior(Step[PosteriorConfig]):
+    def __init__(self: Self, config: "PosteriorConfig") -> None:
         super().__init__(config)
 
         # === Previous Step Variables ===
-        self.kfold: int = self.options.kfold
-        self.pae: PAEModel
         self.nflow: NFlowModel
-        self.data_dir: Path
+        self.pae: PAEModel
 
         self.data: SNPAEData
         self.mask: npt.NDArray[bool]
@@ -66,6 +64,11 @@ class Posterior(Step):
         self.val_spec_mask: npt.NDArray[bool]
         self.val_wl_mask: npt.NDArray[bool]
 
+        self.step_sizes: dict[str, npt.NDArray[float]]
+
+        self.data_dir: Path
+        self.kfold: int = self.options.kfold
+
         self.sn_dim: int
         self.spec_dim: int
         self.wl_dim: int
@@ -81,9 +84,9 @@ class Posterior(Step):
         self.n_burnin: int
         self.n_samples: int
         self.n_leapfrog: int
-        self.train_delta_m: bool
-        self.train_delta_p: bool
-        self.train_bias: bool
+        self.train_delta_m: bool = self.options.train_delta_m
+        self.train_delta_p: bool = self.options.train_delta_p
+        self.train_bias: bool = self.options.train_bias
         # --- Optional ---
         self.debug: bool = self.options.debug
         self.profile: bool = self.options.profile
@@ -177,7 +180,7 @@ class Posterior(Step):
         self.models: dict[str, dict[str, PosteriorModel]]
 
         # === Result Variables ===
-        self.results: PosteriorStepResult
+        self.results: dict[str, dict[str, PosteriorStepResult]]
 
         # === Analysis Variables ===
         self.analysis: PosteriorStepAnalysis = (
@@ -186,7 +189,7 @@ class Posterior(Step):
 
     @override
     def _setup(
-        self,
+        self: Self,
         *args: Any,
         data: "DataStepResult",
         pae: "PAEStepResult",
@@ -272,6 +275,37 @@ class Posterior(Step):
 
         self.setup_data_masks()
 
+        self.step_sizes = {}
+        for subset in self.subsets:
+            z_latents = pae.stages[subset][
+                str(list(pae.stages[subset].keys())[-1])
+            ].latents
+            zs = z_latents[..., :-2] if pae.model.physical_latents else z_latents
+            u_latents = self.nflow.z_to_u(zs, permute=True)
+
+            step_sizes = []
+            if self.train_delta_m:
+                if pae.model.physical_latents:
+                    delta_m = z_latents[..., -2:-1]
+                    delta_m_step_size = np.std(delta_m, axis=0)
+                else:
+                    delta_m_step_size = np.array(self.delta_m_std)
+                step_sizes.append(delta_m_step_size)
+            if self.train_delta_p:
+                if pae.model.physical_latents:
+                    delta_p = z_latents[..., -1:]
+                    delta_p_step_size = np.std(delta_p, axis=0)
+                else:
+                    delta_p_step_size = np.array(self.delta_p_std)
+                step_sizes.append(delta_p_step_size)
+            if self.train_bias:
+                bias_step_size = np.array(self.bias_std)
+                step_sizes.append(bias_step_size)
+            u_latent_step_size = np.std(u_latents, axis=0)
+            step_sizes.append(u_latent_step_size)
+
+            self.step_sizes[subset] = np.concatenate(step_sizes, axis=-1)
+
         # --- Stages ---
         self.map_stage_init = PosteriorMAPStage.model_validate({
             "stage": 0,
@@ -327,7 +361,7 @@ class Posterior(Step):
         self.is_setup = True
 
     @override
-    def _completed(self, *args: Any, **kwargs: Any) -> bool:
+    def _completed(self: Self, *args: Any, **kwargs: Any) -> bool:
         for subset in self.subsets:
             for seed in self.seeds:
                 self.options.subset = subset
@@ -343,7 +377,7 @@ class Posterior(Step):
         return True
 
     @override
-    def _load(self, *args: Any, **kwargs: Any) -> None:
+    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
         models = {}
         for subset in self.subsets:
             models[subset] = {}
@@ -358,13 +392,13 @@ class Posterior(Step):
                 self.model.load_checkpoint(
                     self.savepath / subset / str(seed), load_map=True, load_hmc=True
                 )
-                models[subset][seed] = self.model
+                models[subset][str(seed)] = self.model
         self.models = models
 
         self.is_loaded = True
 
     @override
-    def _run(self, *args: Any, **kwargs: Any) -> None:
+    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
         models = {}
         for subset in self.subsets:
             models[subset] = {}
@@ -387,20 +421,20 @@ class Posterior(Step):
                 self.model.save_checkpoint(
                     self.savepath / subset / str(seed), save_map=True, save_hmc=True
                 )
-                models[subset][seed] = self.model
+                models[subset][str(seed)] = self.model
         self.models = models
 
         self.is_loaded = True
 
     @override
-    def _result(self, *args: Any, **kwargs: Any) -> None:
+    def _result(self: Self, *args: Any, **kwargs: Any) -> None:
         results = {}
         for subset in self.subsets:
             results[subset] = {}
             for seed in self.seeds:
                 self.options.subset = subset
                 self.options.seed = seed
-                model = self.models[subset][seed]
+                model = self.models[subset][str(seed)]
                 data = getattr(self, f"{subset}_data")
 
                 map_results = {
@@ -441,7 +475,7 @@ class Posterior(Step):
                     "map": map_results,
                     "hmc": hmc_results,
                 }
-                results[subset][seed] = PosteriorStepResult.model_validate(
+                results[subset][str(seed)] = PosteriorStepResult.model_validate(
                     model_results
                 )
 
@@ -450,7 +484,7 @@ class Posterior(Step):
         self.has_results = True
 
     @override
-    def _analyse(self, *args: Any, **kwargs: Any) -> None:
+    def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:
         for subset in self.subsets:
             subset_map_init_results = {}
             subset_map_best_results = {}
@@ -462,8 +496,8 @@ class Posterior(Step):
             for seed in self.seeds:
                 self.options.seed = seed
 
-                model = self.models[subset][seed]
-                results = self.results[subset][seed]
+                model = self.models[subset][str(seed)]
+                results = self.results[subset][str(seed)]
 
                 map_init_results = []
                 map_best_results = []
@@ -503,9 +537,9 @@ class Posterior(Step):
                     map_labels[ind] = "Δp"
                 map_init_results = np.concatenate(map_init_results, axis=-1)
                 map_best_results = np.concatenate(map_best_results, axis=-1)
-                subset_map_init_results[seed] = map_init_results
-                subset_map_best_results[seed] = map_best_results
-                subset_map_labels[seed] = map_labels
+                subset_map_init_results[str(seed)] = map_init_results
+                subset_map_best_results[str(seed)] = map_best_results
+                subset_map_labels[str(seed)] = map_labels
 
                 hmc_labels = {}
                 hmc_ind = 0
@@ -520,7 +554,7 @@ class Posterior(Step):
                     hmc_ind += 1
                 for i in range(model.map.n_u_latents):
                     hmc_labels[hmc_ind + i] = f"μ{i + 1}"
-                subset_hmc_labels[seed] = hmc_labels
+                subset_hmc_labels[str(seed)] = hmc_labels
 
                 if self.analysis.plot_map_init is not None:
                     if not isinstance(self.analysis.plot_map_init, list):
@@ -531,6 +565,8 @@ class Posterior(Step):
                             o.labels = map_labels
                         if o.name is None:
                             o.name = "map_init"
+                        if o.plot_kwargs is None:
+                            o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
                         self.log.debug(f"Plotting {o.name}")
                         if o.savepath is None:
                             o.savepath = (
@@ -555,6 +591,8 @@ class Posterior(Step):
                             o.labels = map_labels
                         if o.name is None:
                             o.name = "map_best"
+                        if o.plot_kwargs is None:
+                            o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
                         self.log.debug(f"Plotting {o.name}")
                         if o.savepath is None:
                             o.savepath = (
@@ -579,6 +617,8 @@ class Posterior(Step):
                             o.labels = hmc_labels
                         if o.name is None:
                             o.name = "hmc"
+                        if o.plot_kwargs is None:
+                            o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
                         self.log.debug(f"Plotting {o.name}")
                         if o.savepath is None:
                             o.savepath = (
@@ -590,7 +630,7 @@ class Posterior(Step):
                         o.savepath.mkdir(parents=True, exist_ok=True)
                         samples = results.hmc.samples
                         chains = [samples[:, i, :] for i in range(samples.shape[1])]
-                        subset_hmc_samples[seed] = np.mean(chains, axis=0)
+                        subset_hmc_samples[str(seed)] = np.mean(chains, axis=0)
                         DistributionPlotter.plot_corner(
                             chains,
                             o,
@@ -606,6 +646,8 @@ class Posterior(Step):
                             continue
                         if o.name is None:
                             o.name = "dispersion"
+                        if o.plot_kwargs is None:
+                            o.plot_kwargs = {"title": f"{subset}_{self.name}"}
                         self.log.debug(f"Plotting {o.name}")
                         if o.savepath is None:
                             o.savepath = (
@@ -729,7 +771,7 @@ class Posterior(Step):
 
     @override
     def _clear(
-        self,
+        self: Self,
         *args: "Any",
         setup: bool = False,
         load: bool = False,
@@ -797,7 +839,7 @@ class Posterior(Step):
 
     # === Instance Methods ===
 
-    def setup_data_masks(self) -> None:
+    def setup_data_masks(self: Self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
             data: SNPAEData = getattr(self, f"{mask_type}data")
             mask = data.mask
@@ -832,7 +874,7 @@ class Posterior(Step):
             setattr(self, f"{mask_type}wl_mask", wl_mask)
 
 
-class PosteriorStep(Model):
+class PosteriorStep(Model[PosteriorStepConfig]):
     id: "ClassVar[str]" = "posterior"
     model_backend: "ClassVar[dict[str, Callable[[], type[PosteriorModel]]]]" = {
         "TensorFlow": lambda: importlib.import_module(

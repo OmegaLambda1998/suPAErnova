@@ -12,7 +12,7 @@ from supaernova.steps.nflow import NFlowStep
 from supaernova.steps.posterior import PosteriorStep
 
 from .input import InputConfig
-from .steps import StepConfig, StepResult
+from .steps import StepConfig
 from .steps.pae import PAEStepConfig
 from .steps.data import DataStepConfig
 from .steps.nflow import NFlowStepConfig
@@ -33,7 +33,7 @@ class RunConfig(InputConfig):
 
     @computed_field
     @cached_property
-    def step_configs(self) -> list[StepConfig]:
+    def step_configs(self: Self) -> list[StepConfig]:
         return [
             step_config
             for step_config in [
@@ -53,14 +53,14 @@ class RunConfig(InputConfig):
 
     @computed_field
     @cached_property
-    def steps(self) -> list[Step]:
+    def steps(self: Self) -> list[Step]:
         return [Step.steps[step.id](step) for step in self.step_configs]
 
     # === Model Validators ===
     # --- Before ---
     # --- After ---
     @model_validator(mode="after")
-    def _validate_steps(self) -> Self:
+    def _validate_steps(self: Self) -> Self:
         if len(self.step_configs) == 0:
             err = f"No steps have been defined! Please specify at least one of {list(Step.steps.keys())}"
             self._raise(err)
@@ -91,14 +91,14 @@ class RunConfig(InputConfig):
     # --- Before ---
     # --- After ---
     # === Instance Methods ===
-    def require(self, step_name: str) -> Step:
+    def require(self: Self, step_name: str) -> Step:
         step = getattr(self, step_name + "_step")
         if step is None:
             err = f"{step_name} has not yet run"
             self._raise(err)
         return step
 
-    def run(self) -> None:
+    def run(self: Self) -> None:
         for step in self.steps:
             if not step.skip:
                 self.log.info(f"Executing {step.name}")
@@ -114,11 +114,12 @@ class RunConfig(InputConfig):
                 end_time = time()
                 exec_time = end_time - start_time
                 unit = "s"
-                if exec_time > 60:
-                    exec_time /= 60
+                t = 60
+                if exec_time > t:
+                    exec_time /= t
                     unit = "m"
-                if exec_time > 60:
-                    exec_time /= 60
+                if exec_time > t:
+                    exec_time /= t
                     unit = "h"
                 self.log.info(f"{step.name} took {exec_time:.2f}{unit}")
 

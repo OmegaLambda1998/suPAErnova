@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, ClassVar, override
+from typing import TYPE_CHECKING, Any, Self, ClassVar, override
 import importlib
 
 import numpy as np
@@ -7,6 +7,8 @@ from supaernova.steps import Step
 from supaernova.steps.models import Model
 from supaernova.configs.steps.data import SNPAEData
 from supaernova.configs.steps.nflow import (
+    NFlowConfig,
+    NFlowStepConfig,
     NFlowStepResult,
     NFlowModelResult,
     NFlowStepAnalysis,
@@ -22,18 +24,17 @@ if TYPE_CHECKING:
     from supaernova.steps.pae import PAEModel
     from supaernova.configs.steps.pae import PAEStepResult
     from supaernova.configs.steps.data import DataStepResult
-    from supaernova.configs.steps.nflow import NFlowStepConfig
 
     from .tf import TFNFlowModel
 
     NFlowModel = TFNFlowModel
 
 
-class NFlow(Step):
+class NFlow(Step[NFlowConfig]):
     # Class Variables
     id: ClassVar[str] = "nflow"
 
-    def __init__(self, config: "NFlowStepConfig") -> None:
+    def __init__(self: Self, config: "NFlowConfig") -> None:
         super().__init__(config)
 
         # === Previous Step Variables ===
@@ -113,7 +114,14 @@ class NFlow(Step):
         # === Setup Variables ===
         self.model: NFlowModel
         self.savepath: Path
+
+        # Data Dimensions
+        self.sn_dim: int
+        self.spec_dim: int
+        self.wl_dim: int
+
         # === Run Variables ===
+
         # === Result Variables ===
         self.results: NFlowStepResult
 
@@ -122,7 +130,11 @@ class NFlow(Step):
 
     @override
     def _setup(
-        self, *args: Any, data: "DataStepResult", pae: "PAEStepResult", **kwargs: Any
+        self: Self,
+        *args: Any,
+        data: "DataStepResult",
+        pae: "PAEStepResult",
+        **kwargs: Any,
     ) -> None:
         super()._setup()
         # === Previous Step Variables ===
@@ -190,10 +202,15 @@ class NFlow(Step):
 
         self.setup_data_masks()
 
+        # Data Dimensions
+        self.sn_dim = data.sn_dim
+        self.spec_dim = data.spec_dim
+        self.wl_dim = data.wl_dim
+
         self.is_setup = True
 
     @override
-    def _completed(self, *args: Any, **kwargs: Any) -> bool:
+    def _completed(self: Self, *args: Any, **kwargs: Any) -> bool:
         self.savepath = self.paths.results / self.model.name
         savepath = self.savepath / self.model.ckpt_path
 
@@ -205,20 +222,20 @@ class NFlow(Step):
         return True
 
     @override
-    def _load(self, *args: Any, **kwargs: Any) -> None:
+    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
         self.log.debug(f"Loading final NFlow model weights from {self.savepath}")
         self.model.load_checkpoint(self.savepath)
 
         self.is_loaded = True
 
     @override
-    def _run(self, *args: Any, **kwargs: Any) -> None:
+    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
         self.model.train_model(savepath=self.savepath)
 
         self.is_loaded = True
 
     @override
-    def _result(self, *args: Any, **kwargs: Any) -> None:
+    def _result(self: Self, *args: Any, **kwargs: Any) -> None:
         nflow_results = {}
         nflow_results["min_redshift"] = self.min_redshift
         nflow_results["max_redshift"] = self.max_redshift
@@ -262,7 +279,7 @@ class NFlow(Step):
         self.has_results = True
 
     @override
-    def _analyse(self, *args: Any, **kwargs: Any) -> None:
+    def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:
         z_labels = {}
         u_labels = {}
         labels = {}
@@ -431,7 +448,7 @@ class NFlow(Step):
 
     @override
     def _clear(
-        self,
+        self: Self,
         *args: "Any",
         setup: bool = False,
         load: bool = False,
@@ -492,7 +509,7 @@ class NFlow(Step):
 
     # === Instance Methods ===
 
-    def setup_data_masks(self) -> None:
+    def setup_data_masks(self: Self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
             data: SNPAEData = getattr(self, f"{mask_type}data")
             mask = data.mask
@@ -527,7 +544,7 @@ class NFlow(Step):
             setattr(self, f"{mask_type}wl_mask", wl_mask)
 
 
-class NFlowStep(Model):
+class NFlowStep(Model[NFlowStepConfig]):
     id: "ClassVar[str]" = "nflow"
     model_backend: "ClassVar[dict[str, Callable[[], type[NFlowModel]]]]" = {
         "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFNFlowModel,

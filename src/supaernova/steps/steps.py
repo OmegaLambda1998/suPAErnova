@@ -1,6 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, Self, ClassVar
 from pathlib import Path
 import pkgutil
 import importlib
@@ -15,18 +15,19 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from supaernova.configs.paths import PathConfig
+    from supaernova.configs.steps import StepConfig, StepResult, StepAnalysis
     from supaernova.configs.globals import GlobalConfig
     from supaernova.configs.steps.variants import VariantConfig
 
 
-class Step:
+class Step[C: StepConfig]:
     # === Class Variables ===
-    steps: ClassVar[dict[str, type["Step"]]] = {}
+    steps: ClassVar[dict[str, type["Step[C]"]]] = {}
     id: ClassVar[str]
 
     # === Class Methods ===
     @classmethod
-    def register_step(cls) -> None:
+    def register_step(cls: type[Self]) -> None:
         cls.steps[cls.id] = cls
 
     @staticmethod
@@ -39,7 +40,7 @@ class Step:
                 importlib.import_module(f"{base_name}.{module}")
 
     # === Instance Methods ===
-    def __init__(self, config: "VariantConfig") -> None:
+    def __init__(self: Self, config: C) -> None:
         self.__class__.id = config.__class__.id
         self.name: str = (
             config.name
@@ -47,7 +48,7 @@ class Step:
             else self.__class__.__name__
         ).replace("Config", "")
 
-        self.options: VariantConfig = config
+        self.options: C = config
         self.config: GlobalConfig = config.config
         self.paths: PathConfig = config.paths
         self.log: Logger = config.log
@@ -67,13 +68,15 @@ class Step:
         self.is_loaded = False
         self.has_results = False
         self.was_analysed = False
+        self.results: StepResult
+        self.analysis: StepAnalysis
 
     @abstractmethod
-    def _setup(self, *args: "Any", **kwargs: "Any") -> None:
+    def _setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def setup(self, *args: "Any", **kwargs: "Any") -> None:
+    def setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_setup:
             self.set_seed()
             self.log.info(f"Setting up {self.name}")
@@ -81,11 +84,11 @@ class Step:
             self.log.info(f"Finished setting up {self.name}")
 
     @abstractmethod
-    def _completed(self, *args: "Any", **kwargs: "Any") -> bool:
+    def _completed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
         pass
 
     @callback
-    def completed(self, *args: "Any", **kwargs: "Any") -> bool:
+    def completed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
         if not self.is_completed:
             self.set_seed()
             self.setup(*args, **kwargs)
@@ -97,11 +100,11 @@ class Step:
         return self.is_completed
 
     @abstractmethod
-    def _load(self, *args: "Any", **kwargs: "Any") -> None:
+    def _load(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def load(self, *args: "Any", **kwargs: "Any") -> None:
+    def load(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_loaded:
             if self.completed(*args, **kwargs):
                 self.set_seed()
@@ -114,11 +117,11 @@ class Step:
                 self.run(*args, *kwargs)
 
     @abstractmethod
-    def _run(self, *args: "Any", **kwargs: "Any") -> None:
+    def _run(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def run(self, *args: "Any", **kwargs: "Any") -> None:
+    def run(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_loaded and (self.force or not self.completed(*args, **kwargs)):
             self.set_seed()
             self.setup(*args, **kwargs)
@@ -127,11 +130,11 @@ class Step:
             self.log.info(f"Finished running {self.name}")
 
     @abstractmethod
-    def _result(self, *args: "Any", **kwargs: "Any") -> None:
+    def _result(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def result(self, *args: "Any", **kwargs: "Any") -> None:
+    def result(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.has_results:
             self.set_seed()
             self.load(*args, **kwargs)
@@ -140,11 +143,11 @@ class Step:
             self.log.info(f"Finished gathering {self.name} results")
 
     @abstractmethod
-    def _analyse(self, *args: "Any", **kwargs: "Any") -> None:
+    def _analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
+    def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.was_analysed:
             self.set_seed()
             self.result(*args, **kwargs)
@@ -152,7 +155,7 @@ class Step:
             self._analyse(*args, **kwargs)
             self.log.info(f"Finished analysing {self.name}")
 
-    def clear_attributes(self, attributes: str | list[str]) -> None:
+    def clear_attributes(self: Self, attributes: str | list[str]) -> None:
         if not isinstance(attributes, list):
             attributes = [attributes]
         for attr in attributes:
@@ -161,7 +164,7 @@ class Step:
 
     @abstractmethod
     def _clear(
-        self,
+        self: Self,
         *args: "Any",
         setup: bool = False,
         load: bool = False,
@@ -186,7 +189,7 @@ class Step:
 
     @callback
     def clear(
-        self,
+        self: Self,
         *args: "Any",
         setup: bool = False,
         load: bool = False,
@@ -208,7 +211,7 @@ class Step:
         )
         self.log.info(f"Finished clearing {self.name}")
 
-    def set_seed(self, seed: int = 0) -> None:
+    def set_seed(self: Self, seed: int = 0) -> None:
         seed = self.seed + seed
         self.rng.bit_generator.state = type(self.rng.bit_generator)(seed).state
 

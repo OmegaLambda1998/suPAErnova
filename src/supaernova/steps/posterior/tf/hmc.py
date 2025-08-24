@@ -1,16 +1,12 @@
 # Copyright 2025 Patrick Armstrong
-import os
+from typing import Self
 
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ["TF_DETERMINISTIC_OPS"] = "1"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import tensorflow as tf
 
 
 class PosteriorHMCValue(tf.Module):
     def __init__(
-        self,
+        self: Self,
         samples: tf.Variable,
         step_sizes_final: tf.Variable,
         is_accepted: tf.Variable,

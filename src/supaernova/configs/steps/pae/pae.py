@@ -184,30 +184,30 @@ class PAEConfig(BackendConfig):
     dropout: Annotated[float, Field(ge=0, le=1)] = 0
     save_best: bool = False
 
-    min_redshift: float | Literal["inf", "-inf"] | None = None
-    max_redshift: float | Literal["inf", "-inf"] | None = None
-    min_train_redshift: float | Literal["inf", "-inf"] | None = None
-    max_train_redshift: float | Literal["inf", "-inf"] | None = None
-    min_test_redshift: float | Literal["inf", "-inf"] | None = None
-    max_test_redshift: float | Literal["inf", "-inf"] | None = None
-    min_val_redshift: float | Literal["inf", "-inf"] | None = None
-    max_val_redshift: float | Literal["inf", "-inf"] | None = None
-    min_phase: float | Literal["inf", "-inf"] | None = None
-    max_phase: float | Literal["inf", "-inf"] | None = None
-    min_train_phase: float | Literal["inf", "-inf"] | None = None
-    max_train_phase: float | Literal["inf", "-inf"] | None = None
-    min_test_phase: float | Literal["inf", "-inf"] | None = None
-    max_test_phase: float | Literal["inf", "-inf"] | None = None
-    min_val_phase: float | Literal["inf", "-inf"] | None = None
-    max_val_phase: float | Literal["inf", "-inf"] | None = None
-    min_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_wavelength: float | Literal["inf", "-inf"] | None = None
-    min_train_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_train_wavelength: float | Literal["inf", "-inf"] | None = None
-    min_test_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_test_wavelength: float | Literal["inf", "-inf"] | None = None
-    min_val_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_val_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_redshift: float | None = None
+    max_redshift: float | None = None
+    min_train_redshift: float | None = None
+    max_train_redshift: float | None = None
+    min_test_redshift: float | None = None
+    max_test_redshift: float | None = None
+    min_val_redshift: float | None = None
+    max_val_redshift: float | None = None
+    min_phase: float | None = None
+    max_phase: float | None = None
+    min_train_phase: float | None = None
+    max_train_phase: float | None = None
+    min_test_phase: float | None = None
+    max_test_phase: float | None = None
+    min_val_phase: float | None = None
+    max_val_phase: float | None = None
+    min_wavelength: float | None = None
+    max_wavelength: float | None = None
+    min_train_wavelength: float | None = None
+    max_train_wavelength: float | None = None
+    min_test_wavelength: float | None = None
+    max_test_wavelength: float | None = None
+    min_val_wavelength: float | None = None
+    max_val_wavelength: float | None = None
 
     phase_offset_scale: float = -0.02
     amplitude_offset_scale: NonNegativeFloat = 1.0
@@ -255,7 +255,7 @@ class PAEConfig(BackendConfig):
     # --- Before ---
     @classmethod
     @model_validator(mode="before")
-    def _validate_bounds(cls, data: Any) -> Any:
+    def _validate_bounds(cls: type[Self], data: Any) -> Any:
         if isinstance(data, dict):
             for var in ["redshift", "phase", "wavelength"]:
                 min_bound = data.get(f"min_{var}")
@@ -281,7 +281,7 @@ class PAEConfig(BackendConfig):
 
     # --- After ---
     @model_validator(mode="after")
-    def _validate_decode_dims(self) -> Self:
+    def _validate_decode_dims(self: Self) -> Self:
         if len(self.decode_dims) == 0:
             self.decode_dims = tuple(reversed(self.encode_dims))
         if not all(x < y for x, y in itertools.pairwise(self.decode_dims)):
@@ -290,7 +290,7 @@ class PAEConfig(BackendConfig):
         return self
 
     @model_validator(mode="after")
-    def _validate_n_latents(self) -> Self:
+    def _validate_n_latents(self: Self) -> Self:
         if not self.physical_latents and self.n_z_latents == 0:
             err = "You must specify either non-zero `n_z_latents`, or `physical_latents=True`. With both `physical_latents=False` and `n_z_latents=0, there will be no latents to train at all!"
             self._raise(err)
@@ -301,7 +301,7 @@ class PAEConfig(BackendConfig):
     @field_validator("encode_dims", mode="before")
     @classmethod
     def _validate_encode_dims(
-        cls, value: tuple[PositiveInt, ...]
+        cls: type[Self], value: tuple[PositiveInt, ...]
     ) -> tuple[PositiveInt, ...]:
         if len(value) == 0:
             err = "`encode_dims` can not be empty"

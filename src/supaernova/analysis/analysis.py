@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, Any, TypeVar, ClassVar
 from pathlib import Path  # noqa: TC003
 import colorsys
+from collections.abc import Iterable
 
 import numpy as np
 from cycler import cycler
@@ -45,8 +46,8 @@ if TYPE_CHECKING:
         FillBetweenPolyCollection,
     )
 
-    type Figure = mpl.pyplot.Figure
-    type Axis = mpl.pyplot.Axes
+    type Figure = plt.Figure
+    type Axis = plt.Axes
     Plot = TypeVar("Plot", bound=Collection | Container)
 
 
@@ -300,7 +301,7 @@ class Plotter:
         if fig is not None:
             Plotter.clear(fig=fig)
         if ax is not None:
-            if not isinstance(ax, list):
+            if not isinstance(ax, Iterable):
                 ax = [ax]
             for a in ax:
                 Plotter.clear(ax=a)

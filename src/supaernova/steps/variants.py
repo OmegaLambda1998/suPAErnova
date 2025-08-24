@@ -1,7 +1,6 @@
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, Self, ClassVar, cast, override
 from collections import UserDict
 
-from supaernova.utils import pp
 from supaernova.configs.callbacks import callback
 
 from .steps import Step
@@ -13,26 +12,26 @@ if TYPE_CHECKING:
     from supaernova.configs.steps.variants import VariantConfig
 
 
-class Variant(Step):
+class Variant[C: VariantConfig](Step[C]):
     # === Class Variables ===
-    variant_steps: ClassVar[dict[str, type["Step"]]] = {}
+    variant_steps: ClassVar[dict[str, type[Step[C]]]] = {}
 
     # === Class Methods ===
     @classmethod
-    def register_step(cls, variant_cls: type[Step]) -> None:
+    def register_step(cls: type[Self], variant_cls: type[Step[C]]) -> None:
         cls.variant_steps[cls.id] = variant_cls
         super().register_step()
 
     class VariantResult(UserDict):
-        def __init__(self, instance: "Variant") -> None:
-            self.instance = instance
+        def __init__(self: Self, instance: "Variant[C]") -> None:
+            self.instance: Variant[C] = instance
             super().__init__()
 
         @override
-        def __getitem__(self, key: str) -> "Any":
+        def __getitem__(self: Self, key: str) -> "Any":
             if key in self.instance.variants:
                 variant = self.instance.variants[key]
-                kwargs = {}
+                kwargs: dict[str, StepResult] = {}
                 for k, (v, n) in self.instance.variant_required_steps[key].items():
                     kwargs[k] = v.results[n]
                     v.clear(**{**kwargs, "variants": [n]})
@@ -41,24 +40,27 @@ class Variant(Step):
             return super().__getitem__(key)
 
     # === Instance Methods ===
-    def __init__(self, config: "VariantConfig") -> None:
+    def __init__(self: Self, config: C) -> None:
         super().__init__(config)
 
-        self.variant_step: type[Step] = self.variant_steps[self.id]
+        self.variant_step: type[Step[C]] = self.variant_steps[self.id]
         self.variant_configs: dict[str, StepConfig] = {}
-        self.variant_required_steps: dict[str, dict[str, Step]] = {}
-        self.variants: dict[str, Step] = {}
+        self.variant_required_steps: dict[str, dict[str, tuple[Variant[C], str]]] = {}
+        self.variants: dict[str, Step[C]] = {}
         for variant in self.options.variants:
             step = self.variant_step(variant)
             self.variant_configs[step.name] = variant
             self.variants[step.name] = step
-        self.results: Variant.VariantResult[str, StepResult] = Variant.VariantResult(
-            self
-        )
+        self.results: Variant[C].VariantResult[str, StepResult] = Variant[
+            C
+        ].VariantResult(self)
 
     @override
     def _setup(
-        self, *args: "Any", variants: str | list[str] | None = None, **kwargs: "Any"
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Variant[C]",
     ) -> None:
         if variants is None:
             return
@@ -69,7 +71,7 @@ class Variant(Step):
             kwargs_ = {}
             self.variant_required_steps[variant_name] = {}
             for key, val in kwargs.items():
-                k = variant.options.get(key, 0)
+                k = cast("int | str", variant.options.get(key, 0))
                 n = list(val.results.keys())[k] if isinstance(k, int) else k
                 v = (
                     list(val.results.values())[k]
@@ -84,7 +86,7 @@ class Variant(Step):
 
     @override
     @callback
-    def setup(self, *args: "Any", **kwargs: "Any") -> None:
+    def setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_setup:
             self.set_seed()
             variants = kwargs.get("variants", self.variants)
@@ -93,7 +95,10 @@ class Variant(Step):
 
     @override
     def _completed(
-        self, *args: "Any", variants: str | list[str] | None = None, **kwargs: "Any"
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
     ) -> bool:
         if variants is None:
             return False
@@ -106,7 +111,7 @@ class Variant(Step):
 
     @override
     @callback
-    def completed(self, *args: "Any", **kwargs: "Any") -> bool:
+    def completed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
         self.set_seed()
         variants = kwargs.get("variants", self.variants)
         for variant in variants:
@@ -120,7 +125,10 @@ class Variant(Step):
 
     @override
     def _load(
-        self, *args: "Any", variants: str | list[str] | None = None, **kwargs: "Any"
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
     ) -> None:
         if variants is None:
             return
@@ -132,7 +140,7 @@ class Variant(Step):
 
     @override
     @callback
-    def load(self, *args: "Any", **kwargs: "Any") -> None:
+    def load(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_loaded:
             self.set_seed()
             if self.completed(*args, **kwargs):
@@ -145,7 +153,10 @@ class Variant(Step):
 
     @override
     def _run(
-        self, *args: "Any", variants: str | list[str] | None = None, **kwargs: "Any"
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
     ) -> None:
         if variants is None:
             return
@@ -157,7 +168,7 @@ class Variant(Step):
 
     @override
     @callback
-    def run(self, *args: "Any", **kwargs: "Any") -> None:
+    def run(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_loaded and (self.force or not self.completed(*args, **kwargs)):
             self.set_seed()
             variants = kwargs.get("variants", self.variants)
@@ -167,7 +178,10 @@ class Variant(Step):
 
     @override
     def _result(
-        self, *args: "Any", variants: str | list[str] | None = None, **kwargs: "Any"
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
     ) -> None:
         if variants is None:
             return
@@ -182,7 +196,7 @@ class Variant(Step):
 
     @override
     @callback
-    def result(self, *args: "Any", **kwargs: "Any") -> None:
+    def result(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.has_results:
             self.set_seed()
             variants = kwargs.get("variants", self.variants)
@@ -192,7 +206,10 @@ class Variant(Step):
 
     @override
     def _analyse(
-        self, *args: "Any", variants: str | list[str] | None = None, **kwargs: "Any"
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
     ) -> None:
         if variants is None:
             return
@@ -207,7 +224,7 @@ class Variant(Step):
 
     @override
     @callback
-    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
+    def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.was_analysed:
             self.set_seed()
             variants = kwargs.get("variants", self.variants)
@@ -218,7 +235,7 @@ class Variant(Step):
 
     @override
     def _clear(
-        self,
+        self: Self,
         *args: "Any",
         setup: bool = False,
         load: bool = False,
@@ -257,7 +274,7 @@ class Variant(Step):
     @override
     @callback
     def clear(
-        self,
+        self: Self,
         *args: "Any",
         setup: bool = False,
         load: bool = False,

@@ -1,11 +1,7 @@
 # Copyright 2025 Patrick Armstrong
 import os
-
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ["TF_DETERMINISTIC_OPS"] = "1"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Self, override
+from collections.abc import Iterable
 
 from tqdm import tqdm
 import numpy as np
@@ -24,22 +20,28 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from numpy import typing as npt
+    from tensorflow_probability.python.optimizer.lbfgs import LBfgsOptimizerResults
+    from tensorflow_probability.python.mcmc.dual_averaging_step_size_adaptation import (
+        DualAveragingStepSizeAdaptationResults,
+    )
 
     from supaernova.steps.pae.tf import TFPAEModel
     from supaernova.steps.nflow.tf import TFNFlowModel
     from supaernova.steps.posterior import Posterior
     from supaernova.configs.steps.data import SNPAEData
+    from supaernova.typing.backends.tf import Loss, TensorLike
     from supaernova.configs.steps.posterior import PosteriorMAPStage
     from supaernova.configs.steps.posterior.tf import TFPosteriorConfig
 
 NPROC = os.cpu_count()
-MEM_MB = 0.5 * os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**2)
+
+POSTERIORMODELSTEP: "Posterior"
 
 
 @ks.utils.register_keras_serializable("SuPAErnova")
 class TFPosteriorModel(ks.Model):
     def __init__(
-        self,
+        self: "Self",
         config: "Posterior",
         *args: "Any",
         **kwargs: "Any",
@@ -54,6 +56,7 @@ class TFPosteriorModel(ks.Model):
         self.force: bool = config.config.force
         self.seed: int = self.options.seed
         self.subset: Literal["train", "test"] = self.options.subset
+        self.step_size = config.step_sizes[self.subset]
 
         self.debug: bool = self.options.debug
         self.profile: bool = self.options.profile
@@ -65,20 +68,23 @@ class TFPosteriorModel(ks.Model):
         self.wl_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_wl_mask")
 
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
-        vars(self)["pae"]: TFPAEModel = config.pae
+        self.pae: TFPAEModel
+        vars(self)["pae"] = config.pae
         self.pae.trainable = False
         self.pae.encoder.trainable = False
         self.pae.decoder.trainable = False
 
         # Equivalent to `self.nflow = ...` but avoids tf / ks from tracking self.nflow
-        vars(self)["nflow"]: TFNFlowModel = config.nflow
+        self.nflow: TFNFlowModel
+        vars(self)["nflow"] = config.nflow
         self.nflow.trainable = False
         self.nflow.flow.trainable = False
 
         self.sn_dim, self.spec_dim, self.wl_dim = self.data.amplitude.shape
 
         # MAP Variables
-        vars(self)["map"]: PosteriorMap = PosteriorMap(self)
+        self.map: PosteriorMap
+        vars(self)["map"] = PosteriorMap(self)
         self.tolerance = self.options.tolerance
         self.x_tolerance = self.options.x_tolerance
         self.f_relative_tolerance = self.options.f_relative_tolerance
@@ -104,9 +110,9 @@ class TFPosteriorModel(ks.Model):
             ))
         )
 
-        loss: ks.losses.Loss = self.options.loss_cls()
+        loss: Loss = self.options.loss_cls()
         loss.model = self
-        self._loss: ks.losses.Loss = loss
+        self._loss: Loss = loss
 
         # HMC Variables
         self.n_burnin: int = self.options.n_burnin
@@ -115,7 +121,8 @@ class TFPosteriorModel(ks.Model):
         self.n_thinning: int = self.options.n_thinning
         self.target_acceptance_rate: float = self.options.target_acceptance_rate
 
-        vars(self)["hmc"]: PosteriorHMCValue = PosteriorHMCValue(
+        self.hmc: PosteriorHMCValue
+        vars(self)["hmc"] = PosteriorHMCValue(
             tf.Variable(  # Samples
                 [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.n_samples,
                 dtype=tf.float32,
@@ -171,8 +178,8 @@ class TFPosteriorModel(ks.Model):
     @override
     @tf.function
     def call(
-        self,
-        inputs: tf.Tensor,
+        self: "Self",
+        inputs: tuple[tf.Tensor, ...],
         *,
         training: bool | None = None,
         mask: tf.Tensor | None = None,
@@ -208,7 +215,9 @@ class TFPosteriorModel(ks.Model):
             else sn_mask
         )
 
-        posterior_mask = input_mask * input_sn_mask * input_spec_mask * input_wl_mask
+        posterior_mask = tf.cast(
+            input_mask * input_sn_mask * input_spec_mask * input_wl_mask, tf.float32
+        )
 
         # Determine the prior probability early to avoid exploring non-physical parameter spaces.
         log_prior = self.map.prior(input_position)
@@ -278,64 +287,105 @@ class TFPosteriorModel(ks.Model):
         synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (input_sigma**2))
 
         # Set missing values to 1 for all times
-        synth_sigma *= tf.cast(posterior_mask, tf.float32)
-        synth_sigma += 1 - tf.cast(posterior_mask, tf.float32)
+        synth_sigma *= posterior_mask
+        synth_sigma += 1 - posterior_mask
 
         # Create likelihood distribution
         likelihood = tfd.Independent(
             tfd.MultivariateNormalDiag(
-                loc=synth_amp * tf.cast(posterior_mask, tf.float32),
+                loc=synth_amp,
                 scale_diag=synth_sigma,
             ),
             reinterpreted_batch_ndims=0,
         )
 
-        # Determine the log likelihood
-
-        # ~(~input_mask & input_wl_mask)
-        # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
-        valid_wl_mask = tf.cast(
-            tf.logical_not(
-                tf.logical_and(
-                    tf.logical_not(tf.cast(posterior_mask, tf.bool)),
-                    tf.cast(input_wl_mask, tf.bool),
-                )
-            ),
-            tf.int32,
-        )
-
         # Determine which spectra to keep
         # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-        mask_spec = tf.cast(
-            tf.reduce_min(valid_wl_mask, axis=-1, keepdims=True),
-            tf.int32,
-        )
+        mask_spec = tf.reduce_max(posterior_mask, axis=-1)
 
         # Determine which SNe to keep
         # Will mask out any SN with *no* unmasked spectra
-        mask_sn = tf.reduce_max(mask_spec, axis=-2)
+        mask_sn = tf.reduce_max(mask_spec, axis=-1)
 
-        log_likelihood_num = tf.reduce_sum(
-            likelihood.log_prob(input_amp * tf.cast(posterior_mask, tf.float32))
-            * tf.cast(mask_sn, tf.float32),
-            axis=1,
+        mask_spec = tf.where(
+            tf.cast(mask_spec, tf.bool), mask_spec, tf.zeros_like(mask_spec)
         )
+
+        mask_sn = tf.where(
+            tf.cast(mask_sn, tf.bool), mask_sn, -np.inf * tf.ones_like(mask_sn)
+        )
+
+        # tf.print("mask_spec", mask_spec, mask_spec.shape)
+        # tf.print("mask_sn", mask_sn, mask_sn.shape)
+
+        log_likelihood = likelihood.log_prob(input_amp) * mask_spec
+        # tf.print("likelihood_orig", log_likelihood, log_likelihood.shape)
+
+        log_likelihood_num = mask_sn * tf.reduce_sum(log_likelihood, axis=1)
+        # tf.print("likelihood_num", log_likelihood_num, log_likelihood_num.shape)
+
         log_likelihood_sum = tf.reduce_sum(
             tf.cast(tf.math.greater(input_amp[:, :, 0], -1), tf.float32), axis=1
         )
+        # tf.print("likelihood_sum", log_likelihood_sum, log_likelihood_sum.shape)
+
         log_likelihood = log_likelihood_num / log_likelihood_sum
+        # tf.print("likelihood_div", log_likelihood, log_likelihood.shape)
+
+        log_likelihood += log_prior
+
+        # tf.print("likelihood_prior", log_likelihood, log_likelihood.shape)
 
         inf_likelihood = -tf.ones_like(log_likelihood) * np.inf
-        log_likelihood = tf.where(
-            tf.math.is_nan(log_likelihood),
-            inf_likelihood,
+
+        return tf.where(
+            tf.math.is_finite(log_likelihood),
             log_likelihood,
+            inf_likelihood,
         )
 
-        return log_prior + log_likelihood
+        # tf.print("likelihood", log_likelihood, log_likelihood.shape)
+
+    @override
+    def __call__(
+        self: "Self",
+        inputs: "TensorLike",
+        *,
+        training: bool | None = None,
+        mask: "TensorLike | None" = None,
+        sn_mask: "TensorLike | None" = None,
+        spec_mask: "TensorLike | None" = None,
+        wl_mask: "TensorLike | None" = None,
+        testing: bool | None = None,
+    ) -> tf.Tensor:
+        training = False if training is None else training
+        testing = False if testing is None else testing
+        if isinstance(inputs, Iterable):
+            inputs = tuple(tf.convert_to_tensor(i) for i in inputs)
+        if mask is not None:
+            mask = tf.convert_to_tensor(mask)
+        if sn_mask is not None:
+            sn_mask = tf.convert_to_tensor(sn_mask)
+        if spec_mask is not None:
+            spec_mask = tf.convert_to_tensor(spec_mask)
+        if wl_mask is not None:
+            wl_mask = tf.convert_to_tensor(wl_mask)
+        return super().__call__(
+            inputs,
+            training=training,
+            mask=mask,
+            sn_mask=sn_mask,
+            spec_mask=spec_mask,
+            wl_mask=wl_mask,
+            testing=testing,
+        )
 
     def save_checkpoint(
-        self, savepath: "Path", *, save_map: bool = False, save_hmc: bool = False
+        self: "Self",
+        savepath: "Path",
+        *,
+        save_map: bool = False,
+        save_hmc: bool = False,
     ) -> None:
         (savepath / self.ckpt_path).mkdir(parents=True, exist_ok=True)
 
@@ -351,7 +401,11 @@ class TFPosteriorModel(ks.Model):
         ckpt.save(f"{savepath / self.ckpt_path}/")
 
     def load_checkpoint(
-        self, loadpath: "Path", *, load_map: bool = False, load_hmc: bool = False
+        self: "Self",
+        loadpath: "Path",
+        *,
+        load_map: bool = False,
+        load_hmc: bool = False,
     ) -> None:
         if load_map and load_hmc:
             ckpt = tf.train.Checkpoint(self, map=self.map, hmc=self.hmc)
@@ -367,22 +421,22 @@ class TFPosteriorModel(ks.Model):
         ).assert_existing_objects_matched()
 
     @override
-    def get_config(self) -> dict[str, "Any"]:
+    def get_config(self: "Self") -> dict[str, "Any"]:
         return {**super().get_config()}
 
     @override
     @classmethod
-    def from_config(cls, config: dict[str, "Any"]) -> "Self":
+    def from_config(cls: type["Self"], config: dict[str, "Any"]) -> "Self":
         global POSTERIORMODELSTEP
         return cls(POSTERIORMODELSTEP)
 
     @override
-    def set_seed(self, seed: int = 0) -> None:
+    def set_seed(self: "Self", seed: int = 0) -> None:
         seed = self.seed + seed
         tf.random.set_seed(seed)
 
     def train_model(
-        self,
+        self: "Self",
         stages: "Sequence[PosteriorMAPStage]",
         *,
         savepath: "Path | None" = None,
@@ -405,6 +459,38 @@ class TFPosteriorModel(ks.Model):
         for stage in stages:
             for c in range(stage.n_chains):
                 self.set_seed(chain)
+
+                self.train_map(stage, c, chain, savepath=savepath)
+
+                log_prob = -self.map.negative_log_prob
+                min_log_prob = float(
+                    tf.reduce_min(
+                        tf.where(
+                            tf.math.is_finite(log_prob),
+                            log_prob,
+                            np.inf * tf.ones_like(log_prob),
+                        )
+                    ).numpy()
+                )
+                mean_log_prob = float(
+                    tf.reduce_mean(
+                        tf.where(
+                            tf.math.is_finite(log_prob),
+                            log_prob,
+                            tf.zeros_like(log_prob),
+                        )
+                    ).numpy()
+                )
+                max_log_prob = float(
+                    tf.reduce_max(
+                        tf.where(
+                            tf.math.is_finite(log_prob),
+                            log_prob,
+                            -np.inf * tf.ones_like(log_prob),
+                        )
+                    ).numpy()
+                )
+
                 progress.set_description(f"Stage: {chain}/{n_total}")
                 progress.set_postfix({
                     "evals_tot": self.map.num_evaluations.value().numpy(),
@@ -413,15 +499,15 @@ class TFPosteriorModel(ks.Model):
                         tf.ones_like(self.map.improved, dtype=tf.int32)
                         * tf.cast(self.map.improved, tf.int32)
                     ).numpy(),
-                    "neg_log_prob": (
-                        f"{float(tf.reduce_min(self.map.negative_log_prob).numpy()):.2E}",
-                        f"{float(tf.reduce_mean(self.map.negative_log_prob).numpy()):.2E}",
-                        f"{float(tf.reduce_max(self.map.negative_log_prob).numpy()):.2E}",
+                    "log_prob": (
+                        f"{min_log_prob:.2E}",
+                        f"{mean_log_prob:.2E}",
+                        f"{max_log_prob:.2E}",
                     ),
                 })
-                self.train_map(stage, c, chain, savepath=savepath)
                 progress.update()
 
+                # TODO: Remove non-finite log_prob parameters
                 if summary_writer is not None:
                     with summary_writer.as_default():
                         tf.summary.histogram(
@@ -455,17 +541,17 @@ class TFPosteriorModel(ks.Model):
                         )
                         tf.summary.scalar(
                             "min_log_prob",
-                            tf.reduce_min(-self.map.negative_log_prob),
+                            min_log_prob,
                             step=chain,
                         )
                         tf.summary.scalar(
                             "mean_log_prob",
-                            tf.reduce_mean(-self.map.negative_log_prob),
+                            mean_log_prob,
                             step=chain,
                         )
                         tf.summary.scalar(
                             "max_log_prob",
-                            tf.reduce_max(-self.map.negative_log_prob),
+                            max_log_prob,
                             step=chain,
                         )
                         tf.summary.histogram(
@@ -498,8 +584,9 @@ class TFPosteriorModel(ks.Model):
             self.save_checkpoint(savepath, save_map=True, save_hmc=True)
 
     @tf.function
-    def vals_and_grads(self, position):
+    def vals_and_grads(self: "Self", position: tf.Tensor) -> tf.Tensor:
         input_position = self.map.get_position(position)
+
         log_prob = self(
             (input_position, self.data.time, self.data.amplitude, self.data.sigma),
             training=False,
@@ -510,7 +597,7 @@ class TFPosteriorModel(ks.Model):
         )
         return self._loss(tf.zeros_like(log_prob), log_prob)
 
-    def lbfgs(self):
+    def lbfgs(self: "Self") -> "LBfgsOptimizerResults":
         return tfp.optimizer.lbfgs_minimize(
             lambda x: tfp.math.value_and_gradient(
                 self.vals_and_grads, x, auto_unpack_single_arg=False
@@ -526,7 +613,7 @@ class TFPosteriorModel(ks.Model):
         )
 
     def train_map(
-        self,
+        self: "Self",
         stage: "PosteriorMAPStage",
         chain: int,
         chain_total: int,
@@ -764,7 +851,7 @@ class TFPosteriorModel(ks.Model):
     # === HMC Functions ===
 
     def hmc_train(
-        self,
+        self: "Self",
         *,
         savepath: "Path | None" = None,
     ) -> None:
@@ -830,11 +917,19 @@ class TFPosteriorModel(ks.Model):
             log_dir = savepath.parent / self.log_path / savepath.stem / "hmc"
             summary_writer = tf.summary.create_file_writer(str(log_dir))
 
-        stds = tf.math.reduce_std(self.map.position.original, axis=0)
-
         step_size = tf.repeat(
-            tf.expand_dims(stds, axis=0), repeats=initial_position.shape[0], axis=0
+            tf.expand_dims(self.step_size, axis=0),
+            repeats=initial_position.shape[0],
+            axis=0,
         )
+
+        # stds = tf.math.reduce_std(self.map.position.original, axis=0)
+        #
+        # step_size = tf.repeat(
+        #     tf.expand_dims(stds, axis=0),
+        #     repeats=initial_position.shape[0],
+        #     axis=0,
+        # )
 
         progress = tqdm(
             total=self.n_samples + 1,
@@ -843,7 +938,9 @@ class TFPosteriorModel(ks.Model):
         tf.summary.experimental.set_step(tf.Variable(tf.constant(0, dtype=tf.int64)))
 
         @tf.function
-        def unnormalized_posterior_log_prob(*pos):
+        def unnormalized_posterior_log_prob(
+            *pos: tf.Tensor, results=False
+        ) -> tf.Tensor:
             input_position = self.map.get_position(*pos)
             log_prob = self(
                 (input_position, self.data.time, self.data.amplitude, self.data.sigma),
@@ -861,24 +958,36 @@ class TFPosteriorModel(ks.Model):
                             tf.constant(1, dtype=tf.int64)
                         )
                     )
-                    lp_min = tf.reduce_min(
+
+                    min_log_prob = tf.reduce_min(
                         tf.where(
-                            tf.math.is_finite(log_prob), log_prob, tf.constant(np.inf)
+                            tf.math.is_finite(log_prob),
+                            log_prob,
+                            np.inf * tf.ones_like(log_prob),
                         )
                     )
-                    lp_mean = tf.experimental.numpy.nanmean(
+                    mean_log_prob = tf.reduce_mean(
                         tf.where(
-                            tf.math.is_finite(log_prob), log_prob, tf.constant(np.nan)
+                            tf.math.is_finite(log_prob),
+                            log_prob,
+                            tf.zeros_like(log_prob),
                         )
                     )
-                    lp_max = tf.reduce_max(
+                    max_log_prob = tf.reduce_max(
                         tf.where(
-                            tf.math.is_finite(log_prob), log_prob, tf.constant(-np.inf)
+                            tf.math.is_finite(log_prob),
+                            log_prob,
+                            -np.inf * tf.ones_like(log_prob),
                         )
                     )
-                    tf.summary.scalar("min_log_prob", lp_min)
-                    tf.summary.scalar("mean_log_prob", lp_mean)
-                    tf.summary.scalar("max_log_prob", lp_max)
+
+                    tf.summary.scalar("min_log_prob", min_log_prob)
+                    tf.summary.scalar("mean_log_prob", mean_log_prob)
+                    tf.summary.scalar("max_log_prob", max_log_prob)
+                    if results:
+                        tf.summary.scalar("result_min_log_prob", min_log_prob)
+                        tf.summary.scalar("result_mean_log_prob", mean_log_prob)
+                        tf.summary.scalar("result_max_log_prob", max_log_prob)
 
             return log_prob
 
@@ -887,14 +996,17 @@ class TFPosteriorModel(ks.Model):
             progress.update()
 
         @tf.function
-        def trace_fn(state, pkr):
+        def trace_fn(
+            state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
+        ) -> tuple[tf.Tensor, tf.Tensor]:
+            unnormalized_posterior_log_prob(state, results=True)
             update_progress()
             step_size = pkr.inner_results.step_size
             is_accepted = pkr.inner_results.is_accepted
-            return [step_size, is_accepted]
+            return step_size, is_accepted
 
         @tf.function
-        def sample_chain():
+        def sample_chain() -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
             sampler = tfp.mcmc.NoUTurnSampler(
                 target_log_prob_fn=unnormalized_posterior_log_prob,
                 step_size=step_size,

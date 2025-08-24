@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, Self, Literal, ClassVar, Annotated
+from typing import Any, Self, ClassVar, Annotated
 from pathlib import Path
 
 import numpy as np
@@ -22,30 +22,30 @@ class SNPAEData(StepResult):
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    ind: "npt.NDArray[int]"
-    nspectra: "npt.NDArray[int]"
-    sn_name: "npt.NDArray[str]"
-    dphase: "npt.NDArray[float]"
-    redshift: "npt.NDArray[float]"
-    x0: "npt.NDArray[float]"
-    x1: "npt.NDArray[float]"
-    c: "npt.NDArray[float]"
-    mb: "npt.NDArray[float]"
-    hubble_residual: "npt.NDArray[float]"
-    luminosity_distance: "npt.NDArray[float]"
-    spectra_id: "npt.NDArray[str]"
-    phase: "npt.NDArray[float]"
-    wl_mask_min: "npt.NDArray[float]"
-    wl_mask_max: "npt.NDArray[float]"
-    amplitude: "npt.NDArray[float]"
-    sigma: "npt.NDArray[float]"
-    salt_flux: "npt.NDArray[float]"
-    wavelength: "npt.NDArray[float]"
-    mask: "npt.NDArray[int]"
-    sn_mask: "npt.NDArray[int]"
-    spec_mask: "npt.NDArray[int]"
-    wl_mask: "npt.NDArray[int]"
-    time: "npt.NDArray[float]"
+    ind: npt.NDArray[int]
+    nspectra: npt.NDArray[int]
+    sn_name: npt.NDArray[str]
+    dphase: npt.NDArray[float]
+    redshift: npt.NDArray[float]
+    x0: npt.NDArray[float]
+    x1: npt.NDArray[float]
+    c: npt.NDArray[float]
+    mb: npt.NDArray[float]
+    hubble_residual: npt.NDArray[float]
+    luminosity_distance: npt.NDArray[float]
+    spectra_id: npt.NDArray[str]
+    phase: npt.NDArray[float]
+    wl_mask_min: npt.NDArray[float]
+    wl_mask_max: npt.NDArray[float]
+    amplitude: npt.NDArray[float]
+    sigma: npt.NDArray[float]
+    salt_flux: npt.NDArray[float]
+    wavelength: npt.NDArray[float]
+    mask: npt.NDArray[int]
+    sn_mask: npt.NDArray[int]
+    spec_mask: npt.NDArray[int]
+    wl_mask: npt.NDArray[int]
+    time: npt.NDArray[float]
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---
@@ -124,18 +124,18 @@ class DataConfig(StepConfig):
     analysis: DataStepAnalysis | None = None
     cosmological_model: str = "WMAP7"
     salt_model: str | Path = "salt2"
-    min_redshift: float | Literal["inf", "-inf"] = -np.inf
-    max_redshift: float | Literal["inf", "-inf"] = np.inf
-    min_phase: float | Literal["inf", "-inf"] = -np.inf
-    max_phase: float | Literal["inf", "-inf"] = np.inf
-    min_wavelength: float | Literal["inf", "-inf"] = -np.inf
-    max_wavelength: float | Literal["inf", "-inf"] = np.inf
+    min_redshift: float = -np.inf
+    max_redshift: float = np.inf
+    min_phase: float = -np.inf
+    max_phase: float = np.inf
+    min_wavelength: float = -np.inf
+    max_wavelength: float = np.inf
 
     # === Model Validators ===
     # --- Before ---
     @classmethod
     @model_validator(mode="before")
-    def _validate_bounds(cls, data: Any) -> Any:
+    def _validate_bounds(cls: type[Self], data: Any) -> Any:
         if isinstance(data, dict):
             for var in ["redshift", "phase", "wavelength"]:
                 min_bound = data.get(f"min_{var}")
@@ -157,7 +157,7 @@ class DataConfig(StepConfig):
 
     # --- After ---
     @model_validator(mode="after")
-    def _validate_paths(self) -> Self:
+    def _validate_paths(self: Self) -> Self:
         self.data_dir = resolve_path(self.data_dir, relative_path=self.paths.base)
         if not self.data_dir.exists():
             err = f"`data_dir` resolved to {self.data_dir}, which does not exist."
@@ -188,7 +188,7 @@ class DataConfig(StepConfig):
         return self
 
     @model_validator(mode="after")
-    def _validate_salt_model_path(self) -> Self:
+    def _validate_salt_model_path(self: Self) -> Self:
         salt_path = resolve_path(Path(self.salt_model), relative_path=self.paths.base)
         if salt_path.exists():
             self.salt_model = salt_path
@@ -199,7 +199,7 @@ class DataConfig(StepConfig):
     # --- After ---
     @field_validator("cosmological_model", mode="after")
     @classmethod
-    def _validate_cosmological_model(cls, value: str) -> str:
+    def _validate_cosmological_model(cls: type[Self], value: str) -> str:
         if value not in cosmo.realizations.available:
             err = f"`cosmological_model` is {value} but must be one of {cosmo.realizations.available}"
             cls._raise(err)
@@ -207,7 +207,7 @@ class DataConfig(StepConfig):
 
     @field_validator("salt_model", mode="after")
     @classmethod
-    def _validate_salt_model(cls, value: str) -> str:
+    def _validate_salt_model(cls: type[Self], value: str) -> str:
         if ("salt2" not in value) and ("salt3" not in value):
             err = f'`salt_model` is {value} but does not appear to be a salt2 or salt3 model, as it does not contain the string `"salt2"` or `"salt3"'
             cls._raise(err)

@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, Literal
+from typing import Self, Literal, cast
 from logging import Logger
 from pathlib import Path
 
@@ -7,6 +7,7 @@ import toml
 from pydantic import FilePath, DirectoryPath
 
 from supaernova.utils import deepmerge, resolve_path
+from supaernova.typing import T, Config
 from supaernova.logging import setup_logging
 
 from .base import BaseConfig
@@ -18,22 +19,32 @@ class InputConfig(BaseConfig):
     # === Class Variables ===
     # === Class Methods ===
     @classmethod
-    def _default_config(cls, **input_config) -> dict[str, Any]:
+    def _default_config(cls: type[Self], **input_config: T) -> Config[T]:
+        paths = input_config.get("paths")
+        if paths is None:
+            cls._raise(f'Input Config: {input_config} missing "paths"')
+        paths = cast("PathConfig", paths)
+
+        config = input_config.get("config")
+        if config is None:
+            cls._raise(f'Input Config: {input_config} missing "config"')
+        config = cast("GlobalConfig", config)
+
         return {
             "log": setup_logging(
                 input_config.get("name", cls.__name__),
-                log_path=input_config["paths"].log,
-                verbose=input_config["config"].verbose,
+                log_path=paths.log,
+                verbose=config.verbose,
             ),
         }
 
     @classmethod
     def _extend_config(
-        cls,
-        input_config: dict[str, Any],
+        cls: type[Self],
+        input_config: Config[T],
         base_path: Path | None = None,
         key: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> Config[T]:
         base_path = base_path or input_config.get("paths", {}).get("base")
         if "extends" in input_config and input_config["extends"] is not None:
             extends_path = resolve_path(
@@ -92,12 +103,12 @@ class InputConfig(BaseConfig):
     # --- After ---
 
     # === Instance Methods ===
-    def __init__(self, **input_config) -> None:
+    def __init__(self: Self, **input_config: T) -> None:
         config = self._extend_config(input_config)
         super().__init__(**config)
         self.save()
 
-    def save(self) -> None:
+    def save(self: Self) -> None:
         save_file = self.paths.log / f"{self.name}.toml"
         with save_file.open(
             "w",

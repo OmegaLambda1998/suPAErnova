@@ -8,6 +8,8 @@ from .spectra import SpectraPlot
 from .analysis import Plotter
 
 if TYPE_CHECKING:
+    from numpy import typing as npt
+
     from supaernova.configs.steps.steps import StepResult
 
     from .analysis import Axis, Figure
@@ -22,18 +24,21 @@ class DistributionPlotter(Plotter):
     @staticmethod
     def prep_from_result(data: "StepResult", config: DistributionPlot) -> pd.DataFrame:
         return pd.DataFrame({
-            label: getattr(data, key) for (key, label) in (config.labels or {}).items()
+            label: getattr(data, str(key))
+            for (key, label) in (config.labels or {}).items()
         })
 
     @staticmethod
-    def prep_from_array(data: "np.ndarray", config: DistributionPlot) -> pd.DataFrame:
+    def prep_from_array(
+        data: "npt.NDArray[Any]", config: DistributionPlot
+    ) -> pd.DataFrame:
         return pd.DataFrame({
             label: data[:, ind] for (ind, label) in (config.labels or {}).items()
         })
 
     @staticmethod
     def plot_corner(
-        data: "StepResult | np.ndarray | list[StepResult] | list[np.ndarray] | dict[str, Any]",
+        data: "StepResult | npt.NDArray[Any] | list[StepResult] | list[npt.NDArray[Any]] | dict[str, Any]",
         config: "DistributionPlot",
         *,
         fig: "Figure | None" = None,
@@ -53,6 +58,7 @@ class DistributionPlotter(Plotter):
 
         if not isinstance(data, list):
             data = [data]
+
         if config.mean:
             chains = {
                 "mean": DistributionPlotter.prep_from_array(
@@ -61,10 +67,10 @@ class DistributionPlotter(Plotter):
             }
         else:
             chains = []
-            config_labels = config.labels
+            config_labels = config.labels or {}
             for i, d in enumerate(data):
                 if labels is not None:
-                    config.labels = config_labels[labels[i]]
+                    config.labels = config_labels.get(labels[i], {})
                 if isinstance(d, np.ndarray):
                     chain = DistributionPlotter.prep_from_array(d, config)
                 else:

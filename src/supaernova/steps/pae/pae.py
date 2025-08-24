@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, Self, override
 from pathlib import Path
 import importlib
 
@@ -12,6 +12,8 @@ from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.configs.callbacks import callback
 from supaernova.configs.steps.pae import (
     PAEStage,
+    PAEConfig,
+    PAEStepConfig,
     PAEStepResult,
     PAEStageResult,
     PAEStepAnalysis,
@@ -25,7 +27,6 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from supaernova.configs.steps.pae import PAEStepConfig
     from supaernova.configs.steps.data import DataStepResult
 
     from .tf import TFPAEModel
@@ -33,8 +34,8 @@ if TYPE_CHECKING:
     PAEModel = TFPAEModel
 
 
-class PAE(Step):
-    def __init__(self, config: "PAEStepConfig") -> None:
+class PAE(Step[PAEConfig]):
+    def __init__(self: Self, config: PAEConfig) -> None:
         super().__init__(config)
 
         # === Previous Step Variables ===
@@ -150,7 +151,7 @@ class PAE(Step):
         self.analysis: PAEStepAnalysis = self.options.analysis or PAEStepAnalysis()
 
     @override
-    def _setup(self, *args: Any, data: "DataStepResult", **kwargs: Any) -> None:
+    def _setup(self: Self, *args: Any, data: "DataStepResult", **kwargs: Any) -> None:
         super()._setup()
         # === Previous Step Variables ===
         self.data = data.data
@@ -336,7 +337,7 @@ class PAE(Step):
         self.is_setup = True
 
     @override
-    def _completed(self, *args: Any, **kwargs: Any) -> bool:
+    def _completed(self: Self, *args: Any, **kwargs: Any) -> bool:
         final_savepath = self.paths.results / self.model.name / self.model.ckpt_path
         if not (final_savepath.exists() and any(final_savepath.iterdir())):
             self.log.debug(
@@ -346,7 +347,7 @@ class PAE(Step):
         return True
 
     @override
-    def _load(self, *args: Any, **kwargs: Any) -> None:
+    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
         final_stage = self.run_stages[-1]
         final_stage.prev_stage = None
         self.model.stage = final_stage
@@ -358,7 +359,7 @@ class PAE(Step):
         self.is_loaded = True
 
     @override
-    def _run(self, *args: Any, **kwargs: Any) -> None:
+    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
         savepath: Path | None = None
         for i, stage in enumerate(self.run_stages):
             self.model = self.model.__class__(self)
@@ -390,7 +391,7 @@ class PAE(Step):
         self.is_loaded = True
 
     @override
-    def _result(self, *args: Any, **kwargs: Any) -> None:
+    def _result(self: Self, *args: Any, **kwargs: Any) -> None:
         pae_results = {}
         pae_results["min_redshift"] = self.min_redshift
         pae_results["max_redshift"] = self.max_redshift
@@ -494,7 +495,7 @@ class PAE(Step):
         self.has_results = True
 
     @override
-    def _analyse(self, *args: Any, **kwargs: Any) -> None:
+    def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:
         labels = {}
         ind = 0
         if self.physical_latents:
@@ -754,7 +755,7 @@ class PAE(Step):
                     input_wl_mask = results.input_wl_mask
 
                     data = getattr(self, f"{dt}data").model_copy(deep=True)
-                    wl, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask = (
+                    wl, amplitude, sigma, mask, _sn_mask, _spec_mask, _wl_mask = (
                         SpectraPlotter.prep(
                             data,
                             o,
@@ -800,7 +801,7 @@ class PAE(Step):
 
     @override
     def _clear(
-        self,
+        self: Self,
         *args: "Any",
         setup: bool = False,
         load: bool = False,
@@ -867,7 +868,7 @@ class PAE(Step):
 
     # === Instance Methods ===
 
-    def setup_data_masks(self) -> None:
+    def setup_data_masks(self: Self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
             data: SNPAEData = getattr(self, f"{mask_type}data")
             min_redshift: float = getattr(self, f"min_{mask_type}redshift")
@@ -900,20 +901,26 @@ class PAE(Step):
             setattr(self, f"{mask_type}wl_mask", wl_mask)
 
 
-class PAEStep(Model):
+class PAEStep(Model[PAEStepConfig]):
     id: "ClassVar[str]" = "pae"
     model_backend: "ClassVar[dict[str, Callable[[], type[PAEModel]]]]" = {
         "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFPAEModel,
     }
 
-    def __init__(self, config: "PAEStepConfig") -> None:
+    def __init__(self: Self, config: "PAEStepConfig") -> None:
         super().__init__(config)
+
+        self.variants: dict[str, PAE]
+
         self.plots = {}
         self.bases = {}
 
     @override
     def _analyse(
-        self, *args: "Any", variants: str | list[str] | None = None, **kwargs: "Any"
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
     ) -> None:
         if variants is None:
             return
@@ -1007,7 +1014,7 @@ class PAEStep(Model):
 
     @override
     @callback
-    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
+    def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
         super().analyse(*args, **kwargs)
         if len(self.variants) > 1:
             for name, opts in self.plots.items():

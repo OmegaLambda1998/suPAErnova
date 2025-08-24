@@ -24,18 +24,18 @@ dependencies = [
 
 [project.optional-dependencies]
 tf-cpu = [
-    "tensorflow-cpu",
-    "tf-keras",
-    "tensorflow-probability",
+    "tensorflow_cpu",
+    "tf_keras",
+    "tensorflow_probability",
     "tensorboard",
     "tensorboard_plugin_profile",
 ]
 
 [dependency-groups]
-dev = ["pandas-stubs", "types-tensorflow"]
-docs = ["mkapi", "mkdocs-jupyter", "mkdocs-material", "mkdocs"]
+dev = ["pandas_stubs", "types_tensorflow"]
+docs = ["mkapi", "mkdocs_jupyter", "mkdocs_material", "mkdocs"]
 jupyter = ["ipykernel", "jupyter"]
-tests = ["pytest", "pytest-json-ctrf", "pytest-richer"]
+tests = ["pytest", "pytest_json_ctrf", "pytest_richer"]
 
 [build-system]
 requires = ["hatchling"]
@@ -46,12 +46,12 @@ build-backend = "hatchling.build"
 prerelease = "allow"
 environments = ["sys_platform == 'linux'"]
 
-# We override the tf-keras dependency metadata to avoid installing multiple version of tensorflow
+# We override the tf_keras dependency metadata to avoid installing multiple version of tensorflow
 [[tool.uv.dependency-metadata]]
-name = "tf-keras"
+name = "tf_keras"
 
 [[tool.uv.dependency-metadata]]
-name = "tf-keras-nightly"
+name = "tf_keras_nightly"
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib", "--color=yes", "--tb=short"]

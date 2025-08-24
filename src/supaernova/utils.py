@@ -1,18 +1,22 @@
 from types import ModuleType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from inspect import signature
 from pathlib import Path
 from collections.abc import Callable
 
 Fn = Callable[..., Any]
-type ConfigInputObject[T: Fn] = str | Path | T
+type ConfigInputObject[F: Fn] = str | Path | F
 
 
-def pp(expression):
-    return __import__("pprint").pprint(expression)
+if TYPE_CHECKING:
+    from supaernova.typing import T, Config
 
 
-def deepmerge(d1, d2):
+def pp(expression: object) -> None:
+    __import__("pprint").pprint(expression)
+
+
+def deepmerge(d1: "Config[T]", d2: "Config[T]") -> "Config[T]":
     out = d1.copy()
     for k, v in d2.items():
         if k in out and isinstance(out[k], dict) and isinstance(v, dict):
@@ -44,7 +48,7 @@ def resolve_path(
     return final_path
 
 
-def validate_signature[T: Fn](obj: T, dummy_obj: T, attr: str | None = None) -> T:
+def validate_signature[F: Fn](obj: F, dummy_obj: F, attr: str | None = None) -> F:
     if attr is not None:
         fn_signature = signature(getattr(obj, attr))
         dummy_signature = signature(getattr(dummy_obj, attr))
@@ -69,14 +73,14 @@ def validate_signature[T: Fn](obj: T, dummy_obj: T, attr: str | None = None) -> 
     return obj
 
 
-def extract_from_module[T: Fn](name: str, mod: ModuleType, _type_hint: type[T]) -> T:
+def extract_from_module[F: Fn](name: str, mod: ModuleType, _type_hint: type[F]) -> F:
     if not hasattr(mod, name):
         err = f"Module `{mod}` has no attribute `{name}`"
         raise ValueError(err)
     return getattr(mod, name)
 
 
-def extract_from_file[T: Fn](name: str, file: Path, _type_hint: type[T]) -> T:
+def extract_from_file[F: Fn](name: str, file: Path, _type_hint: type[F]) -> F:
     if not file.exists():
         err = f"File `{file}` does not exist"
         raise ValueError(err)
@@ -91,13 +95,13 @@ def extract_from_file[T: Fn](name: str, file: Path, _type_hint: type[T]) -> T:
     return extract_from_module(name, mod, _type_hint)
 
 
-def validate_object[T: Fn](
-    obj: ConfigInputObject[T],
+def validate_object[F: Fn](
+    obj: ConfigInputObject[F],
     *,
-    dummy_obj: T,
+    dummy_obj: F,
     mod: ModuleType | None = None,
     attr: str | None = None,
-) -> T:
+) -> F:
     type_hint = type(dummy_obj)
     if isinstance(obj, str):
         path = Path(obj)

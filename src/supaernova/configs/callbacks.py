@@ -1,24 +1,29 @@
-from typing import Any, Self, Literal, Protocol
+from typing import Any, Self, Literal, TypeVar, Protocol, ParamSpec
 from collections.abc import Callable
 
-from pydantic import FilePath, BaseModel, model_validator
+from pydantic import BaseModel, model_validator
 
 from supaernova.utils import resolve_path
 
 from .input import InputConfig
 
+Param = ParamSpec("Param")
+RetType = TypeVar("RetType")
 
-class CallbackFunc[Instance: Any, Returns](Protocol):
-    def __call__(_self, self: Instance, *args: Any, **kwargs: Any) -> Returns: ...
+
+class Callbackable(Protocol):
+    def __call__(
+        _self: Self, self: "CallbackConfig", *args: Param.args, **kwargs: Param.kwargs
+    ) -> RetType: ...
 
     __name__: str
 
 
-def callback[Instance: Any, Returns](
-    fn: CallbackFunc[Instance, Returns],
-) -> Callable[..., Returns]:
-    def wrapper(self: Instance, *args: Any, **kwargs: Any) -> Returns:
-        callbacks_spec: CallbackSpec | None = (self.callbacks or {}).get(
+def callback(fn: Callbackable) -> Callbackable:
+    def wrapper(
+        self: "CallbackConfig", *args: Param.args, **kwargs: Param.kwargs
+    ) -> RetType:
+        callbacks_spec: list[CallbackSpec] | None = (self.callbacks or {}).get(
             fn.__name__.lower()
         )
         if callbacks_spec is None:
@@ -31,10 +36,11 @@ def callback[Instance: Any, Returns](
             cb = cb_spec.callback
             cb_args = cb_spec.args or []
             cb_kwargs = cb_spec.kwargs or {}
-            if "pre" in cb:
-                pre_cbs.append((cb["pre"], cb_args, cb_kwargs))
-            if "post" in cb:
-                post_cbs.append((cb["post"], cb_args, cb_kwargs))
+            if isinstance(cb, dict):
+                if "pre" in cb:
+                    pre_cbs.append((cb["pre"], cb_args, cb_kwargs))
+                if "post" in cb:
+                    post_cbs.append((cb["post"], cb_args, cb_kwargs))
 
         for pre_callback, cb_args, cb_kwargs in pre_cbs:
             self.log.debug(
@@ -71,7 +77,7 @@ class CallbackConfig(InputConfig):
     # --- Before ---
     # --- After ---
     @model_validator(mode="after")
-    def _set_callbacks(self) -> Self:
+    def _set_callbacks(self: Self) -> Self:
         if not isinstance(self.callbacks, dict):
             return self
         for fn, callbacks_spec in self.callbacks.items():

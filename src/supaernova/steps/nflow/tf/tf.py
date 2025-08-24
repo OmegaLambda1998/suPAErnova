@@ -1,11 +1,6 @@
 # Copyright 2025 Patrick Armstrong
-import os
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, Self, cast, override
 
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ["TF_DETERMINISTIC_OPS"] = "1"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import tensorflow as tf
 from tensorflow import keras as ks
 from tqdm.keras import TqdmCallback
@@ -24,14 +19,17 @@ if TYPE_CHECKING:
 
     from supaernova.steps.pae import TFPAEModel
     from supaernova.steps.nflow import NFlow
-    from supaernova.configs.steps.data import DataStepResult
+    from supaernova.configs.steps.data import SNPAEData
+    from supaernova.typing.backends.tf import Loss, LearningRateSchedule
     from supaernova.configs.steps.nflow.tf import TFNFlowConfig
+
+NFLOWMODELSTEP: "NFlow"
 
 
 @ks.utils.register_keras_serializable("SuPAErnova")
 class TFNFlowModel(ks.Model):
     def __init__(
-        self,
+        self: "Self",
         config: "NFlow",
         *args: "Any",
         **kwargs: "Any",
@@ -49,8 +47,13 @@ class TFNFlowModel(ks.Model):
         self.profile: bool = self.options.profile
         self.set_seed()
 
+        # Data Dimensions
+        self.sn_dim = config.sn_dim
+        self.spec_dim = config.spec_dim
+        self.wl_dim = config.wl_dim
+
         self.latents: tf.Tensor
-        self.data: DataStepResult = config.data
+        self.data: SNPAEData = config.data
         self.data_mask: npt.NDArray[bool] = config.mask
         self.sn_mask: npt.NDArray[bool] = config.sn_mask
         self.spec_mask: npt.NDArray[bool] = config.spec_mask
@@ -66,14 +69,14 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         mask_spec = tf.cast(
-            tf.reduce_min(valid_wl_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_mask, axis=-1, keepdims=True),
             tf.int32,
         )
         mask_sn = tf.reduce_max(mask_spec, axis=-2)
         self.mask = tf.cast(mask_sn, tf.float32)
 
         self.train_latents: tf.Tensor
-        self.train_data: DataStepResult = config.train_data
+        self.train_data: SNPAEData = config.train_data
         self.train_data_mask: npt.NDArray[bool] = config.train_mask
         self.train_sn_mask: npt.NDArray[bool] = config.train_sn_mask
         self.train_spec_mask: npt.NDArray[bool] = config.train_spec_mask
@@ -94,14 +97,14 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         train_mask_spec = tf.cast(
-            tf.reduce_min(valid_wl_train_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_train_mask, axis=-1, keepdims=True),
             tf.int32,
         )
         train_mask_sn = tf.reduce_max(train_mask_spec, axis=-2)
         self.train_mask = tf.cast(train_mask_sn, tf.float32)
 
         self.test_latents: tf.Tensor
-        self.test_data: DataStepResult = config.test_data
+        self.test_data: SNPAEData = config.test_data
         self.test_data_mask: npt.NDArray[bool] = config.test_mask
         self.test_sn_mask: npt.NDArray[bool] = config.test_sn_mask
         self.test_spec_mask: npt.NDArray[bool] = config.test_spec_mask
@@ -122,14 +125,14 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         test_mask_spec = tf.cast(
-            tf.reduce_min(valid_wl_test_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_test_mask, axis=-1, keepdims=True),
             tf.int32,
         )
         test_mask_sn = tf.reduce_max(test_mask_spec, axis=-2)
         self.test_mask = tf.cast(test_mask_sn, tf.float32)
 
         self.val_latents: tf.Tensor
-        self.val_data: DataStepResult = config.val_data
+        self.val_data: SNPAEData = config.val_data
         self.val_data_mask: npt.NDArray[bool] = config.val_mask
         self.val_sn_mask: npt.NDArray[bool] = config.val_sn_mask
         self.val_spec_mask: npt.NDArray[bool] = config.val_spec_mask
@@ -150,14 +153,15 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         val_mask_spec = tf.cast(
-            tf.reduce_min(valid_wl_val_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_val_mask, axis=-1, keepdims=True),
             tf.int32,
         )
         val_mask_sn = tf.reduce_max(val_mask_spec, axis=-2)
         self.val_mask = tf.cast(val_mask_sn, tf.float32)
 
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
-        vars(self)["pae"]: TFPAEModel = config.pae
+        self.pae: TFPAEModel
+        vars(self)["pae"] = config.pae
         self.pae.trainable = False
         self.pae.encoder.trainable = False
         self.pae.decoder.trainable = False
@@ -175,18 +179,16 @@ class TFNFlowModel(ks.Model):
         self.patience: int = self.options.patience
 
         self.lr: float = self.options.lr
-        self.lr_decay_steps: float = self.options.lr_decay_steps
+        self.lr_decay_steps: int = self.options.lr_decay_steps
         self.lr_decay_rate: float = self.options.lr_decay_rate
         self.lr_weight_decay_rate: float = self.options.lr_weight_decay_rate
 
         self.activation: Callable[[tf.Tensor], tf.Tensor] = self.options.activation_fn
-        self._scheduler: type[ks.optimizers.schedules.LearningRateSchedule] = (
-            self.options.scheduler_cls
-        )
+        self._scheduler: type[LearningRateSchedule] = self.options.scheduler_cls
         self._optimiser: type[ks.optimizers.Optimizer] = self.options.optimiser_cls
-        loss: ks.losses.Loss = self.options.loss_cls()
+        loss: Loss = self.options.loss_cls()
         loss.model = self
-        self._loss: ks.losses.Loss = loss
+        self._loss: Loss = loss
         self._loss_terms: dict[str, tf.Tensor]
         self._val_loss_terms: dict[str, tf.Tensor]
 
@@ -234,7 +236,7 @@ class TFNFlowModel(ks.Model):
         self._get_latents()
 
     @override
-    def build(self, input_shape: tuple[int, ...]) -> None:
+    def build(self: "Self", input_shape: tf.TensorShape) -> None:
         gaussian = tfd.MultivariateNormalDiag(
             loc=tf.zeros(self.n_flow_latents),
             scale_diag=tf.ones(self.n_flow_latents),
@@ -300,7 +302,7 @@ class TFNFlowModel(ks.Model):
     @override
     @tf.function
     def call(
-        self,
+        self: "Self",
         inputs: tf.Tensor,
         training: bool | None = None,
     ) -> tf.Tensor:
@@ -313,13 +315,13 @@ class TFNFlowModel(ks.Model):
         masked_flow = tfd.Masked(self.flow, mask)
         return masked_flow.log_prob(latents)
 
-    def u_to_z(self, inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
+    def u_to_z(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         # If permute is True, then the incoming u_latents need to be permuted correctly
         if permute:
             inputs = tf.gather(inputs, self.u_to_z_permute, axis=-1)
         return self.flow.bijector.forward(inputs)
 
-    def z_to_u(self, inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
+    def z_to_u(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         u_latents = self.flow.bijector.inverse(inputs)
         # If permute is True, then the outgoing u_latents need to be un-permuted correctly
         # Reverse, permute, reverse undoes the initial permutation
@@ -333,7 +335,7 @@ class TFNFlowModel(ks.Model):
         return u_latents
 
     def z_to_u_steps(
-        self, inputs: tf.Tensor, step: int, *, permute: bool = False
+        self: "Self", inputs: tf.Tensor, step: int, *, permute: bool = False
     ) -> tuple[tf.Tensor, bool]:
         if step <= 0:
             return tf.convert_to_tensor(inputs, dtype=tf.float32), False
@@ -360,13 +362,13 @@ class TFNFlowModel(ks.Model):
         return u_latents, isinstance(bijectors[:step][-1], tfb.Permute)
 
     def train_model(
-        self,
+        self: "Self",
         *,
         savepath: "Path | None" = None,
     ) -> ks.callbacks.History:
         self.build_model()
 
-        n_batches_per_epoch = self.train_latents.shape[0] / self.batch_size
+        n_batches_per_epoch = self.data_mask.shape[0] / self.batch_size
 
         # === Setup Callbacks ===
         callbacks: list[ks.callbacks.Callback] = []
@@ -462,9 +464,9 @@ class TFNFlowModel(ks.Model):
             validation_freq=1,
         )
 
-    def _get_latents(self) -> None:
+    def _get_latents(self: "Self") -> None:
         for dt in ["train_", "test_", "val_", ""]:
-            data: DataStepResult = getattr(self, f"{dt}data")
+            data: SNPAEData = getattr(self, f"{dt}data")
             phase = tf.convert_to_tensor(data.time, dtype=tf.float32)
             amplitude = tf.convert_to_tensor(data.amplitude, dtype=tf.float32)
             data_mask = tf.convert_to_tensor(
@@ -498,7 +500,7 @@ class TFNFlowModel(ks.Model):
                 latents = latents[:, 1:]
             setattr(self, f"{dt}latents", latents)
 
-    def build_model(self) -> None:
+    def build_model(self: "Self") -> None:
         if not self.built:
             self.build(self.train_latents.shape)
 
@@ -534,13 +536,13 @@ class TFNFlowModel(ks.Model):
 
             self.built = True
 
-    def save_checkpoint(self, savepath: "Path") -> None:
+    def save_checkpoint(self: "Self", savepath: "Path") -> None:
         (savepath / self.ckpt_path).mkdir(parents=True, exist_ok=True)
         tf.train.Checkpoint(
             self,
         ).save(f"{savepath / self.ckpt_path}/")
 
-    def load_checkpoint(self, loadpath: "Path") -> None:
+    def load_checkpoint(self: "Self", loadpath: "Path") -> None:
         self.build_model()
 
         tf.train.Checkpoint(
@@ -550,19 +552,19 @@ class TFNFlowModel(ks.Model):
         ).assert_existing_objects_matched()
 
     @override
-    def get_config(self) -> dict[str, "Any"]:
+    def get_config(self: "Self") -> dict[str, "Any"]:
         return {**super().get_config()}
 
     @override
     @classmethod
-    def from_config(cls, config: dict[str, "Any"]) -> "Self":
+    def from_config(cls: type["Self"], config: dict[str, "Any"]) -> "Self":
         global NFLOWMODELSTEP
         return cls(NFLOWMODELSTEP)
 
-    def build_from_config(self, _config: dict[str, "Any"]) -> None:
+    def build_from_config(self: "Self", _config: dict[str, "Any"]) -> None:
         self.build_model()
 
     @override
-    def set_seed(self, seed: int = 0) -> None:
+    def set_seed(self: "Self", seed: int = 0) -> None:
         seed = self.seed + seed
         tf.random.set_seed(seed)

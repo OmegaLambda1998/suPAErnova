@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, ClassVar, cast, override
+from typing import TYPE_CHECKING, Self, ClassVar, cast, override
 from pathlib import Path
 
 import numpy as np
@@ -12,7 +12,13 @@ from supaernova.steps.variants import Variant
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis.analysis import Plotter
 from supaernova.configs.callbacks import callback
-from supaernova.configs.steps.data import SNPAEData, DataStepResult, DataStepAnalysis
+from supaernova.configs.steps.data import (
+    SNPAEData,
+    DataConfig,
+    DataStepConfig,
+    DataStepResult,
+    DataStepAnalysis,
+)
 
 if TYPE_CHECKING:
     from typing import Any
@@ -20,13 +26,13 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from supaernova.configs.steps.data import DataStepConfig
+    from supaernova.typing import T, Config
 
     SNeDataFrame = pd.DataFrame
 
 
-class Data(Step):
-    def __init__(self, config: "DataStepConfig") -> None:
+class Data(Step[DataConfig]):
+    def __init__(self: Self, config: DataConfig) -> None:
         super().__init__(config)
 
         # === Previous Step Variables ===
@@ -64,7 +70,7 @@ class Data(Step):
 
         # === Run Variables ===
         self.sne: SNeDataFrame  # Created in self.load_sne
-        self.data: SNPAEData  # Created in self.prepare_data_arrays
+        self.data: Config[T]  # Created in self.prepare_data_arrays
         self.train_data: list[SNPAEData]  # Created in self.split_train_test
         self.test_data: list[SNPAEData]  # Created in self.split_train_test
         # Data Dimensions
@@ -81,7 +87,7 @@ class Data(Step):
         self.analysis: DataStepAnalysis = self.options.analysis or DataStepAnalysis()
 
     @override
-    def _setup(self, *args: "Any", **kwargs: "Any") -> None:
+    def _setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
         # === Previous Step Variables ===
 
         # === Config Variables ===
@@ -123,7 +129,7 @@ class Data(Step):
         self.is_setup = True
 
     @override
-    def _completed(self, *args: "Any", **kwargs: "Any") -> bool:
+    def _completed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
         if not self.out_data.exists():
             self.log.debug(
                 f"{self.name} has not completed as {self.out_data} does not exist"
@@ -157,7 +163,7 @@ class Data(Step):
         return True
 
     @override
-    def _load(self, *args: "Any", **kwargs: "Any") -> None:
+    def _load(self: Self, *args: "Any", **kwargs: "Any") -> None:
         # Load SNe DataFrames
         self.log.debug(f"Loading SNe dataframe from {self.out_sne}")
         self.sne = pd.read_pickle(self.out_sne)
@@ -189,7 +195,7 @@ class Data(Step):
         self.is_loaded = True
 
     @override
-    def _run(self, *args: "Any", **kwargs: "Any") -> None:
+    def _run(self: Self, *args: "Any", **kwargs: "Any") -> None:
         self.load_sne()
         self.calculate_salt_flux()
         self.get_dims()
@@ -198,7 +204,7 @@ class Data(Step):
         self.is_loaded = True
 
     @override
-    def _result(self, *args: "Any", **kwargs: "Any") -> None:
+    def _result(self: Self, *args: "Any", **kwargs: "Any") -> None:
         results = {}
         results["data"] = SNPAEData.model_validate(self.data)
         results["dir"] = self.data_dir
@@ -225,7 +231,7 @@ class Data(Step):
             self.log.debug(f"Saving data arrays to {self.out_data}")
             np.savez_compressed(
                 self.out_data,
-                **self.results.data.model_dump(exclude={"metadata", "name"}),
+                **self.results.data.model_dump(exclude={"name"}),
             )
 
         for i, train_data in enumerate(self.results.train_data):
@@ -234,7 +240,7 @@ class Data(Step):
                 self.log.debug(f"Saving #{i} training data array to {out_train}")
                 np.savez_compressed(
                     out_train,
-                    **train_data.model_dump(exclude={"metadata", "name"}),
+                    **train_data.model_dump(exclude={"name"}),
                 )
 
         for i, test_data in enumerate(self.results.test_data):
@@ -243,13 +249,13 @@ class Data(Step):
                 self.log.debug(f"Saving #{i} testing data array to {out_test}")
                 np.savez_compressed(
                     out_test,
-                    **test_data.model_dump(exclude={"metadata", "name"}),
+                    **test_data.model_dump(exclude={"name"}),
                 )
 
         self.has_results = True
 
     @override
-    def _analyse(self, *args: "Any", **kwargs: "Any") -> None:
+    def _analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if self.analysis.plot_spectra is not None:
             if not isinstance(self.analysis.plot_spectra, list):
                 self.analysis.plot_spectra = [self.analysis.plot_spectra]
@@ -296,7 +302,7 @@ class Data(Step):
 
     @override
     def _clear(
-        self,
+        self: Self,
         *args: "Any",
         setup: bool = False,
         load: bool = False,
@@ -344,7 +350,7 @@ class Data(Step):
     # === DataStep Specific Functions ===
     #
 
-    def load_sne(self) -> None:
+    def load_sne(self: Self) -> None:
         self.log.debug(f"Loading data from `meta` file: {self.meta}")
         sne_dtypes = {
             "id": str,
@@ -466,7 +472,7 @@ class Data(Step):
 
         self.sne = sne
 
-    def calculate_salt_flux(self) -> None:
+    def calculate_salt_flux(self: Self) -> None:
         self.log.debug("Calculating SALT fluxes")
 
         def get_salt_flux(
@@ -503,7 +509,7 @@ class Data(Step):
                     c=sn["c"],
                 )
 
-    def get_dims(self) -> None:
+    def get_dims(self: Self) -> None:
         self.log.debug("Calculating data dimensions")
         self.sn_dim = len(self.sne)
         self.log.debug(f"Number of SNe: {self.sn_dim}")
@@ -524,7 +530,7 @@ class Data(Step):
         self.wl_dim = len(self.wavelength)
         self.log.debug(f"Length of wavelength grid: {self.wl_dim}")
 
-    def prepare_data_arrays(self) -> None:
+    def prepare_data_arrays(self: Self) -> None:
         self.log.debug("Preparing data arrays")
         # Each element of data is a 3D Array of shape (SNDim x SpecDim x DataDim) where:
         #   SNDim = Number of SNe
@@ -769,9 +775,11 @@ class Data(Step):
 
         data["mask"] = data["mask"].astype(np.int32)
 
-        self.data = SNPAEData.model_validate(data)
+        self.data = data
 
-    def get_unmasked_dims(self, mask: np.ndarray | None = None) -> tuple[int, int, int]:
+    def get_unmasked_dims(
+        self: Self, mask: "npt.NDArray[np.int32] | None" = None
+    ) -> tuple[int, int, int]:
         self.log.debug("Calculating unmasked data dimensions")
         if mask is None:
             mask = self.data.mask
@@ -798,7 +806,7 @@ class Data(Step):
 
         return unmasked_sn_dim, unmasked_spec_dim, unmasked_wl_dim
 
-    def split_train_test(self) -> None:
+    def split_train_test(self: Self) -> None:
         self.train_data = []
         self.test_data = []
 
@@ -842,17 +850,23 @@ class Data(Step):
         )
 
 
-class DataStep(Variant):
+class DataStep(Variant[DataStepConfig]):
     id: ClassVar[str] = "data"
 
-    def __init__(self, config: "DataStepConfig") -> None:
+    def __init__(self: Self, config: "DataStepConfig") -> None:
         super().__init__(config)
+
+        self.variants: dict[str, Data]
+
         self.plots = {}
         self.bases = {}
 
     @override
     def _analyse(
-        self, *args: "Any", variants: str | list[str] | None = None, **kwargs: "Any"
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
     ) -> None:
         if variants is None:
             return
@@ -933,7 +947,7 @@ class DataStep(Variant):
 
     @override
     @callback
-    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
+    def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
         super().analyse(*args, **kwargs)
         if len(self.variants) > 1:
             for name, opts in self.plots.items():

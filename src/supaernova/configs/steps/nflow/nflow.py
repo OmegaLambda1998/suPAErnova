@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, Literal, ClassVar, Annotated
+from typing import Any, Self, Literal, ClassVar, Annotated
 import importlib
 from collections.abc import Callable
 
@@ -89,7 +89,7 @@ class NFlowConfig(BackendConfig):
     save_best: bool = False
 
     lr: PositiveFloat = 0.0001
-    lr_decay_steps: PositiveFloat = 300
+    lr_decay_steps: PositiveInt = 300
     lr_decay_rate: PositiveFloat = 0.95
     lr_weight_decay_rate: PositiveFloat = 0.0001
 
@@ -97,36 +97,36 @@ class NFlowConfig(BackendConfig):
     patience: PositiveFloat = 0.05
     batch_normalisation: bool = False
 
-    min_redshift: float | Literal["inf", "-inf"] | None = None
-    max_redshift: float | Literal["inf", "-inf"] | None = None
-    min_train_redshift: float | Literal["inf", "-inf"] | None = None
-    max_train_redshift: float | Literal["inf", "-inf"] | None = None
-    min_test_redshift: float | Literal["inf", "-inf"] | None = None
-    max_test_redshift: float | Literal["inf", "-inf"] | None = None
-    min_val_redshift: float | Literal["inf", "-inf"] | None = None
-    max_val_redshift: float | Literal["inf", "-inf"] | None = None
-    min_phase: float | Literal["inf", "-inf"] | None = None
-    max_phase: float | Literal["inf", "-inf"] | None = None
-    min_train_phase: float | Literal["inf", "-inf"] | None = None
-    max_train_phase: float | Literal["inf", "-inf"] | None = None
-    min_test_phase: float | Literal["inf", "-inf"] | None = None
-    max_test_phase: float | Literal["inf", "-inf"] | None = None
-    min_val_phase: float | Literal["inf", "-inf"] | None = None
-    max_val_phase: float | Literal["inf", "-inf"] | None = None
-    min_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_wavelength: float | Literal["inf", "-inf"] | None = None
-    min_train_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_train_wavelength: float | Literal["inf", "-inf"] | None = None
-    min_test_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_test_wavelength: float | Literal["inf", "-inf"] | None = None
-    min_val_wavelength: float | Literal["inf", "-inf"] | None = None
-    max_val_wavelength: float | Literal["inf", "-inf"] | None = None
+    min_redshift: float | None = None
+    max_redshift: float | None = None
+    min_train_redshift: float | None = None
+    max_train_redshift: float | None = None
+    min_test_redshift: float | None = None
+    max_test_redshift: float | None = None
+    min_val_redshift: float | None = None
+    max_val_redshift: float | None = None
+    min_phase: float | None = None
+    max_phase: float | None = None
+    min_train_phase: float | None = None
+    max_train_phase: float | None = None
+    min_test_phase: float | None = None
+    max_test_phase: float | None = None
+    min_val_phase: float | None = None
+    max_val_phase: float | None = None
+    min_wavelength: float | None = None
+    max_wavelength: float | None = None
+    min_train_wavelength: float | None = None
+    max_train_wavelength: float | None = None
+    min_test_wavelength: float | None = None
+    max_test_wavelength: float | None = None
+    min_val_wavelength: float | None = None
+    max_val_wavelength: float | None = None
 
     # === Model Validators ===
     # --- Before ---
     @classmethod
     @model_validator(mode="before")
-    def _validate_bounds(cls, data: Any) -> Any:
+    def _validate_bounds(cls: type[Self], data: Any) -> Any:
         if isinstance(data, dict):
             for var in ["redshift", "phase", "wavelength"]:
                 min_bound = data.get(f"min_{var}")

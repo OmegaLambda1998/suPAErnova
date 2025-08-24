@@ -2,13 +2,12 @@ from typing import TYPE_CHECKING, Literal
 from pathlib import Path
 
 import numpy as np
+from numpy import typing as npt  # noqa: TC002
 
 from .analysis import Plotter, AbstractPlot
 
 if TYPE_CHECKING:
     from typing import Any
-
-    from numpy import typing as npt
 
     from supaernova.configs.steps.data import SNPAEData
 
@@ -27,10 +26,10 @@ class SpectraPlot(AbstractPlot):
 
 class ComparisonPlot(SpectraPlot):
     base: str = ""
-    base_wl: np.ndarray | None = None
-    base_amp: np.ndarray | None = None
-    base_sigma: np.ndarray | None = None
-    base_mask: np.ndarray | None = None
+    base_wl: "npt.NDArray[int] | None" = None
+    base_amp: "npt.NDArray[int] | None" = None
+    base_sigma: "npt.NDArray[int] | None" = None
+    base_mask: "npt.NDArray[int] | None" = None
     plot_base: bool = True
 
 

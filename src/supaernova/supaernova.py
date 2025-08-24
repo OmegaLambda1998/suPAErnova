@@ -1,4 +1,5 @@
 # Copyright 2025 Patrick Armstrong
+
 import sys
 from time import time
 from typing import TYPE_CHECKING
@@ -21,9 +22,11 @@ from .configs.globals import GlobalConfig
 if TYPE_CHECKING:
     from pydantic import JsonValue
 
+    from .typing import Config
+
 
 def prepare_config(
-    config: dict[str, "JsonValue"],
+    config: "Config[JsonValue]",
     *,  # Force keyword-only arguments
     verbose: bool = False,
     force: bool = False,
@@ -93,7 +96,7 @@ def prepare_config(
 
 
 def main(
-    input_config: dict[str, "JsonValue"],
+    input_config: "Config[JsonValue]",
     *,  # Force keyword-only arguments
     verbose: bool = False,
     force: bool = False,
@@ -126,11 +129,12 @@ def main(
             end_time = time()
             exec_time = end_time - start_time
             unit = "s"
-            if exec_time > 60:
-                exec_time /= 60
+            t = 60
+            if exec_time > t:
+                exec_time /= t
                 unit = "m"
-            if exec_time > 60:
-                exec_time /= 60
+            if exec_time > t:
+                exec_time /= t
                 unit = "h"
             log.info(f"SuPAErnovae took {exec_time:.2f}{unit}")
     except ValidationError as e:

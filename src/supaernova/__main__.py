@@ -5,11 +5,13 @@ from pathlib import Path
 import toml
 import click
 
+from . import main
 from .utils import resolve_path
-from .supaernova import main
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
+
+    from supaernova.typing import Config
 
 
 @click.command()
@@ -57,7 +59,7 @@ def cli(
     plot_path: Path | None = None,
     log_path: Path | None = None,
 ) -> None:
-    input_config: dict[str, JsonValue] = toml.load(input_path)
+    input_config: Config[JsonValue] = toml.load(input_path)
 
     # Set base_path to input_path.parent if none provided
     base_path = resolve_path(
