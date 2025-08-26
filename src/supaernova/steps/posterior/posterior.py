@@ -456,8 +456,26 @@ class Posterior(Step[PosteriorConfig]):
                     "best_z_latents": model.map.z_latents.best.numpy(),
                 }
 
+                samples = model.hmc.samples.numpy()
+                mean_samples = samples.mean(axis=0)
+                input_position = model.map.get_position(mean_samples)
+                log_prob = model(
+                    (
+                        input_position,
+                        model.data.time,
+                        model.data.amplitude,
+                        model.data.sigma,
+                    ),
+                    training=False,
+                    mask=model.data_mask,
+                    sn_mask=model.sn_mask,
+                    spec_mask=model.spec_mask,
+                    wl_mask=model.wl_mask,
+                )
+
                 hmc_results = {
-                    "samples": model.hmc.samples.numpy(),
+                    "samples": samples,
+                    "log_prob": log_prob.numpy(),
                     "step_sizes_final": model.hmc.step_sizes_final.numpy(),
                     "is_accepted": model.hmc.is_accepted.numpy(),
                     "u_delta_av": model.hmc.u_delta_av.numpy(),

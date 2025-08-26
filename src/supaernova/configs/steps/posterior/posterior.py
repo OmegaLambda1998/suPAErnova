@@ -113,6 +113,7 @@ class PosteriorStepHMCResult(StepResult):
     # === Field Variables ===
     # --- Required ---
     samples: npt.NDArray[float]
+    log_prob: npt.NDArray[float]
     step_sizes_final: npt.NDArray[float]
     is_accepted: npt.NDArray[float]
     u_delta_av: npt.NDArray[float]
@@ -196,7 +197,7 @@ class PosteriorConfig(BackendConfig):
     n_burnin: PositiveInt
     n_samples: PositiveInt
     n_leapfrog: PositiveInt = 3
-    n_thinning: PositiveInt = 1
+    n_thinning: NonNegativeInt = 1
     # --- Optional ---
     debug: bool = False
     profile: bool = False

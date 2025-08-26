@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from supaernova.typing import T, Config
+    from supaernova.typing import T
 
     SNeDataFrame = pd.DataFrame
 
@@ -70,7 +70,7 @@ class Data(Step[DataConfig]):
 
         # === Run Variables ===
         self.sne: SNeDataFrame  # Created in self.load_sne
-        self.data: Config[T]  # Created in self.prepare_data_arrays
+        self.data: SNPAEData  # Created in self.prepare_data_arrays
         self.train_data: list[SNPAEData]  # Created in self.split_train_test
         self.test_data: list[SNPAEData]  # Created in self.split_train_test
         # Data Dimensions
@@ -174,7 +174,7 @@ class Data(Step[DataConfig]):
         # Open the file, read each key into a dictionary, then close the file
         self.log.debug(f"Loading data arrays from {self.out_data}")
         with np.load(self.out_data, allow_pickle=True) as io:
-            self.data = dict(io.items())
+            self.data = SNPAEData.model_validate(dict(io.items()))
 
         # Load in training and testing data
         self.log.debug(f"Loading training data arrays from {self.out_train}")
@@ -775,7 +775,7 @@ class Data(Step[DataConfig]):
 
         data["mask"] = data["mask"].astype(np.int32)
 
-        self.data = data
+        self.data = SNPAEData.model_validate(data)
 
     def get_unmasked_dims(
         self: Self, mask: "npt.NDArray[np.int32] | None" = None

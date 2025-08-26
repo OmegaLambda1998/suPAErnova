@@ -321,7 +321,7 @@ class TFPosteriorModel(ks.Model):
         log_likelihood = likelihood.log_prob(input_amp) * mask_spec
         # tf.print("likelihood_orig", log_likelihood, log_likelihood.shape)
 
-        log_likelihood_num = mask_sn * tf.reduce_sum(log_likelihood, axis=1)
+        log_likelihood_num = tf.reduce_sum(log_likelihood, axis=1)  # * mask_sn
         # tf.print("likelihood_num", log_likelihood_num, log_likelihood_num.shape)
 
         log_likelihood_sum = tf.reduce_sum(

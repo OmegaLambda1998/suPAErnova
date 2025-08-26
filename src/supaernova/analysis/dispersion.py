@@ -87,8 +87,8 @@ class DispersionPlotter(Plotter):
             _wl,
             _amplitude,
             _sigma,
-            _input_mask,
-            input_sn_mask,
+            input_mask,
+            _input_sn_mask,
             _input_spec_mask,
             _input_wl_mask,
         ) = SpectraPlotter.prep(
@@ -100,13 +100,21 @@ class DispersionPlotter(Plotter):
             wl_mask=wl_mask,
         )
 
+        # Determine which spectra to keep
+        # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+        mask_spec = input_mask.max(axis=-1)
+
+        # Determine which SNe to keep
+        # Will mask out any SN with *no* unmasked spectra
+        mask_sn = mask_spec.max(axis=-1)
+
         pae_redshift = data.redshift[:, 0, 0]
         pae_order = np.argsort(pae_redshift)
         pae_redshift = pae_redshift[pae_order]
         pae_redshift_error = (pae_redshift * 3e5 + 300.0) / 3e5
         pae_magshift_error = abs(-5 * np.log10(pae_redshift / pae_redshift_error))
 
-        pae_mask = input_sn_mask[:, 0, 0][pae_order]
+        pae_mask = mask_sn[pae_order]
 
         pae_names = data.sn_name[:, 0, 0][pae_order]
         pae_amplitudes = np.concatenate(
@@ -127,19 +135,15 @@ class DispersionPlotter(Plotter):
             axis=0
         ) / pae_weighted_sum
 
-        n_pae_iter = len(hmcs)
-        n_pae_eff = 1 if n_pae_iter == 1 else n_pae_iter / (n_pae_iter - 1)
+        pae_n_iter = len(hmcs)
+        pae_n_eff = 1 if pae_n_iter == 1 else pae_n_iter / (pae_n_iter - 1)
 
-        pae_weighted_deviations = np.sqrt(
-            n_pae_eff
-            * (
-                (
-                    (pae_weights * pae_amplitudes * pae_amplitudes).sum(axis=0)
-                    / pae_weighted_sum
-                )
-                - (pae_weighted_amplitudes * pae_weighted_amplitudes)
-            )
-        )
+        pae_weighted_variance = (
+            (pae_weights * pae_amplitudes * pae_amplitudes).sum(axis=0)
+            / pae_weighted_sum
+        ) - (pae_weighted_amplitudes * pae_weighted_amplitudes)
+
+        pae_weighted_deviations = np.sqrt(pae_n_eff * np.abs(pae_weighted_variance))
 
         pae_weighted_stds = np.sqrt(
             pae_weighted_deviations * pae_weighted_deviations
@@ -282,22 +286,20 @@ class DispersionPlotter(Plotter):
 
             legacy_n_eff = 1
 
+            legacy_weighted_variance = (
+                (legacy_weights * legacy_amplitudes * legacy_amplitudes).sum(axis=0)
+                / legacy_weighted_sum
+            ) - (legacy_weighted_amplitudes * legacy_weighted_amplitudes)
+
             legacy_weighted_deviations = np.sqrt(
-                legacy_n_eff
-                * (
-                    (
-                        (legacy_weights * legacy_amplitudes * legacy_amplitudes).sum(
-                            axis=0
-                        )
-                        / legacy_weighted_sum
-                    )
-                    - (legacy_weighted_amplitudes * legacy_weighted_amplitudes)
-                )
+                legacy_n_eff * np.abs(legacy_weighted_variance)
             )
+
             legacy_weighted_stds = np.sqrt(
                 legacy_weighted_deviations * legacy_weighted_deviations
                 + legacy_magshift_error * legacy_magshift_error
             )
+            # pae_mask *= np.isfinite(legacy_weighted_stds)
 
             # === No Mask ===
             legacy_x = legacy_redshift
