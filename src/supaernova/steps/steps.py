@@ -1,32 +1,33 @@
 # Copyright 2025 Patrick Armstrong
-import os
 from abc import abstractmethod
-import random as rn
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, Self, ClassVar
 from pathlib import Path
 import pkgutil
 import importlib
 
 import numpy as np
 
-from supaernova.configs import callback
+from supaernova.configs.callbacks import callback
 
 if TYPE_CHECKING:
     from typing import Any
     from logging import Logger
+    from collections.abc import Callable
 
     from supaernova.configs.paths import PathConfig
-    from supaernova.configs.steps import StepConfig
+    from supaernova.configs.steps import StepConfig, StepResult, StepAnalysis
     from supaernova.configs.globals import GlobalConfig
+    from supaernova.configs.steps.variants import VariantConfig
 
 
-class SNPAEStep:
-    # Class Variables
-    steps: ClassVar[dict[str, type["SNPAEStep"]]] = {}
+class Step[C: StepConfig]:
+    # === Class Variables ===
+    steps: ClassVar[dict[str, type["Step[C]"]]] = {}
     id: ClassVar[str]
 
+    # === Class Methods ===
     @classmethod
-    def register_step(cls) -> None:
+    def register_step(cls: type[Self]) -> None:
         cls.steps[cls.id] = cls
 
     @staticmethod
@@ -35,11 +36,11 @@ class SNPAEStep:
             __name__.split(".")[:-1]
         )  # Remove the last duplicated part
         for _, module, is_pkg in pkgutil.iter_modules([str(Path(__file__).parent)]):
-            if is_pkg:
+            if is_pkg and module != "posterior":
                 importlib.import_module(f"{base_name}.{module}")
 
-    def __init__(self, config: "StepConfig") -> None:
-        # Class Variables
+    # === Instance Methods ===
+    def __init__(self: Self, config: C) -> None:
         self.__class__.id = config.__class__.id
         self.name: str = (
             config.name
@@ -47,110 +48,171 @@ class SNPAEStep:
             else self.__class__.__name__
         ).replace("Config", "")
 
-        # Init Variables
-        self.options: StepConfig = config
+        self.options: C = config
         self.config: GlobalConfig = config.config
         self.paths: PathConfig = config.paths
         self.log: Logger = config.log
         self.force: bool = self.config.force
         self.verbose: bool = self.config.verbose
+        self.callbacks: dict[str, str | dict[str, Callable[[Any], None]]] = (
+            config.callbacks
+        )
+        self.skip: bool = self.options.skip
 
-        self.seed: int = 0
+        self.seed: int = config.seed
+        self.rng = np.random.default_rng(self.seed)
         self.set_seed()
-        self.is_setup: bool = False
-        self.is_loaded: bool = False
-        self.is_saved: bool = False
+
+        self.is_setup = False
+        self.is_completed = False
+        self.is_loaded = False
+        self.has_results = False
+        self.was_analysed = False
+        self.results: StepResult
+        self.analysis: StepAnalysis
 
     @abstractmethod
-    def _setup(self, *_args: "Any", **_kwargs: "Any") -> None:
+    def _setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def setup(self, *args: "Any", **kwargs: "Any") -> None:
-        self.set_seed()
-        self.log.info(f"Setting up {self.name}")
-        self._setup(*args, **kwargs)
-        self.is_setup = True
-        self.log.info(f"Finished setting up {self.name}")
-
-    @abstractmethod
-    def _completed(self) -> bool:
-        pass
-
-    @callback
-    def completed(self, *args: "Any", **kwargs: "Any") -> bool:
-        self.set_seed()
+    def setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_setup:
-            self.setup(*args, **kwargs)
-        self.log.debug(f"Checking if {self.name} has completed")
-        completed = self._completed()
-        self.log.debug(f"{self.name} has {'' if completed else 'not '}completed")
-        self.is_completed = completed
-        return completed
+            self.set_seed()
+            self.log.info(f"Setting up {self.name}")
+            self._setup(*args, **kwargs)
+            self.log.info(f"Finished setting up {self.name}")
 
     @abstractmethod
-    def _load(self) -> None:
+    def _completed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
         pass
 
     @callback
-    def load(self, *args: "Any", **kwargs: "Any") -> None:
-        self.set_seed()
-        if not self.is_setup:
+    def completed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        if not self.is_completed:
+            self.set_seed()
             self.setup(*args, **kwargs)
-        if self.completed(*args, **kwargs):
-            self.log.info(f"Loading {self.name}")
-            self._load()
-            self.is_loaded = True
-            self.log.info(f"Finished loading {self.name}")
-        else:
-            self.run(*args, *kwargs)
+            self.log.debug(f"Checking if {self.name} has completed")
+            self.is_completed = self._completed(*args, **kwargs)
+            self.log.debug(
+                f"{self.name} has {'' if self.is_completed else 'not '}completed"
+            )
+        return self.is_completed
 
     @abstractmethod
-    def _run(self) -> None:
+    def _load(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def run(self, *args: "Any", **kwargs: "Any") -> None:
-        self.set_seed()
-        if not self.is_setup:
-            self.setup(*args, **kwargs)
-        if self.force or not self.completed(*args, **kwargs):
-            self.log.info(f"Running {self.name}")
-            self._run()
-            self.is_loaded = True
-            self.log.info(f"Finished running {self.name}")
-        else:
-            self.load(*args, **kwargs)
-
-    @abstractmethod
-    def _result(self) -> None:
-        pass
-
-    @callback
-    def result(self, *args: "Any", **kwargs: "Any") -> None:
-        self.set_seed()
+    def load(self: Self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_loaded:
-            self.load(*args, **kwargs)
-        self.log.info(f"Saving {self.name} results")
-        self._result()
-        self.is_saved = True
-        self.log.info(f"Finished saving {self.name} results")
+            if self.completed(*args, **kwargs):
+                self.set_seed()
+                self.setup(*args, **kwargs)
+                self.log.info(f"Loading {self.name}")
+                self._load(*args, **kwargs)
+                self.log.info(f"Finished loading {self.name}")
+            else:
+                self.set_seed()
+                self.run(*args, *kwargs)
 
     @abstractmethod
-    def _analyse(self) -> None:
+    def _run(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
-        self.set_seed()
-        if not self.is_saved:
-            self.result(*args, **kwargs)
-        self.log.info(f"Analysing {self.name}")
-        self._analyse()
-        self.log.info(f"Finished analysing {self.name}")
+    def run(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        if not self.is_loaded and (self.force or not self.completed(*args, **kwargs)):
+            self.set_seed()
+            self.setup(*args, **kwargs)
+            self.log.info(f"Running {self.name}")
+            self._run(*args, **kwargs)
+            self.log.info(f"Finished running {self.name}")
 
-    def set_seed(self, seed: int = 0) -> None:
+    @abstractmethod
+    def _result(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        pass
+
+    @callback
+    def result(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        if not self.has_results:
+            self.set_seed()
+            self.load(*args, **kwargs)
+            self.log.info(f"Gathering {self.name} results")
+            self._result(*args, **kwargs)
+            self.log.info(f"Finished gathering {self.name} results")
+
+    @abstractmethod
+    def _analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        pass
+
+    @callback
+    def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        if not self.was_analysed:
+            self.set_seed()
+            self.result(*args, **kwargs)
+            self.log.info(f"Analysing {self.name}")
+            self._analyse(*args, **kwargs)
+            self.log.info(f"Finished analysing {self.name}")
+
+    def clear_attributes(self: Self, attributes: str | list[str]) -> None:
+        if not isinstance(attributes, list):
+            attributes = [attributes]
+        for attr in attributes:
+            if hasattr(self, attr):
+                delattr(self, attr)
+
+    @abstractmethod
+    def _clear(
+        self: Self,
+        *args: "Any",
+        setup: bool = False,
+        load: bool = False,
+        result: bool = False,
+        analyse: bool = False,
+        complete: bool = False,
+        **kwargs: "Any",
+    ) -> None:
+        if complete:
+            setup = True
+            load = True
+            result = True
+            analyse = True
+        if setup:
+            self.is_setup = False
+        if load:
+            self.is_loaded = False
+        if result:
+            self.has_results = False
+        if analyse:
+            self.was_analysed = False
+
+    @callback
+    def clear(
+        self: Self,
+        *args: "Any",
+        setup: bool = False,
+        load: bool = False,
+        result: bool = False,
+        analyse: bool = False,
+        complete: bool = False,
+        **kwargs: "Any",
+    ) -> None:
+        self.set_seed()
+        self.log.info(f"Clearing {self.name}")
+        self._clear(
+            *args,
+            setup=setup,
+            load=load,
+            result=result,
+            analyse=analyse,
+            complete=complete,
+            **kwargs,
+        )
+        self.log.info(f"Finished clearing {self.name}")
+
+    def set_seed(self: Self, seed: int = 0) -> None:
         seed = self.seed + seed
-        os.environ["PYTHONHASHSEED"] = str(seed)
-        np.random.seed(seed)
-        rn.seed(seed)
+        self.rng.bit_generator.state = type(self.rng.bit_generator)(seed).state
+
+    # === Static Methods ===

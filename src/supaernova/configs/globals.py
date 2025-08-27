@@ -1,34 +1,42 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import Any, Self
+from typing import Self
 
-from pydantic import (
-    BaseModel,
-    JsonValue,
-    StrictBool,
-)
+from pydantic import StrictBool
+
+from supaernova.typing import T, Config
+
+from .base import BaseConfig
 
 
-class GlobalConfig(BaseModel):
+class GlobalConfig(BaseConfig):
+    # === Class Variables ===
+    # === Class Methods ===
+    @classmethod
+    def _default_config(
+        cls: type[Self],
+        **input_config: T,
+    ) -> Config[T]:
+        return {
+            "verbose": input_config.get("verbose", False),
+            "force": input_config.get("force", False),
+        }
+
+    # === Field Variables ===
+    # --- Required ---
     verbose: StrictBool
     force: StrictBool
 
-    @classmethod
-    def from_config(
-        cls,
-        input_config: dict[str, JsonValue],
-        *,  # Force keyword-only arguments
-        verbose: StrictBool = False,
-        force: StrictBool = False,
-    ) -> Self:
-        config = {**cls.default_config(verbose=verbose, force=force), **input_config}
-        return cls.model_validate(config)
+    # --- Optional ---
 
-    @classmethod
-    def default_config(
-        cls,
-        *,  # Force keyword-only arguments
-        verbose: StrictBool = False,
-        force: StrictBool = False,
-    ) -> dict[str, Any]:
-        return {"verbose": verbose, "force": force}
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+
+    # === Instance Methods ===
+
+    # === Static Methods ===

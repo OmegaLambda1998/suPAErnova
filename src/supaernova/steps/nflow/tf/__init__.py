@@ -1,3 +1,1 @@
-from .tf import TFNFlowModel
-
-__all__ = ("TFNFlowModel",)
+from .tf import *

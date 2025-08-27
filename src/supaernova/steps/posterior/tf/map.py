@@ -1,57 +1,67 @@
 # Copyright 2025 Patrick Armstrong
-import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Self, ClassVar
 
 import numpy as np
-
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ["TF_DETERMINISTIC_OPS"] = "1"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import tensorflow as tf
 from tensorflow_probability import distributions as tfd
 
 if TYPE_CHECKING:
-    from typing import Self
+    from numpy import typing as npt
 
     from supaernova.steps.pae.tf import TFPAEModel
     from supaernova.steps.nflow.tf import TFNFlowModel
-    from supaernova.configs.steps.data import DataStepResult
-    from supaernova.steps.posterior.model import PosteriorModelStep
-    from supaernova.configs.steps.posterior.tf import TFPosteriorModelConfig
-    from supaernova.configs.steps.posterior.posterior import PosteriorMapStage
+    from supaernova.steps.posterior import TFPosteriorModel
+    from supaernova.configs.steps.data import SNPAEData
+    from supaernova.configs.steps.posterior import PosteriorMAPStage
 
 
 class PosteriorMapValue(tf.Module):
-    def __init__(self, initial: tf.Variable) -> None:
-        self.original: tf.Variable = initial
-        self.initial: tf.Variable = initial
-        self.current: tf.Variable = initial
-        self.best: tf.Variable = initial
+    map_keys: ClassVar[set[str]] = {"original", "initial", "current", "best"}
+
+    def __init__(self: Self, initial: tf.Tensor) -> None:
+        self.original: tf.Variable = tf.Variable(tf.identity(initial))
+        self.initial: tf.Variable = tf.Variable(tf.identity(initial))
+        self.current: tf.Variable = tf.Variable(tf.identity(initial))
+        self.best: tf.Variable = tf.Variable(tf.identity(initial))
+
+    def __setattr__(self: Self, key: str, val: Any) -> None:
+        if key in self.map_keys:
+            val = tf.identity(val)
+            if hasattr(self, key):
+                getattr(self, key).assign(val)
+                return
+            val = tf.Variable(val)
+        super().__setattr__(key, val)
 
 
 class PosteriorMap(tf.Module):
     def __init__(
-        self,
-        config: "PosteriorModelStep[TFPosteriorModelConfig]",
-        nflow: "TFNFlowModel",
-        pae: "TFPAEModel",
-        data: "DataStepResult",
+        self: Self,
+        config: "TFPosteriorModel",
     ) -> None:
-        self.random_initial_positions: bool = config.random_initial_positions
+        self.random_initial_positions: bool = config.options.random_initial_positions
         # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
-        vars(self)["nflow"]: TFNFlowModel = nflow
-        vars(self)["pae"]: TFPAEModel = pae
-        self.data: DataStepResult = data
+        self.data: SNPAEData = config.data
 
-        self.sn_dim = self.data.amplitude.shape[0]
-        self.spec_dim = self.data.amplitude.shape[1]
-        self.wl_dim = self.data.amplitude.shape[2]
+        self.data_mask: npt.NDArray[bool] = config.data_mask
+        self.sn_mask: npt.NDArray[bool] = config.sn_mask
+        self.spec_mask: npt.NDArray[bool] = config.spec_mask
+        self.wl_mask: npt.NDArray[bool] = config.wl_mask
+
+        self.sn_dim = config.sn_dim
+        self.spec_dim = config.spec_dim
+        self.wl_dim = config.wl_dim
+
+        self.nflow: TFNFlowModel
+        vars(self)["nflow"] = config.nflow
         self.n_u_latents = self.nflow.n_u_latents
         self.n_flow_latents = self.nflow.n_flow_latents
+        self.n_pos = self.n_u_latents
+
+        self.pae: TFPAEModel
+        vars(self)["pae"] = config.pae
         self.n_z_latents = self.pae.n_z_latents
         self.n_pae_latents = self.pae.n_pae_latents
-        self.n_pos = self.n_u_latents
 
         # === Training ===
         self.chain_min = tf.Variable(tf.zeros(self.sn_dim, dtype=tf.int32))
@@ -61,102 +71,102 @@ class PosteriorMap(tf.Module):
         self.improved = tf.Variable(
             tf.cast(tf.zeros(self.sn_dim, dtype=tf.int32), tf.bool)
         )
-        self.num_evaluations = tf.Variable(0, dtype=tf.int32)
-        self.num_chain_evaluations = tf.Variable(0, dtype=tf.int32)
+        self.num_evaluations = tf.Variable(tf.constant(0), dtype=tf.int32)
+        self.num_chain_evaluations = tf.Variable(tf.constant(0), dtype=tf.int32)
         self.negative_log_prob = tf.Variable(
             np.inf * tf.ones(self.sn_dim, dtype=tf.float32)
         )
 
         # === Priors ===
-        self.u_delta_av_min: float = config.u_delta_av_min
-        self.u_delta_av_max: float = config.u_delta_av_max
-        self.u_delta_av_start: float = config.u_delta_av_start
-        self.u_delta_av_end: float = config.u_delta_av_end
-        self.u_delta_av_mean: float = config.u_delta_av_mean
-        self.u_delta_av_std: float = config.u_delta_av_std
+        self.u_delta_av_min: float = config.options.u_delta_av_min
+        self.u_delta_av_max: float = config.options.u_delta_av_max
+        self.u_delta_av_start: float = config.options.u_delta_av_start
+        self.u_delta_av_end: float = config.options.u_delta_av_end
+        self.u_delta_av_mean: float = config.options.u_delta_av_mean
+        self.u_delta_av_std: float = config.options.u_delta_av_std
         self.u_delta_av_prior = tfd.Normal(
             loc=self.u_delta_av_mean, scale=self.u_delta_av_std
         )
         if self.nflow.physical_latents:
             self.n_pos += 1
 
-        self.u_latents_min: float = config.u_latents_min
-        self.u_latents_max: float = config.u_latents_max
-        self.u_latents_mean: float = config.u_latents_mean
-        self.u_latents_std: float = config.u_latents_std
+        self.u_latents_min: float = config.options.u_latents_min
+        self.u_latents_max: float = config.options.u_latents_max
+        self.u_latents_mean: float = config.options.u_latents_mean
+        self.u_latents_std: float = config.options.u_latents_std
         self.u_latents_prior = tfd.MultivariateNormalDiag(
             loc=self.u_latents_mean * tf.ones(self.n_u_latents),
             scale_diag=self.u_latents_std * tf.ones(self.n_u_latents),
         )
 
-        self.delta_av_min: float = config.delta_av_min
-        self.delta_av_max: float = config.delta_av_max
-        self.delta_av_start: float = config.delta_av_start
-        self.delta_av_end: float = config.delta_av_end
-        self.delta_av_mean: float = config.delta_av_mean
-        self.delta_av_std: float = config.delta_av_std
+        self.delta_av_min: float = config.options.delta_av_min
+        self.delta_av_max: float = config.options.delta_av_max
+        self.delta_av_start: float = config.options.delta_av_start
+        self.delta_av_end: float = config.options.delta_av_end
+        self.delta_av_mean: float = config.options.delta_av_mean
+        self.delta_av_std: float = config.options.delta_av_std
         self.delta_av_prior = tfd.Normal(
             loc=self.delta_av_mean, scale=self.delta_av_std
         )
 
-        self.train_delta_m: bool = config.train_delta_m
-        self.delta_m_min: float = config.delta_m_min
-        self.delta_m_max: float = config.delta_m_max
-        self.delta_m_start: float = config.delta_m_start
-        self.delta_m_end: float = config.delta_m_end
-        self.delta_m_mean: float = config.delta_m_mean
-        self.delta_m_std: float = config.delta_m_std
+        self.train_delta_m: bool = config.options.train_delta_m
+        self.delta_m_min: float = config.options.delta_m_min
+        self.delta_m_max: float = config.options.delta_m_max
+        self.delta_m_start: float = config.options.delta_m_start
+        self.delta_m_end: float = config.options.delta_m_end
+        self.delta_m_mean: float = config.options.delta_m_mean
+        self.delta_m_std: float = config.options.delta_m_std
         self.delta_m_prior = tfd.Normal(loc=self.delta_m_mean, scale=self.delta_m_std)
         if self.train_delta_m:
             self.n_pos += 1
 
-        self.train_delta_p: bool = config.train_delta_p
-        self.delta_p_min: float = config.delta_p_min
-        self.delta_p_max: float = config.delta_p_max
-        self.delta_p_start: float = config.delta_p_start
-        self.delta_p_end: float = config.delta_p_end
-        self.delta_p_mean: float = config.delta_p_mean
-        self.delta_p_std: float = config.delta_p_std
+        self.train_delta_p: bool = config.options.train_delta_p
+        self.delta_p_min: float = config.options.delta_p_min
+        self.delta_p_max: float = config.options.delta_p_max
+        self.delta_p_start: float = config.options.delta_p_start
+        self.delta_p_end: float = config.options.delta_p_end
+        self.delta_p_mean: float = config.options.delta_p_mean
+        self.delta_p_std: float = config.options.delta_p_std
         self.delta_p_prior = tfd.Normal(loc=self.delta_p_mean, scale=self.delta_p_std)
         if self.train_delta_p:
             self.n_pos += 1
 
-        self.train_bias: bool = config.train_bias
-        self.bias_min: float = config.bias_min
-        self.bias_max: float = config.bias_max
-        self.bias_start: float = config.bias_start
-        self.bias_end: float = config.bias_end
-        self.bias_mean: float = config.bias_mean
-        self.bias_std: float = config.bias_std
+        self.train_bias: bool = config.options.train_bias
+        self.bias_min: float = config.options.bias_min
+        self.bias_max: float = config.options.bias_max
+        self.bias_start: float = config.options.bias_start
+        self.bias_end: float = config.options.bias_end
+        self.bias_mean: float = config.options.bias_mean
+        self.bias_std: float = config.options.bias_std
         self.bias_prior = tfd.Normal(loc=self.bias_mean, scale=self.bias_std)
         if self.train_bias:
             self.n_pos += 1
 
         self.u_delta_av: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, 1)))
+            np.inf * tf.ones((self.sn_dim, 1))
         )
         self.u_latents: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, self.n_u_latents)))
+            np.inf * tf.ones((self.sn_dim, self.n_u_latents))
         )
         self.z_latents: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, self.n_z_latents)))
+            np.inf * tf.ones((self.sn_dim, self.n_z_latents))
         )
 
         self.delta_av: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, 1)))
+            np.inf * tf.ones((self.sn_dim, 1))
         )
         self.delta_m: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, 1)))
+            np.inf * tf.ones((self.sn_dim, 1))
         )
         self.delta_p: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, 1)))
+            np.inf * tf.ones((self.sn_dim, 1))
         )
 
         self.bias: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, 1)))
+            np.inf * tf.ones((self.sn_dim, 1))
         )
         self.position: PosteriorMapValue = PosteriorMapValue(
-            tf.Variable(np.inf * tf.ones((self.sn_dim, self.n_pos)))
+            np.inf * tf.ones((self.sn_dim, self.n_pos))
         )
 
         self.labels: list[str] = []
@@ -172,8 +182,8 @@ class PosteriorMap(tf.Module):
             self.labels.append(f"μ{i}")
 
     def setup(
-        self,
-        stage: "PosteriorMapStage",
+        self: Self,
+        stage: "PosteriorMAPStage",
         chain: int,
     ) -> None:
         # === Initial Values ===
@@ -270,7 +280,10 @@ class PosteriorMap(tf.Module):
                 z_latents = self.pae(
                     pae_input,
                     training=False,
-                    mask=self.data.mask,
+                    mask=self.data_mask,
+                    sn_mask=self.sn_mask,
+                    spec_mask=self.spec_mask,
+                    wl_mask=self.wl_mask,
                 )[0][:, 0, :]
                 if self.pae.physical_latents:
                     if stage.init_delta_av == "data":
@@ -462,14 +475,14 @@ class PosteriorMap(tf.Module):
         position.append(u_latents)
         position = tf.concat(position, axis=-1)
 
-        self.u_delta_av.current = tf.Variable(u_delta_av)
-        self.u_latents.current = tf.Variable(u_latents)
-        self.z_latents.current = tf.Variable(z_latents)
-        self.delta_av.current = tf.Variable(delta_av)
-        self.delta_m.current = tf.Variable(delta_m)
-        self.delta_p.current = tf.Variable(delta_p)
-        self.bias.current = tf.Variable(bias)
-        self.position.current = tf.Variable(position)
+        self.u_delta_av.current = u_delta_av
+        self.u_latents.current = u_latents
+        self.z_latents.current = z_latents
+        self.delta_av.current = delta_av
+        self.delta_m.current = delta_m
+        self.delta_p.current = delta_p
+        self.bias.current = bias
+        self.position.current = position
 
         if stage.init:
             self.u_delta_av.original = self.u_delta_av.current
@@ -504,7 +517,9 @@ class PosteriorMap(tf.Module):
             self.position.initial = self.position.current
             self.position.best = self.position.current
 
-    def get_position(self, position, best=False) -> tf.Tensor:
+    def get_position(
+        self: Self, position: tf.Tensor, *, best: bool = False
+    ) -> tf.Tensor:
         u_delta_av = self.u_delta_av.best if best else self.u_delta_av.current
         delta_m = self.delta_m.best if best else self.delta_m.current
         delta_p = self.delta_p.best if best else self.delta_p.current
@@ -535,7 +550,7 @@ class PosteriorMap(tf.Module):
 
         return tf.concat([delta_m, delta_p, bias, u_delta_av, u_latents], axis=-1)
 
-    def prior(self, position) -> tf.Tensor:
+    def prior(self: Self, position: tf.Tensor) -> tf.Tensor:
         log_prior = tf.zeros((position.shape[0],))
         inf_prior = -tf.ones_like(log_prior) * np.inf
 

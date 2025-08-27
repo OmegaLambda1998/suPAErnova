@@ -1,30 +1,25 @@
-import os
-from typing import cast, override
+from typing import Self, override
 from functools import cached_property
 from collections.abc import Callable
 
 from pydantic import computed_field
-
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ["TF_DETERMINISTIC_OPS"] = "1"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 import tensorflow as tf
 from tensorflow import keras as ks
 
-from supaernova.configs.steps import ConfigInputObject, validate_object
+from supaernova.utils import ConfigInputObject, validate_object
 from supaernova.steps.posterior.tf import (
     loss as snpae_losses,
 )
+from supaernova.typing.backends.tf import Loss, LossFunc
 
-from .model import PosteriorModelConfig
+from .posterior import PosteriorConfig
 
-LossObject = type[ks.losses.Loss] | Callable[[tf.Tensor, tf.Tensor], tf.Tensor]
+LossObject = type[Loss] | Callable[..., tf.Tensor]
 
 
-def validate_loss(loss: ConfigInputObject[LossObject]):
+def validate_loss(loss: ConfigInputObject[LossObject]) -> LossObject:
     err = f"Could not validate loss: {loss}:\n"
-    for dummy_obj in (ks.losses.Loss, ks.losses.mae):
+    for dummy_obj in (ks.losses.Loss, LossFunc.__call__):
         for mod in (ks.losses, snpae_losses):
             try:
                 return validate_object(loss, dummy_obj=dummy_obj, mod=mod)
@@ -34,24 +29,29 @@ def validate_loss(loss: ConfigInputObject[LossObject]):
 
 
 def get_loss(
-    loss_fn: Callable[[tf.Tensor, tf.Tensor], tf.Tensor],
-) -> type[ks.losses.Loss]:
+    loss_fn: LossFunc,
+) -> type[Loss]:
     @ks.utils.register_keras_serializable("SuPAErnova")
-    class CustomLoss(ks.losses.Loss):
+    class CustomLoss(Loss):
         @override
-        def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        def call(self: Self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
             self.reduction = "none"
             return loss_fn(y_true, y_pred, model=self.model)
 
     return CustomLoss
 
 
-class TFPosteriorModelConfig(PosteriorModelConfig):
+class TFPosteriorConfig(PosteriorConfig):
+    # === Class Variables ===
+    # === Class Methods ===
+    # === Field Variables ===
+    # --- Required ---
+    # --- Optional ---
     loss: ConfigInputObject[LossObject] = "NegLogLikelihood"
 
     @computed_field
     @cached_property
-    def loss_cls(self) -> type[ks.losses.Loss] | None:
+    def loss_cls(self: Self) -> type[Loss] | None:
         if self.loss is None:
             return self.loss
         loss = validate_loss(self.loss)
@@ -60,3 +60,13 @@ class TFPosteriorModelConfig(PosteriorModelConfig):
             loss = loss()
 
         return get_loss(loss)
+
+    # === Model Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Field Validators ===
+    # --- Before ---
+    # --- After ---
+    # === Instance Methods ===
+    # === Static Methods ===
+    # --- Training ---

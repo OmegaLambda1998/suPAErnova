@@ -1,15 +1,11 @@
-import os
 from typing import TYPE_CHECKING
 
-os.environ["TF_USE_LEGACY_KERAS"] = "1"
-os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ["TF_DETERMINISTIC_OPS"] = "1"
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-import tensorflow as tf
-
 if TYPE_CHECKING:
-    from .tf import TFNFlowModel
+    import tensorflow as tf
+    from tensorflow import keras as ks
 
 
-def NegLogLikelihood(y_true, y_pred, *, model: "TFNFlowModel"):
+def NegLogLikelihood(
+    y_true: "tf.Tensor", y_pred: "tf.Tensor", *, model: "ks.Model"
+) -> "tf.Tensor":
     return -y_pred
