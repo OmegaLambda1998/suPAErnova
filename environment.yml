@@ -1,5 +1,6 @@
 name: supaernova
 dependencies:
+  - python >=3.12,<3.13
   - astropy
   - cairocffi
   - click
