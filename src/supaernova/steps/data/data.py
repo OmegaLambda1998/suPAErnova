@@ -46,9 +46,6 @@ class Data(Step[DataConfig]):
         self.train_frac: float = self.options.train_frac
 
         # --- Optional ---
-        self.colourlaw: npt.NDArray[float] | None
-        self.cosmological_model: cosmo.FLRW
-        self.salt_model: sncosmo.SALT2Source | sncosmo.SALT3Source
         self.min_redshift: float = self.options.min_redshift
         self.max_redshift: float = self.options.max_redshift
         self.min_phase: float = self.options.min_phase
@@ -57,27 +54,34 @@ class Data(Step[DataConfig]):
         self.max_wavelength: float = self.options.max_wavelength
         self.seed: int = self.options.seed
 
-        # === Setup Variables ===
         # Output Paths
-        self.out_data: Path
-        self.out_sne: Path
-        self.out_train: Path
-        self.out_test: Path
+        self.out_data: Path = self.paths.results / "data.npz"
+        self.out_sne: Path = self.paths.results / "sne.pkl"
+        self.out_train: Path = self.paths.results / "train"
+        self.out_train.mkdir(parents=True, exist_ok=True)
+        self.out_test: Path = self.paths.results / "test"
+        self.out_test.mkdir(parents=True, exist_ok=True)
+
+        # === Setup Variables ===
+        self.colourlaw: npt.NDArray[float] | None
+        self.cosmological_model: cosmo.FLRW
+        self.salt_model: sncosmo.SALT2Source | sncosmo.SALT3Source
 
         # Train / Test Split
         self.test_frac: float
         self.n_kfolds: int
 
-        # === Run Variables ===
-        self.sne: SNeDataFrame  # Created in self.load_sne
-        self.data: SNPAEData  # Created in self.prepare_data_arrays
-        self.train_data: list[SNPAEData]  # Created in self.split_train_test
-        self.test_data: list[SNPAEData]  # Created in self.split_train_test
-        # Data Dimensions
-        self.sn_dim: int  # Created in self.get_dims
-        self.nspectra_per_sn: npt.NDArray[int]  # Created in self.get_dims
-        self.spec_dim: int  # Created in self.get_dims
+        # === Load / Run Variables ===
+        self.sne: SNeDataFrame
+        self.data: SNPAEData
+        self.train_data: list[SNPAEData]
+        self.test_data: list[SNPAEData]
         self.wavelength: npt.NDArray[float]
+
+        # Data Dimensions
+        self.nspectra_per_sn: npt.NDArray[int]  # Created in self.get_dims
+        self.sn_dim: int  # Created in self.get_dims
+        self.spec_dim: int  # Created in self.get_dims
         self.wl_dim: int  # Created in self.get_dims
 
         # === Result Variables ===
@@ -85,6 +89,16 @@ class Data(Step[DataConfig]):
 
         # === Analysis Variables ===
         self.analysis: DataStepAnalysis = self.options.analysis or DataStepAnalysis()
+
+    @override
+    def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        return self.has_attributes([
+            "colourlaw",
+            "cosmological_model",
+            "salt_model",
+            "test_frac",
+            "n_kfolds",
+        ])
 
     @override
     def _setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
@@ -114,53 +128,95 @@ class Data(Step[DataConfig]):
             self.salt_model = sncosmo.get_source(salt_model)
 
         # === Config Variables ===
-        # Output Paths
-        self.out_data = self.paths.results / "data.npz"
-        self.out_sne = self.paths.results / "sne.pkl"
-        self.out_train = self.paths.results / "train"
-        self.out_train.mkdir(parents=True, exist_ok=True)
-        self.out_test = self.paths.results / "test"
-        self.out_test.mkdir(parents=True, exist_ok=True)
 
         # Train / Test Split
         self.test_frac = 1 - self.train_frac
         self.n_kfolds = int(1 / self.test_frac)
 
-        self.is_setup = True
+    @override
+    def _has_run(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        return self.has_attributes([
+            "sne",
+            "data",
+            "train_data",
+            "test_data",
+            "wavelength",
+            "nspecta_per_sn",
+            "sn_dim",
+            "spec_dim",
+            "wl_dim",
+        ])
 
     @override
-    def _completed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _run(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        self.load_sne()
+        self.calculate_salt_flux()
+        self.get_dims()
+        self.prepare_data_arrays()
+        self.split_train_test()
+
+    @override
+    def _is_saved(self: Self, *args: "Any", **kwargs: "Any") -> bool:
         if not self.out_data.exists():
             self.log.debug(
-                f"{self.name} has not completed as {self.out_data} does not exist"
+                f"{self.name} is not saved as {self.out_data} does not exist"
             )
             return False
         if not self.out_sne.exists():
-            self.log.debug(
-                f"{self.name} has not completed as {self.out_sne} does not exist"
-            )
+            self.log.debug(f"{self.name} is not saved as {self.out_sne} does not exist")
             return False
         if not self.out_train.exists():
             self.log.debug(
-                f"{self.name} has not completed as {self.out_train} does not exist"
+                f"{self.name} is not saved as {self.out_train} does not exist"
             )
             return False
         if not self.out_test.exists():
             self.log.debug(
-                f"{self.name} has not completed as {self.out_test} does not exist"
+                f"{self.name} is not saved as {self.out_test} does not exist"
             )
             return False
         if len(list(self.out_train.iterdir())) == 0:
             self.log.debug(
-                f"{self.name} has not completed as {self.out_train} does not contain any files"
+                f"{self.name} is not saved as {self.out_train} does not contain any files"
             )
             return False
         if len(list(self.out_test.iterdir())) == 0:
             self.log.debug(
-                f"{self.name} has not completed as {self.out_test} does not contain any files"
+                f"{self.name} is not saved as {self.out_test} does not contain any files"
             )
             return False
         return True
+
+    @override
+    def _save(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        if self.force or not self.out_sne.exists():
+            self.log.debug(f"Saving SNe DataFrame to {self.out_sne}")
+            self.sne.to_pickle(self.out_sne)
+
+        if self.force or not self.out_data.exists():
+            self.log.debug(f"Saving data arrays to {self.out_data}")
+            np.savez_compressed(
+                self.out_data,
+                **self.data.model_dump(exclude={"name"}),
+            )
+
+        for i, train_data in enumerate(self.train_data):
+            out_train = self.out_train / f"kfold_{i:d}.npz"
+            if self.force or not out_train.exists():
+                self.log.debug(f"Saving #{i} training data array to {out_train}")
+                np.savez_compressed(
+                    out_train,
+                    **train_data.model_dump(exclude={"name"}),
+                )
+
+        for i, test_data in enumerate(self.test_data):
+            out_test = self.out_test / f"kfold_{i:d}.npz"
+            if self.force or not out_test.exists():
+                self.log.debug(f"Saving #{i} testing data array to {out_test}")
+                np.savez_compressed(
+                    out_test,
+                    **test_data.model_dump(exclude={"name"}),
+                )
 
     @override
     def _load(self: Self, *args: "Any", **kwargs: "Any") -> None:
@@ -192,16 +248,10 @@ class Data(Step[DataConfig]):
                 with np.load(test_data, allow_pickle=True) as io:
                     data = dict(io.items())
                 self.test_data.append(SNPAEData.model_validate(data))
-        self.is_loaded = True
 
     @override
-    def _run(self: Self, *args: "Any", **kwargs: "Any") -> None:
-        self.load_sne()
-        self.calculate_salt_flux()
-        self.get_dims()
-        self.prepare_data_arrays()
-        self.split_train_test()
-        self.is_loaded = True
+    def _has_results(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        return self.has_attributes(["results"])
 
     @override
     def _result(self: Self, *args: "Any", **kwargs: "Any") -> None:
@@ -223,36 +273,57 @@ class Data(Step[DataConfig]):
         results["wl_dim"] = self.wl_dim
         self.results = DataStepResult.model_validate(results)
 
-        if self.force or not self.out_sne.exists():
-            self.log.debug(f"Saving SNe DataFrame to {self.out_sne}")
-            self.sne.to_pickle(self.out_sne)
-
-        if self.force or not self.out_data.exists():
-            self.log.debug(f"Saving data arrays to {self.out_data}")
-            np.savez_compressed(
-                self.out_data,
-                **self.results.data.model_dump(exclude={"name"}),
-            )
-
-        for i, train_data in enumerate(self.results.train_data):
-            out_train = self.out_train / f"kfold_{i:d}.npz"
-            if self.force or not out_train.exists():
-                self.log.debug(f"Saving #{i} training data array to {out_train}")
-                np.savez_compressed(
-                    out_train,
-                    **train_data.model_dump(exclude={"name"}),
+    @override
+    def _was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        if self.analysis.plot_spectra is not None:
+            if not isinstance(self.analysis.plot_spectra, list):
+                self.analysis.plot_spectra = [self.analysis.plot_spectra]
+            for opts in self.analysis.plot_spectra:
+                name = "spectra" if opts.name is None else opts.name
+                savepath = (
+                    self.paths.plots / str(self.seed) / f"{name}.{opts.ext}"
+                    if opts.savepath is None
+                    else opts.savepath
                 )
+                if not savepath.exists():
+                    self.log.debug(
+                        f"{self.name} is missing analyses as {savepath} does not exist"
+                    )
+                    return False
 
-        for i, test_data in enumerate(self.results.test_data):
-            out_test = self.out_test / f"kfold_{i:d}.npz"
-            if self.force or not out_test.exists():
-                self.log.debug(f"Saving #{i} testing data array to {out_test}")
-                np.savez_compressed(
-                    out_test,
-                    **test_data.model_dump(exclude={"name"}),
+        if self.analysis.plot_summary is not None:
+            if not isinstance(self.analysis.plot_summary, list):
+                self.analysis.plot_summary = [self.analysis.plot_summary]
+            for opts in self.analysis.plot_summary:
+                name = "summary" if opts.name is None else opts.name
+                savepath = (
+                    self.paths.plots / str(self.seed) / f"{name}.{opts.ext}"
+                    if opts.savepath is None
+                    else opts.savepath
                 )
+                if not savepath.exists():
+                    self.log.debug(
+                        f"{self.name} is missing analyses as {savepath} does not exist"
+                    )
+                    return False
 
-        self.has_results = True
+        if self.analysis.plot_comparison is not None:
+            if not isinstance(self.analysis.plot_comparison, list):
+                self.analysis.plot_comparison = [self.analysis.plot_comparison]
+            for opts in self.analysis.plot_comparison:
+                name = "comparison" if opts.name is None else opts.name
+                savepath = (
+                    self.paths.plots / str(self.seed) / f"{name}.{opts.ext}"
+                    if opts.savepath is None
+                    else opts.savepath
+                )
+                if not savepath.exists():
+                    self.log.debug(
+                        f"{self.name} is missing analyses as {savepath} does not exist"
+                    )
+                    return False
+
+        return True
 
     @override
     def _analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
@@ -297,8 +368,6 @@ class Data(Step[DataConfig]):
                 if opts.plot_kwargs is None:
                     opts.plot_kwargs = {"label": self.name}
                 SpectraPlotter.plot_comparison(self.results.data, opts)
-
-        self.was_analysed = True
 
     @override
     def _clear(
@@ -874,12 +943,18 @@ class DataStep(Variant[DataStepConfig]):
             variants = [variants]
         for variant_name in variants:
             variant = self.variants[variant_name]
+
+            variant.set_seed()
+            variant.log.info(f"Analysing {variant.name}")
+            variant.result(*args, **{**kwargs, "variants": [variant_name]})
+
             if variant.analysis.plot_comparison is not None:
                 if not isinstance(variant.analysis.plot_comparison, list):
                     variant.analysis.plot_comparison = [
                         variant.analysis.plot_comparison
                     ]
                 for opts in variant.analysis.plot_comparison:
+                    self._setup(*args, **{**kwargs, "variants": [opts.base]})
                     name = f"{opts.name}.{opts.ext}"
                     self.bases[name] = self.bases.get(
                         name, {"wl": None, "amp": None, "sigma": None, "mask": None}
@@ -890,9 +965,7 @@ class DataStep(Variant[DataStepConfig]):
                     base_mask = self.bases[name]["mask"]
                     if base_amp is None:
                         wl, amplitude, sigma, mask, _sn_mask, _spec_mask, _wl_mask = (
-                            SpectraPlotter.prep(
-                                self.variants[opts.base].results.data, opts
-                            )
+                            SpectraPlotter.prep(self.results[opts.base].data, opts)
                         )
                         base_wl = wl
                         base_amp = amplitude
@@ -908,7 +981,7 @@ class DataStep(Variant[DataStepConfig]):
                     opts.base_mask = base_mask
                     opts.plot_base = True
 
-            super()._analyse(*args, **{**kwargs, "variants": [variant_name]})
+            variant._analyse(*args, **{**kwargs, "variants": [variant_name]})
 
             if variant.analysis.plot_summary is not None:
                 for opts in variant.analysis.plot_summary:
@@ -944,6 +1017,8 @@ class DataStep(Variant[DataStepConfig]):
                     opts.base_amp = None
                     opts.base_sigma = None
                     opts.base_mask = None
+
+            variant.log.info(f"Finished analysing {variant.name}")
 
     @override
     @callback

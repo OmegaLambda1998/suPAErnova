@@ -1,0 +1,3 @@
+TRY400
+noqa
+stdout

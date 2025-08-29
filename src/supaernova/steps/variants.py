@@ -56,6 +56,22 @@ class Variant[C: VariantConfig](Step[C]):
         ].VariantResult(self)
 
     @override
+    def _is_setup(
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
+    ) -> bool:
+        if variants is None:
+            variants = list(self.variants.keys())
+        if not isinstance(variants, list):
+            variants = [variants]
+        return all(
+            self.variants[variant].is_setup(*args, **{**kwargs, "variants": [variant]})
+            for variant in variants
+        )
+
+    @override
     def _setup(
         self: Self,
         *args: "Any",
@@ -66,10 +82,10 @@ class Variant[C: VariantConfig](Step[C]):
             return
         if not isinstance(variants, list):
             variants = [variants]
-        for variant_name in variants:
-            variant = self.variants[variant_name]
-            kwargs_ = {}
-            self.variant_required_steps[variant_name] = {}
+        for name in variants:
+            variant = self.variants[name]
+            variant_kwargs = {}
+            self.variant_required_steps[name] = {}
             for key, val in kwargs.items():
                 k = cast("int | str", variant.options.get(key, 0))
                 n = list(val.results.keys())[k] if isinstance(k, int) else k
@@ -78,78 +94,38 @@ class Variant[C: VariantConfig](Step[C]):
                     if isinstance(k, int)
                     else val.results[k]
                 )
-                kwargs_[key] = v
+                variant_kwargs[key] = v
                 val.clear(*args, **{**kwargs, "variants": [n]})
-                self.variant_required_steps[variant_name][key] = (val, n)
-            variant.setup(*args, **kwargs_)
-        self.is_setup = all(variant.is_setup for variant in self.variants.values())
+                self.variant_required_steps[name][key] = (val, n)
+            variant.setup(*args, **variant_kwargs)
 
     @override
     @callback
     def setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
-        if not self.is_setup:
-            self.set_seed()
+        if not self.is_setup(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
+            self.set_seed()
+            self.log.info(f"Setting up {self.name}")
             for variant in variants:
-                self._setup(*args, **{**kwargs, "variants": [variant]})
+                if not self._is_setup(*args, **{**kwargs, "variants": [variant]}):
+                    self._setup(*args, **{**kwargs, "variants": [variant]})
+            self.log.info(f"Finished setting up {self.name}")
 
     @override
-    def _completed(
+    def _has_run(
         self: Self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
     ) -> bool:
         if variants is None:
-            return False
+            variants = list(self.variants.keys())
         if not isinstance(variants, list):
             variants = [variants]
         return all(
-            self.variants[variant].completed(*args, **{**kwargs, "variants": [variant]})
+            self.variants[variant].has_run(*args, **{**kwargs, "variants": [variant]})
             for variant in variants
         )
-
-    @override
-    @callback
-    def completed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
-        self.set_seed()
-        variants = kwargs.get("variants", self.variants)
-        for variant in variants:
-            self.setup(*args, **{**kwargs, "variants": [variant]})
-        self.log.debug(f"Checking if {self.name} has completed")
-        is_completed = self._completed(*args, **kwargs)
-        self.log.debug(
-            f"{self.name} has {'' if self.is_completed else 'not '}completed"
-        )
-        return is_completed
-
-    @override
-    def _load(
-        self: Self,
-        *args: "Any",
-        variants: str | list[str] | None = None,
-        **kwargs: "Any",
-    ) -> None:
-        if variants is None:
-            return
-        if not isinstance(variants, list):
-            variants = [variants]
-        for variant in variants:
-            self.variants[variant].load(*args, **kwargs)
-        self.is_loaded = all(variant.is_loaded for variant in self.variants.values())
-
-    @override
-    @callback
-    def load(self: Self, *args: "Any", **kwargs: "Any") -> None:
-        if not self.is_loaded:
-            self.set_seed()
-            if self.completed(*args, **kwargs):
-                variants = kwargs.get("variants", self.variants)
-                for variant in variants:
-                    self.setup(*args, **{**kwargs, "variants": [variant]})
-                    self._load(*args, **{**kwargs, "variants": [variant]})
-            else:
-                self.run(*args, **kwargs)
 
     @override
     def _run(
@@ -164,17 +140,125 @@ class Variant[C: VariantConfig](Step[C]):
             variants = [variants]
         for variant in variants:
             self.variants[variant].run(*args, **kwargs)
-        self.is_loaded = all(variant.is_loaded for variant in self.variants.values())
 
     @override
     @callback
     def run(self: Self, *args: "Any", **kwargs: "Any") -> None:
-        if not self.is_loaded and (self.force or not self.completed(*args, **kwargs)):
-            self.set_seed()
+        if not self.has_run(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
+            self.set_seed()
+            self.log.info(f"Running {self.name}")
             for variant in variants:
-                self.setup(*args, **{**kwargs, "variants": [variant]})
-                self._run(*args, **{**kwargs, "variants": [variant]})
+                if not self._has_run(*args, **{**kwargs, "variants": [variant]}):
+                    self._run(*args, **{**kwargs, "variants": [variant]})
+            self.log.info(f"Finished running {self.name}")
+
+    @override
+    def _is_saved(
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
+    ) -> bool:
+        if variants is None:
+            variants = list(self.variants.keys())
+        if not isinstance(variants, list):
+            variants = [variants]
+        return all(
+            self.variants[variant].is_saved(*args, **{**kwargs, "variants": [variant]})
+            for variant in variants
+        )
+
+    @override
+    def _save(
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
+    ) -> None:
+        if variants is None:
+            return
+        if not isinstance(variants, list):
+            variants = [variants]
+        for variant in variants:
+            self.variants[variant].save(*args, **kwargs)
+
+    @override
+    @callback
+    def save(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        if not self.is_saved(*args, **kwargs):
+            variants = kwargs.get("variants", self.variants)
+            self.set_seed()
+            self.log.info(f"Saving {self.name}")
+            for variant in variants:
+                if not self._is_saved(*args, **{**kwargs, "variants": [variant]}):
+                    self._save(*args, **{**kwargs, "variants": [variant]})
+            self.log.info(f"Finished saving {self.name}")
+
+    @override
+    def _is_loaded(
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
+    ) -> bool:
+        if variants is None:
+            variants = list(self.variants.keys())
+        if not isinstance(variants, list):
+            variants = [variants]
+        return all(
+            self.variants[variant].is_loaded(*args, **{**kwargs, "variants": [variant]})
+            for variant in variants
+        )
+
+    @override
+    def _load(
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
+    ) -> None:
+        if variants is None:
+            return
+        if not isinstance(variants, list):
+            variants = [variants]
+        for variant in variants:
+            self.variants[variant].load(*args, **kwargs)
+
+    @override
+    @callback
+    def load(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        if not self.is_loaded(*args, **kwargs):
+            variants = kwargs.get("variants", self.variants)
+            self.set_seed()
+            if self.is_saved(*args, **kwargs):
+                self.log.info(f"Loading {self.name}")
+                for variant in variants:
+                    if not self._is_loaded(*args, **{**kwargs, "variants": [variant]}):
+                        self._load(*args, **{**kwargs, "variants": [variant]})
+                self.log.info(f"Finished loading {self.name}")
+            else:
+                for variant in variants:
+                    if not self._is_saved(*args, **{**kwargs, "variants": [variant]}):
+                        self._save(*args, **{**kwargs, "variants": [variant]})
+
+    @override
+    def _has_results(
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
+    ) -> bool:
+        if variants is None:
+            variants = list(self.variants.keys())
+        if not isinstance(variants, list):
+            variants = [variants]
+        return all(
+            self.variants[variant].has_results(
+                *args, **{**kwargs, "variants": [variant]}
+            )
+            for variant in variants
+        )
 
     @override
     def _result(
@@ -190,19 +274,36 @@ class Variant[C: VariantConfig](Step[C]):
         for variant_name in variants:
             variant = self.variants[variant_name]
             variant.result(*args, **kwargs)
-        self.has_results = all(
-            variant.has_results for variant in self.variants.values()
-        )
 
     @override
     @callback
     def result(self: Self, *args: "Any", **kwargs: "Any") -> None:
-        if not self.has_results:
-            self.set_seed()
+        if not self.has_results(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
+            self.set_seed()
+            self.log.info(f"Gathering {self.name} results")
             for variant in variants:
-                self.load(*args, **{**kwargs, "variants": [variant]})
-                self._result(*args, **{**kwargs, "variants": [variant]})
+                if not self._has_results(*args, **{**kwargs, "variants": [variant]}):
+                    self._result(*args, **{**kwargs, "variants": [variant]})
+            self.log.info(f"Finished gathering {self.name} results")
+
+    @override
+    def _was_analysed(
+        self: Self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
+    ) -> bool:
+        if variants is None:
+            variants = list(self.variants.keys())
+        if not isinstance(variants, list):
+            variants = [variants]
+        return all(
+            self.variants[variant].was_analysed(
+                *args, **{**kwargs, "variants": [variant]}
+            )
+            for variant in variants
+        )
 
     @override
     def _analyse(
@@ -218,20 +319,21 @@ class Variant[C: VariantConfig](Step[C]):
         for variant_name in variants:
             variant = self.variants[variant_name]
             variant.analyse(*args, **kwargs)
-        self.was_analysed = all(
-            variant.was_analysed for variant in self.variants.values()
-        )
 
     @override
     @callback
     def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
-        if not self.was_analysed:
-            self.set_seed()
+        if self.force or not self.was_analysed(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
+            self.set_seed()
+            self.log.info(f"Analysing {self.name}")
             for variant_name in variants:
-                self.result(*args, **{**kwargs, "variants": [variant_name]})
-                self._analyse(*args, **{**kwargs, "variants": [variant_name]})
-                self._clear(variants=[variant_name])
+                if self.force or not self._was_analysed(
+                    *args, **{**kwargs, "variants": [variant_name]}
+                ):
+                    self._analyse(*args, **{**kwargs, "variants": [variant_name]})
+                    self._clear(variants=[variant_name])
+            self.log.info(f"Finished analysing {self.name}")
 
     @override
     def _clear(
@@ -283,8 +385,9 @@ class Variant[C: VariantConfig](Step[C]):
         complete: bool = False,
         **kwargs: "Any",
     ) -> None:
-        self.set_seed()
         variants = kwargs.get("variants", self.variants)
+        self.set_seed()
+        self.log.info(f"Clearing {self.name}")
         for variant_name in variants:
             self._clear(
                 *args,
@@ -295,5 +398,6 @@ class Variant[C: VariantConfig](Step[C]):
                 complete=complete,
                 **{**kwargs, "variants": [variant_name]},
             )
+        self.log.info(f"Finished clearing {self.name}")
 
     # === Static Methods ===

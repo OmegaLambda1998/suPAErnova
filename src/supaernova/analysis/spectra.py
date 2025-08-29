@@ -240,7 +240,9 @@ class SpectraPlotter(Plotter):
         # Mean
         y_mean = y.mean(axis=(0, 1))
         y_std = y.std(axis=(0, 1))
-        yerr_mean = yerr.mean(axis=(0, 1))
+        yerr_mean = np.sqrt(
+            (yerr * yerr).mean(axis=(0, 1)) / np.ones_like(yerr).sum(axis=(0, 1))
+        )
 
         order = np.argsort(x)
         x = x[order]
@@ -357,7 +359,9 @@ class SpectraPlotter(Plotter):
         yerr = yerr[..., order]
         y_mean = y.mean(axis=(0, 1))
         y_std = y.std(axis=(0, 1))
-        yerr_mean = yerr.mean(axis=(0, 1))
+        yerr_mean = np.sqrt(
+            (yerr * yerr).mean(axis=(0, 1)) / np.ones_like(yerr).sum(axis=(0, 1))
+        )
 
         order_prime = np.argsort(x_prime)
         x_prime = x_prime[order_prime]
@@ -365,7 +369,10 @@ class SpectraPlotter(Plotter):
         yerr_prime = yerr_prime[..., order_prime]
         y_prime_mean = y_prime.mean(axis=(0, 1))
         y_prime_std = y_prime.std(axis=(0, 1))
-        yerr_prime_mean = yerr_prime.mean(axis=(0, 1))
+        yerr_prime_mean = np.sqrt(
+            (yerr_prime * yerr_prime).mean(axis=(0, 1))
+            / np.ones_like(yerr_prime).sum(axis=(0, 1))
+        )
 
         if config.plot_base:
             fig, spectra_ax, _ebar = Plotter.errorbar(
@@ -450,25 +457,42 @@ class SpectraPlotter(Plotter):
         x_min = max(x.min(), x_prime.min())
         x_max = min(x.max(), x_prime.max())
 
-        mask_overlap = (x >= x_min) & (x <= x_max)
-        mask_overlap_prime = (x_prime >= x_min) & (x_prime <= x_max)
+        mask_overlap = (x >= x_min - 1) & (x <= x_max + 1)
+        mask_overlap_prime = (x_prime >= x_min - 1) & (x_prime <= x_max + 1)
 
         # Extract overlapping regions
         x_common = x[mask_overlap]
         y_common = y[..., mask_overlap]
         yerr_common = yerr[..., mask_overlap]
+        y_common_mean = y_common.mean(axis=(0, 1))
+        yerr_common_mean = np.sqrt(
+            (yerr_common * yerr_common).mean(axis=(0, 1))
+            / np.ones_like(yerr_common).sum(axis=(0, 1))
+        )
 
         x_prime_common = x_prime[mask_overlap_prime]
         y_prime_common = y_prime[..., mask_overlap_prime]
         yerr_prime_common = yerr_prime[..., mask_overlap_prime]
+        y_prime_common_mean = y_prime_common.mean(axis=(0, 1))
+        yerr_prime_common_mean = yerr_prime_common.mean(axis=(0, 1))
+        yerr_prime_common_mean = np.sqrt(
+            (yerr_prime_common * yerr_prime_common).mean(axis=(0, 1))
+            / np.ones_like(yerr_prime_common).sum(axis=(0, 1))
+        )
 
         # Residual with masks respected
-        y_residual = y_common - y_prime_common
-        y_residual_mean = y_residual.mean(axis=(0, 1))
+        # y_residual = y_common - y_prime_common
+        # y_residual_mean = y_residual.mean(axis=(0, 1))
+        y_residual_mean = y_common_mean - y_prime_common_mean
+        yerr_residual_mean = np.sqrt(
+            yerr_common_mean * yerr_common_mean
+            + yerr_prime_common_mean * yerr_prime_common_mean
+        )
 
         fig, residual_ax, ebar = Plotter.errorbar(
             x_common,
             y_residual_mean,
+            yerr=yerr_residual_mean,
             *args,
             fig=fig,
             ax=residual_ax,
@@ -480,10 +504,7 @@ class SpectraPlotter(Plotter):
 
         # fig, pull_ax, _hline = Plotter.axhline(0, color="black", fig=fig, ax=pull_ax)
 
-        y_pull = np.abs(y_common - y_prime_common) / np.sqrt(
-            yerr_common * yerr_common + yerr_prime_common * yerr_prime_common
-        )
-        y_pull_mean = y_pull.mean(axis=(0, 1))
+        y_pull_mean = np.abs(y_residual_mean) / yerr_residual_mean
 
         fig, pull_ax, ebar = Plotter.errorbar(
             x_common,
@@ -497,6 +518,8 @@ class SpectraPlotter(Plotter):
 
         pull_ax.set_xlabel("Wavelength [Å]")
         pull_ax.set_ylabel("Abs Pull")
+        if y_pull_mean.min() != y_pull_mean.max():
+            pull_ax.set_yscale("symlog", linthresh=1e-3)
 
         spectra_ax.set_title(
             (config.plot_kwargs or {}).get("title", config.name.capitalize())
