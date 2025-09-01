@@ -8,23 +8,23 @@ from .steps import Step
 if TYPE_CHECKING:
     from typing import Any
 
-    from supaernova.configs.steps import StepConfig, StepResult
+    from supaernova.configs.steps import StepResult
     from supaernova.configs.steps.variants import VariantConfig
 
 
-class Variant[C: VariantConfig](Step[C]):
+class Variant[C: VariantConfig, S: Step](Step[C]):
     # === Class Variables ===
-    variant_steps: ClassVar[dict[str, type[Step[C]]]] = {}
+    variant_steps: ClassVar[dict[str, type[S]]] = {}
 
     # === Class Methods ===
     @classmethod
-    def register_step(cls: type[Self], variant_cls: type[Step[C]]) -> None:
+    def register_step(cls: type[Self], variant_cls: type[S]) -> None:
         cls.variant_steps[cls.id] = variant_cls
         super().register_step()
 
     class VariantResult(UserDict):
-        def __init__(self: Self, instance: "Variant[C]") -> None:
-            self.instance: Variant[C] = instance
+        def __init__(self: Self, instance: "Variant[C, S]") -> None:
+            self.instance: Variant[C, S] = instance
             super().__init__()
 
         @override
@@ -43,16 +43,16 @@ class Variant[C: VariantConfig](Step[C]):
     def __init__(self: Self, config: C) -> None:
         super().__init__(config)
 
-        self.variant_step: type[Step[C]] = self.variant_steps[self.id]
-        self.variant_configs: dict[str, StepConfig] = {}
-        self.variant_required_steps: dict[str, dict[str, tuple[Variant[C], str]]] = {}
-        self.variants: dict[str, Step[C]] = {}
+        self.variant_step: type[S] = self.variant_steps[self.id]
+        self.variant_required_steps: dict[
+            str, dict[str, tuple[Variant[VariantConfig, Step], str]]
+        ] = {}
+        self.variants: dict[str, S] = {}
         for variant in self.options.variants:
             step = self.variant_step(variant)
-            self.variant_configs[step.name] = variant
             self.variants[step.name] = step
-        self.results: Variant[C].VariantResult[str, StepResult] = Variant[
-            C
+        self.results: Variant[C, S].VariantResult[str, StepResult] = Variant[
+            C, S
         ].VariantResult(self)
 
     @override
@@ -340,10 +340,11 @@ class Variant[C: VariantConfig](Step[C]):
         self: Self,
         *args: "Any",
         setup: bool = False,
+        run: bool = False,
+        save: bool = False,
         load: bool = False,
         result: bool = False,
         analyse: bool = False,
-        complete: bool = False,
         variants: str | list[str] | None = None,
         **kwargs: "Any",
     ) -> None:
@@ -356,20 +357,22 @@ class Variant[C: VariantConfig](Step[C]):
             variant.clear(
                 *args,
                 setup=setup,
+                run=run,
+                save=save,
                 load=load,
                 result=result,
                 analyse=analyse,
-                complete=complete,
                 **kwargs,
             )
             # self.variant_required_steps[variant_name] = {}
         super()._clear(
             *args,
             setup=setup,
+            run=run,
+            save=save,
             load=load,
             result=result,
             analyse=analyse,
-            complete=complete,
             **kwargs,
         )
 
@@ -379,10 +382,11 @@ class Variant[C: VariantConfig](Step[C]):
         self: Self,
         *args: "Any",
         setup: bool = False,
+        run: bool = False,
+        save: bool = False,
         load: bool = False,
         result: bool = False,
         analyse: bool = False,
-        complete: bool = False,
         **kwargs: "Any",
     ) -> None:
         variants = kwargs.get("variants", self.variants)
@@ -392,10 +396,11 @@ class Variant[C: VariantConfig](Step[C]):
             self._clear(
                 *args,
                 setup=setup,
+                run=run,
+                save=save,
                 load=load,
                 result=result,
                 analyse=analyse,
-                complete=complete,
                 **{**kwargs, "variants": [variant_name]},
             )
         self.log.info(f"Finished clearing {self.name}")

@@ -4,9 +4,8 @@ import importlib
 import numpy as np
 import pandas as pd
 
-from supaernova.steps import Step
-from supaernova.steps.data import SNPAEData, DataStepResult
-from supaernova.steps.models import Model
+from supaernova.steps.models import Model, ModelStep
+from supaernova.configs.steps.data import SNPAEData, DataStepResult
 from supaernova.analysis.dispersion import DispersionPlotter
 from supaernova.analysis.distribution import DistributionPlotter
 from supaernova.configs.steps.posterior import (
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
     PosteriorModel = TFPosteriorModel
 
 
-class Posterior(Step[PosteriorConfig]):
+class Posterior(ModelStep[PosteriorConfig]):
     def __init__(self: Self, config: "PosteriorConfig") -> None:
         super().__init__(config)
 
@@ -795,15 +794,8 @@ class Posterior(Step[PosteriorConfig]):
         load: bool = False,
         result: bool = False,
         analyse: bool = False,
-        complete: bool = False,
         **kwargs: "Any",
     ) -> None:
-        if not any((setup, load, result, analyse, complete)):
-            setup = True
-            load = True
-            result = True
-            analyse = True
-
         if setup:
             self.clear_attributes([
                 "data",
@@ -851,7 +843,6 @@ class Posterior(Step[PosteriorConfig]):
             load=load,
             result=result,
             analyse=analyse,
-            complete=complete,
             **kwargs,
         )
 
@@ -892,7 +883,7 @@ class Posterior(Step[PosteriorConfig]):
             setattr(self, f"{mask_type}wl_mask", wl_mask)
 
 
-class PosteriorStep(Model[PosteriorStepConfig]):
+class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
     id: "ClassVar[str]" = "posterior"
     model_backend: "ClassVar[dict[str, Callable[[], type[PosteriorModel]]]]" = {
         "TensorFlow": lambda: importlib.import_module(

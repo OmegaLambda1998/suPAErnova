@@ -5,9 +5,8 @@ import importlib
 
 import numpy as np
 
-from supaernova.steps import Step
 from supaernova.analysis import Plotter
-from supaernova.steps.models import Model
+from supaernova.steps.models import Model, ModelStep
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.configs.callbacks import callback
 from supaernova.configs.steps.pae import (
@@ -18,7 +17,6 @@ from supaernova.configs.steps.pae import (
     PAEStageResult,
     PAEStepAnalysis,
 )
-from supaernova.configs.steps.data import SNPAEData
 from supaernova.analysis.distribution import DistributionPlotter
 
 if TYPE_CHECKING:
@@ -27,14 +25,14 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
-    from supaernova.configs.steps.data import DataStepResult
+    from supaernova.configs.steps.data import LazySNPAEData, DataStepResult
 
     from .tf import TFPAEModel
 
     PAEModel = TFPAEModel
 
 
-class PAE(Step[PAEConfig]):
+class PAE(ModelStep[PAEConfig]):
     def __init__(self: Self, config: PAEConfig) -> None:
         super().__init__(config)
 
@@ -42,25 +40,25 @@ class PAE(Step[PAEConfig]):
         self.kfold: int = self.options.kfold
         self.colourlaw: npt.NDArray[float] | None
 
-        self.data: SNPAEData
+        self.data: LazySNPAEData
         self.mask: npt.NDArray[bool]
         self.sn_mask: npt.NDArray[bool]
         self.spec_mask: npt.NDArray[bool]
         self.wl_mask: npt.NDArray[bool]
 
-        self.train_data: SNPAEData
+        self.train_data: LazySNPAEData
         self.train_mask: npt.NDArray[bool]
         self.train_sn_mask: npt.NDArray[bool]
         self.train_spec_mask: npt.NDArray[bool]
         self.train_wl_mask: npt.NDArray[bool]
 
-        self.test_data: SNPAEData
+        self.test_data: LazySNPAEData
         self.test_mask: npt.NDArray[bool]
         self.test_sn_mask: npt.NDArray[bool]
         self.test_spec_mask: npt.NDArray[bool]
         self.test_wl_mask: npt.NDArray[bool]
 
-        self.val_data: SNPAEData
+        self.val_data: LazySNPAEData
         self.val_mask: npt.NDArray[bool]
         self.val_sn_mask: npt.NDArray[bool]
         self.val_spec_mask: npt.NDArray[bool]
@@ -807,15 +805,8 @@ class PAE(Step[PAEConfig]):
         load: bool = False,
         result: bool = False,
         analyse: bool = False,
-        complete: bool = False,
         **kwargs: "Any",
     ) -> None:
-        if not any((setup, load, result, analyse, complete)):
-            setup = True
-            load = True
-            result = True
-            analyse = True
-
         if setup:
             self.clear_attributes([
                 "data",
@@ -862,7 +853,6 @@ class PAE(Step[PAEConfig]):
             load=load,
             result=result,
             analyse=analyse,
-            complete=complete,
             **kwargs,
         )
 
@@ -870,7 +860,7 @@ class PAE(Step[PAEConfig]):
 
     def setup_data_masks(self: Self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
-            data: SNPAEData = getattr(self, f"{mask_type}data")
+            data: LazySNPAEData = getattr(self, f"{mask_type}data")
             min_redshift: float = getattr(self, f"min_{mask_type}redshift")
             max_redshift: float = getattr(self, f"max_{mask_type}redshift")
             redshift_mask = (
@@ -901,7 +891,7 @@ class PAE(Step[PAEConfig]):
             setattr(self, f"{mask_type}wl_mask", wl_mask)
 
 
-class PAEStep(Model[PAEStepConfig]):
+class PAEStep(Model[PAEStepConfig, PAE]):
     id: "ClassVar[str]" = "pae"
     model_backend: "ClassVar[dict[str, Callable[[], type[PAEModel]]]]" = {
         "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFPAEModel,
@@ -910,10 +900,8 @@ class PAEStep(Model[PAEStepConfig]):
     def __init__(self: Self, config: "PAEStepConfig") -> None:
         super().__init__(config)
 
-        self.variants: dict[str, PAE]
-
-        self.plots = {}
-        self.bases = {}
+        self.bases: dict[str, dict[str, Any]] = {}
+        self.plots: dict[str, dict[str, Any]] = {}
 
     @override
     def _analyse(

@@ -5,13 +5,10 @@ from pathlib import Path
 import numpy as np
 from numpy import typing as npt
 from astropy import cosmology as cosmo
-from pydantic import (
-    Field,
-    field_validator,
-    model_validator,
-)
+from pydantic import Field, PositiveInt, field_validator, model_validator
 
 from supaernova.utils import resolve_path
+from supaernova.utils.lazy import LazyNPZ, LazyTuple, LazyPydantic
 from supaernova.configs.steps import StepConfig, StepResult, StepAnalysis
 from supaernova.analysis.spectra import SpectraPlot, ComparisonPlot
 from supaernova.configs.steps.variants import VariantConfig
@@ -57,15 +54,24 @@ class SNPAEData(StepResult):
     # === Static Methods ===
 
 
+class LazySNPAEData(LazyPydantic[SNPAEData, LazyNPZ]):
+    inner = LazyNPZ
+    model = SNPAEData
+
+
+class LazySNPAEDataTuple(LazyTuple[LazySNPAEData]):
+    elem = LazySNPAEData
+
+
 class DataStepResult(StepResult):
     # === Class Variables ===
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    data: SNPAEData
+    data: LazySNPAEData
     dir: Path
-    train_data: list[SNPAEData]
-    test_data: list[SNPAEData]
+    train_data: LazySNPAEDataTuple
+    test_data: LazySNPAEDataTuple
     colourlaw: npt.NDArray[float] | None
     min_redshift: float
     max_redshift: float
@@ -120,6 +126,7 @@ class DataConfig(StepConfig):
     train_frac: Annotated[float, Field(ge=0, le=1)]
 
     # --- Optional ---
+    n_kfolds: PositiveInt | None = None
     colourlaw: Path | None = None
     analysis: DataStepAnalysis | None = None
     cosmological_model: str = "WMAP7"

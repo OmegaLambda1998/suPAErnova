@@ -6,7 +6,7 @@ from pydantic import computed_field
 import tensorflow as tf
 from tensorflow import keras as ks
 
-from supaernova.utils import ConfigInputObject, validate_object
+from supaernova.utils.validation import ConfigInputObject, validate_object
 from supaernova.steps.posterior.tf import (
     loss as snpae_losses,
 )

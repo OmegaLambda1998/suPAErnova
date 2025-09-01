@@ -3,8 +3,7 @@ import importlib
 
 import numpy as np
 
-from supaernova.steps import Step
-from supaernova.steps.models import Model
+from supaernova.steps.models import Model, ModelStep
 from supaernova.configs.steps.data import SNPAEData
 from supaernova.configs.steps.nflow import (
     NFlowConfig,
@@ -30,7 +29,7 @@ if TYPE_CHECKING:
     NFlowModel = TFNFlowModel
 
 
-class NFlow(Step[NFlowConfig]):
+class NFlow(ModelStep[NFlowConfig]):
     # Class Variables
     id: ClassVar[str] = "nflow"
 
@@ -454,15 +453,8 @@ class NFlow(Step[NFlowConfig]):
         load: bool = False,
         result: bool = False,
         analyse: bool = False,
-        complete: bool = False,
         **kwargs: "Any",
     ) -> None:
-        if not any((setup, load, result, analyse, complete)):
-            setup = True
-            load = True
-            result = True
-            analyse = True
-
         if setup:
             self.clear_attributes([
                 "data",
@@ -503,7 +495,6 @@ class NFlow(Step[NFlowConfig]):
             load=load,
             result=result,
             analyse=analyse,
-            complete=complete,
             **kwargs,
         )
 
@@ -544,7 +535,7 @@ class NFlow(Step[NFlowConfig]):
             setattr(self, f"{mask_type}wl_mask", wl_mask)
 
 
-class NFlowStep(Model[NFlowStepConfig]):
+class NFlowStep(Model[NFlowStepConfig, NFlow]):
     id: "ClassVar[str]" = "nflow"
     model_backend: "ClassVar[dict[str, Callable[[], type[NFlowModel]]]]" = {
         "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFNFlowModel,

@@ -6,10 +6,10 @@ from pydantic import PositiveFloat, computed_field
 import tensorflow as tf
 from tensorflow import keras as ks
 
-from supaernova.utils import ConfigInputObject, validate_object
 from supaernova.steps.pae.tf import (
     loss as snpae_losses,
 )
+from supaernova.utils.validation import ConfigInputObject, validate_object
 from supaernova.typing.backends.tf import Loss, LossFunc
 
 from .pae import PAEConfig

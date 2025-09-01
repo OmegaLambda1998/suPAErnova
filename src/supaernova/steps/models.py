@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Any, Self, ClassVar, get_args, override
 
-from supaernova.configs.steps.models import BACKENDS
+from supaernova.configs.steps.models import BACKENDS, ModelConfig, BackendConfig
 
 from .steps import Step
 from .variants import Variant
@@ -9,22 +9,21 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from supaernova.configs.steps import StepResult
-    from supaernova.configs.steps.models import ModelConfig
 
 
-class ModelStep[C: ModelConfig](Step[C]):
+class ModelStep[C: BackendConfig](Step[C]):
     def __init__(self: Self, config: C) -> None:
         super().__init__(config)
         self.model: Any
 
 
-class Model[C: ModelConfig](Variant[C]):
+class Model[C: ModelConfig, S: ModelStep](Variant[C, S]):
     # --- Class Variables ---
     model_backend: ClassVar[dict[str, "Callable[[], type[Any]]"]]
 
     class ModelResult(Variant.VariantResult):
         def __init__(self: Self, instance: "Model") -> None:
-            self.instance: Model = instance
+            self.instance: Model[C, S] = instance
             super().__init__(instance)
 
         @override
@@ -45,8 +44,6 @@ class Model[C: ModelConfig](Variant[C]):
         super().__init__(config)
 
         self.models_cls: dict[str, type[Any]] = {}
-
-        self.variants: dict[str, ModelStep[C]]
 
         self.results: Model.ModelResult[str, StepResult] = Model.ModelResult(self)
 

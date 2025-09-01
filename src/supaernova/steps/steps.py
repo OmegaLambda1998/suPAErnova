@@ -1,9 +1,9 @@
 # Copyright 2025 Patrick Armstrong
-from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Self, ClassVar
 from pathlib import Path
 import pkgutil
 import importlib
+from collections.abc import Iterable
 
 import numpy as np
 
@@ -66,9 +66,8 @@ class Step[C: StepConfig]:
         self.results: StepResult
         self.analysis: StepAnalysis
 
-    @abstractmethod
     def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
-        pass
+        return False
 
     @callback
     def is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
@@ -77,7 +76,6 @@ class Step[C: StepConfig]:
         self.log.debug(f"{self.name} is {'' if is_setup else 'not '}setup")
         return is_setup
 
-    @abstractmethod
     def _setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
@@ -89,9 +87,8 @@ class Step[C: StepConfig]:
             self._setup(*args, **kwargs)
             self.log.info(f"Finished setting up {self.name}")
 
-    @abstractmethod
     def _has_run(self: Self, *args: "Any", **kwargs: "Any") -> bool:
-        pass
+        return False
 
     @callback
     def has_run(self: Self, *args: "Any", **kwargs: "Any") -> bool:
@@ -100,7 +97,6 @@ class Step[C: StepConfig]:
         self.log.debug(f"{self.name} has {'' if has_run else 'not '}run")
         return has_run
 
-    @abstractmethod
     def _run(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
@@ -113,9 +109,8 @@ class Step[C: StepConfig]:
             self._run(*args, **kwargs)
             self.log.info(f"Finished running {self.name}")
 
-    @abstractmethod
     def _is_saved(self: Self, *args: "Any", **kwargs: "Any") -> bool:
-        pass
+        return False
 
     @callback
     def is_saved(self: Self, *args: "Any", **kwargs: "Any") -> bool:
@@ -124,7 +119,6 @@ class Step[C: StepConfig]:
         self.log.debug(f"{self.name} is {'' if is_saved else 'not '}saved")
         return is_saved
 
-    @abstractmethod
     def _save(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
@@ -137,7 +131,6 @@ class Step[C: StepConfig]:
             self._save(*args, **kwargs)
             self.log.info(f"Finished saving {self.name}")
 
-    @abstractmethod
     def _is_loaded(self: Self, *args: "Any", **kwargs: "Any") -> bool:
         return self._has_run(*args, **kwargs)
 
@@ -148,7 +141,6 @@ class Step[C: StepConfig]:
         self.log.debug(f"{self.name} is {'' if is_loaded else 'not '}loaded")
         return is_loaded
 
-    @abstractmethod
     def _load(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
@@ -164,9 +156,8 @@ class Step[C: StepConfig]:
             else:
                 self.save(*args, **kwargs)
 
-    @abstractmethod
     def _has_results(self: Self, *args: "Any", **kwargs: "Any") -> bool:
-        pass
+        return False
 
     @callback
     def has_results(self: Self, *args: "Any", **kwargs: "Any") -> bool:
@@ -175,7 +166,6 @@ class Step[C: StepConfig]:
         self.log.debug(f"{self.name} is {'not ' if has_results else ''}missing results")
         return has_results
 
-    @abstractmethod
     def _result(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
@@ -188,9 +178,8 @@ class Step[C: StepConfig]:
             self._result(*args, **kwargs)
             self.log.info(f"Finished gathering {self.name} results")
 
-    @abstractmethod
     def _was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
-        pass
+        return False
 
     @callback
     def was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
@@ -201,7 +190,6 @@ class Step[C: StepConfig]:
         )
         return was_analysed
 
-    @abstractmethod
     def _analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
@@ -214,35 +202,30 @@ class Step[C: StepConfig]:
             self._analyse(*args, **kwargs)
             self.log.info(f"Finished analysing {self.name}")
 
-    def has_attributes(self: Self, attributes: str | list[str]) -> bool:
-        if not isinstance(attributes, list):
+    def has_attributes(self: Self, attributes: str | Iterable[str]) -> bool:
+        if not isinstance(attributes, Iterable):
             attributes = [attributes]
         return all(hasattr(self, attr) for attr in attributes)
 
-    def clear_attributes(self: Self, attributes: str | list[str]) -> None:
-        if not isinstance(attributes, list):
+    def clear_attributes(self: Self, attributes: str | Iterable[str]) -> None:
+        if not isinstance(attributes, Iterable):
             attributes = [attributes]
         for attr in attributes:
             if hasattr(self, attr):
                 delattr(self, attr)
 
-    @abstractmethod
     def _clear(
         self: Self,
         *args: "Any",
         setup: bool = False,
         run: bool = False,
+        save: bool = False,
         load: bool = False,
         result: bool = False,
         analyse: bool = False,
         **kwargs: "Any",
     ) -> None:
-        if not any((setup, run, load, result, analyse)):
-            setup = True
-            run = True
-            load = True
-            result = True
-            analyse = True
+        pass
 
     @callback
     def clear(
@@ -250,22 +233,30 @@ class Step[C: StepConfig]:
         *args: "Any",
         setup: bool = False,
         run: bool = False,
+        save: bool = False,
         load: bool = False,
         result: bool = False,
         analyse: bool = False,
-        complete: bool = False,
         **kwargs: "Any",
     ) -> None:
+        if not any((setup, run, save, load, result, analyse)):
+            setup = True
+            run = True
+            save = True
+            load = True
+            result = True
+            analyse = True
+
         self.set_seed()
         self.log.info(f"Clearing {self.name}")
         self._clear(
             *args,
             setup=setup,
             run=run,
+            save=save,
             load=load,
             result=result,
             analyse=analyse,
-            complete=complete,
             **kwargs,
         )
         self.log.info(f"Finished clearing {self.name}")

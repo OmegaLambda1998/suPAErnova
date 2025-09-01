@@ -9,7 +9,7 @@ from .analysis import Plotter, AbstractPlot
 if TYPE_CHECKING:
     from typing import Any
 
-    from supaernova.configs.steps.data import SNPAEData
+    from supaernova.configs.steps.data import LazySNPAEData
 
     from .analysis import Axis, Figure
 
@@ -44,7 +44,7 @@ CONSTRAINTS = {
 class SpectraPlotter(Plotter):
     @staticmethod
     def prep(
-        data: "SNPAEData",
+        data: "LazySNPAEData",
         config: "SpectraPlot",
         *,
         mask: "npt.NDArray[float] | None" = None,
@@ -59,10 +59,14 @@ class SpectraPlotter(Plotter):
         "npt.NDArray[int]",
         "npt.NDArray[int]",
         "npt.NDArray[int]",
+        "npt.NDArray[str]",
+        "npt.NDArray[float]",
     ]:
         wl = data.wavelength.copy()
         amplitude = data.amplitude.copy()
         sigma = data.sigma.copy()
+        sn_name = data.sn_name.copy()
+        time = data.time.copy()
 
         input_mask = data.mask.copy() if mask is None else mask
         # Wavelength Range Mask
@@ -89,10 +93,14 @@ class SpectraPlotter(Plotter):
         input_sn_mask *= input_spec_mask.max(axis=-2, keepdims=True)
         input_mask *= input_sn_mask * input_spec_mask * input_wl_mask
 
+        data.clear()
+
         return (
             wl,
             amplitude,
             sigma,
+            sn_name,
+            time,
             input_mask,
             input_sn_mask,
             input_spec_mask,
@@ -101,7 +109,7 @@ class SpectraPlotter(Plotter):
 
     @staticmethod
     def plot_spectra(
-        data: "SNPAEData",
+        data: "LazySNPAEData",
         config: "SpectraPlot",
         *args: "Any",
         fig: "Figure | None" = None,
@@ -121,6 +129,8 @@ class SpectraPlotter(Plotter):
             wl,
             amplitude,
             sigma,
+            sn_name,
+            time,
             input_mask,
             input_sn_mask,
             input_spec_mask,
@@ -149,12 +159,12 @@ class SpectraPlotter(Plotter):
                     ax=ax,
                     linestyle="-",
                     c=colours(0.5),
-                    label=data.sn_name[sn, 0, 0],
+                    label=sn_name[sn, 0, 0],
                     **kwargs,
                 )
                 for spec in range(n_spec):
                     if input_spec_mask[sn, spec, 0]:
-                        c = colours(data.time[sn, spec, 0])
+                        c = colours(time[sn, spec, 0])
                         ma = input_mask[sn, spec, :].astype(bool)
                         x = wl[sn, spec, :][ma]
                         y = amplitude[sn, spec, :][ma]
@@ -198,7 +208,7 @@ class SpectraPlotter(Plotter):
 
     @staticmethod
     def plot_summary(
-        data: "SNPAEData",
+        data: "LazySNPAEData",
         config: "SpectraPlot",
         *args: "Any",
         fig: "Figure | None" = None,
@@ -218,6 +228,8 @@ class SpectraPlotter(Plotter):
             wl,
             amplitude,
             sigma,
+            _sn_name,
+            _time,
             input_mask,
             _input_sn_mask,
             _input_spec_mask,
@@ -297,7 +309,7 @@ class SpectraPlotter(Plotter):
 
     @staticmethod
     def plot_comparison(
-        data: "SNPAEData",
+        data: "LazySNPAEData",
         config: "ComparisonPlot",
         *args: "Any",
         fig: "Figure | None" = None,
@@ -317,6 +329,8 @@ class SpectraPlotter(Plotter):
             wl,
             amplitude,
             sigma,
+            _sn_name,
+            _time,
             input_mask,
             _input_sn_mask,
             _input_spec_mask,
