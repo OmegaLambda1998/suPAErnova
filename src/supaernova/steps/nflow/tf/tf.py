@@ -1,6 +1,7 @@
 # Copyright 2025 Patrick Armstrong
 from typing import TYPE_CHECKING, Self, cast, override
 
+import numpy as np
 import tensorflow as tf
 from tensorflow import keras as ks
 from tqdm.keras import TqdmCallback
@@ -69,10 +70,10 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_mask, axis=-1),
             tf.int32,
         )
-        mask_sn = tf.reduce_max(mask_spec, axis=-2)
+        mask_sn = tf.reduce_max(mask_spec, axis=-1, keepdims=True)
         self.mask = tf.cast(mask_sn, tf.float32)
 
         self.train_latents: tf.Tensor
@@ -97,10 +98,10 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         train_mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_train_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_train_mask, axis=-1),
             tf.int32,
         )
-        train_mask_sn = tf.reduce_max(train_mask_spec, axis=-2)
+        train_mask_sn = tf.reduce_max(train_mask_spec, axis=-1, keepdims=True)
         self.train_mask = tf.cast(train_mask_sn, tf.float32)
 
         self.test_latents: tf.Tensor
@@ -125,10 +126,10 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         test_mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_test_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_test_mask, axis=-1),
             tf.int32,
         )
-        test_mask_sn = tf.reduce_max(test_mask_spec, axis=-2)
+        test_mask_sn = tf.reduce_max(test_mask_spec, axis=-1, keepdims=True)
         self.test_mask = tf.cast(test_mask_sn, tf.float32)
 
         self.val_latents: tf.Tensor
@@ -153,10 +154,10 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         val_mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_val_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_val_mask, axis=-1),
             tf.int32,
         )
-        val_mask_sn = tf.reduce_max(val_mask_spec, axis=-2)
+        val_mask_sn = tf.reduce_max(val_mask_spec, axis=-1, keepdims=True)
         self.val_mask = tf.cast(val_mask_sn, tf.float32)
 
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
@@ -300,7 +301,6 @@ class TFNFlowModel(ks.Model):
         )
 
     @override
-    @tf.function
     def call(
         self: "Self",
         inputs: tf.Tensor,
@@ -310,10 +310,21 @@ class TFNFlowModel(ks.Model):
 
         # === Unpack Inputs ===
         latents = inputs[..., :-1]
-        mask = inputs[..., -1:][:, 0]
-        mask = tf.cast(mask, tf.bool)
-        masked_flow = tfd.Masked(self.flow, mask)
-        return masked_flow.log_prob(latents)
+        mask = inputs[..., -1:][..., 0]
+
+        # === Calculate Log Probability ===
+        log_prob = self.flow.log_prob(latents)
+
+        # Replace NaN and inf with infinitely low log prob
+        inf_log_prob = -np.inf * tf.ones_like(log_prob)
+
+        masked_log_prob = tf.where(tf.cast(mask, tf.bool), log_prob, inf_log_prob)
+
+        return tf.where(
+            tf.math.is_finite(masked_log_prob),
+            masked_log_prob,
+            inf_log_prob,
+        )
 
     def u_to_z(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         # If permute is True, then the incoming u_latents need to be permuted correctly

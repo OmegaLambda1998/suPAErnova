@@ -58,19 +58,19 @@ class Model[C: ModelConfig, S: ModelStep](Variant[C, S]):
         self._model(*args, **kwargs)
 
     @override
-    def _completed(self: Self, *args: Any, **kwargs: Any) -> bool:
+    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
         self._model(*args, **kwargs)
-        return super()._completed(*args, **kwargs)
+        super()._run(*args, **kwargs)
+
+    @override
+    def _save(self: Self, *args: Any, **kwargs: Any) -> None:
+        self._model(*args, **kwargs)
+        super()._save(*args, **kwargs)
 
     @override
     def _load(self: Self, *args: Any, **kwargs: Any) -> None:
         self._model(*args, **kwargs)
         super()._load(*args, **kwargs)
-
-    @override
-    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
-        self._model(*args, **kwargs)
-        super()._run(*args, **kwargs)
 
     @override
     def _result(self: Self, *args: Any, **kwargs: Any) -> None:

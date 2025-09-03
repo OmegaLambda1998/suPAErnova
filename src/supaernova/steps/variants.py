@@ -31,11 +31,11 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         def __getitem__(self: Self, key: str) -> "Any":
             if key in self.instance.variants:
                 variant = self.instance.variants[key]
-                kwargs: dict[str, StepResult] = {}
+                variant_kwargs: dict[str, StepResult] = {}
                 for k, (v, n) in self.instance.variant_required_steps[key].items():
-                    kwargs[k] = v.results[n]
-                    v.clear(**{**kwargs, "variants": [n]})
-                variant.result(**kwargs)
+                    variant_kwargs[k] = v.results[n]
+                    v.clear(**{**variant_kwargs, "variants": [n]})
+                variant.result(**variant_kwargs)
                 return variant.results
             return super().__getitem__(key)
 
@@ -76,7 +76,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         self: Self,
         *args: "Any",
         variants: str | list[str] | None = None,
-        **kwargs: "Variant[C]",
+        **kwargs: "Variant[VariantConfig, Step]",
     ) -> None:
         if variants is None:
             return
@@ -323,6 +323,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
     @override
     @callback
     def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        self.setup(*args, **kwargs)
         if self.force or not self.was_analysed(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()

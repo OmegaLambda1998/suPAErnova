@@ -1158,7 +1158,7 @@ class TFPAEModel(ks.Model):
             self.stage.val_wl_mask, dtype=tf.int32
         )
 
-        n_batches_per_epoch = self.stage.train_data.amplitude.shape[0] / self.batch_size
+        n_batches_per_epoch = self.stage.train_mask.shape[0] / self.batch_size
 
         # === Setup Callbacks ===
         callbacks: list[ks.callbacks.Callback] = []
@@ -1230,6 +1230,7 @@ class TFPAEModel(ks.Model):
             self.stage.spec_mask,
             self.stage.wl_mask,
         )
+        self.stage.data.clear()
 
         train_data = (
             self.stage.train_data.time,
@@ -1241,6 +1242,7 @@ class TFPAEModel(ks.Model):
             self.stage.train_spec_mask,
             self.stage.train_wl_mask,
         )
+        self.stage.train_data.clear()
 
         _test_data = (
             self.stage.test_data.time,
@@ -1252,6 +1254,7 @@ class TFPAEModel(ks.Model):
             self.stage.test_spec_mask,
             self.stage.test_wl_mask,
         )
+        self.stage.test_data.clear()
 
         val_data = (
             self.stage.val_data.time,
@@ -1263,6 +1266,7 @@ class TFPAEModel(ks.Model):
             self.stage.val_spec_mask,
             self.stage.val_wl_mask,
         )
+        self.stage.val_data.clear()
 
         # === Train ===
         self._epoch = 0
@@ -1319,6 +1323,7 @@ class TFPAEModel(ks.Model):
                 amplitude = tf.convert_to_tensor(
                     self.stage.data.amplitude, dtype=tf.float32
                 )
+                self.stage.data.clear()
                 pae_input = tf.concat((phase, amplitude), axis=-1)
 
                 mask = tf.convert_to_tensor(self.stage.mask, dtype=tf.int32)
@@ -1371,6 +1376,9 @@ class TFPAEModel(ks.Model):
             self.stage.train_data.amplitude, dtype=tf.float32
         )
         sigma = tf.convert_to_tensor(self.stage.train_data.sigma, dtype=tf.float32)
+
+        self.stage.train_data.clear()
+
         mask = tf.convert_to_tensor(self.stage.train_mask, dtype=tf.int32)
         sn_mask = tf.convert_to_tensor(self.stage.train_sn_mask, dtype=tf.int32)
         spec_mask = tf.convert_to_tensor(self.stage.train_spec_mask, dtype=tf.int32)

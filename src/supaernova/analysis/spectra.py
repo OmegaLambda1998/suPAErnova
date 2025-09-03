@@ -67,10 +67,20 @@ class SpectraPlotter(Plotter):
         sigma = data.sigma.copy()
         sn_name = data.sn_name.copy()
         time = data.time.copy()
-
         input_mask = data.mask.copy() if mask is None else mask
+
         # Wavelength Range Mask
         input_wl_mask = np.ones_like(input_mask) if wl_mask is None else wl_mask
+
+        if config.filter is not None:
+            for key, constraints in config.filter.items():
+                value = getattr(data, key)
+                for comparison, constraint in constraints.items():
+                    compare = CONSTRAINTS[comparison]
+                    input_wl_mask *= compare(value, constraint).astype(np.int32)
+
+        data.clear()
+
         # Phase Range Mask
         input_spec_mask = (
             input_wl_mask.max(axis=-1, keepdims=True)
@@ -82,18 +92,9 @@ class SpectraPlotter(Plotter):
             input_spec_mask.max(axis=-2, keepdims=True) if sn_mask is None else sn_mask
         )
 
-        if config.filter is not None:
-            for key, constraints in config.filter.items():
-                value = getattr(data, key)
-                for comparison, constraint in constraints.items():
-                    compare = CONSTRAINTS[comparison]
-                    input_wl_mask *= compare(value, constraint).astype(np.int32)
-
         input_spec_mask *= input_wl_mask.max(axis=-1, keepdims=True)
         input_sn_mask *= input_spec_mask.max(axis=-2, keepdims=True)
         input_mask *= input_sn_mask * input_spec_mask * input_wl_mask
-
-        data.clear()
 
         return (
             wl,

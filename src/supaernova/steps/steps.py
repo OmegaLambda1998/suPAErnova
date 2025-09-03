@@ -195,6 +195,7 @@ class Step[C: StepConfig]:
 
     @callback
     def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        self.setup(*args, **kwargs)
         if self.force or not self.was_analysed(*args, **kwargs):
             self.set_seed()
             self.log.info(f"Analysing {self.name}")

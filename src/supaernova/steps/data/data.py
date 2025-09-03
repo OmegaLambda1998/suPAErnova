@@ -36,8 +36,6 @@ class Data(Step[DataConfig]):
     def __init__(self: Self, config: DataConfig) -> None:
         super().__init__(config)
 
-        # === Previous Step Variables ===
-
         # === Config Variables ===
         # --- Required ---
         self.data_dir: Path = self.options.data_dir
@@ -89,7 +87,7 @@ class Data(Step[DataConfig]):
         self.train_data: LazySNPAEDataTuple
         self.test_data: LazySNPAEDataTuple
 
-        # === Load / Run Variables ===
+        # === Run / Save / Load Variables ===
         self.run_attributes: set[str] = {
             "sne",
             "wavelength",
@@ -418,7 +416,7 @@ class Data(Step[DataConfig]):
         )
 
     #
-    # === DataStep Specific Functions ===
+    # === Instance Methods ===
     #
 
     def load_sne(self: Self) -> None:

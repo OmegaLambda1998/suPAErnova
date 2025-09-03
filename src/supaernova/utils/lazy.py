@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING, Any, cast, override
-from collections.abc import Mapping, Iterable
+from collections.abc import Mapping, Collection
 
 import numpy as np
 from numpy import typing as npt
@@ -57,25 +57,33 @@ class LazyFile[O, I](LazyObj[O, I]):
         self.path: Path = path
 
 
-class LazyIterable[I: Iterable, L: LazyFile](LazyObj[type[I][L], type[I][L]], Iterable):
+class LazyCollection[C: Collection, L: LazyFile](
+    LazyObj[type[C][L], type[C][L]], Collection
+):
     meta_keys: "ClassVar[set[str]]" = LazyObj.meta_keys.union({
         "iter",
         "elem",
         "paths",
     })
-    iter: type[I]
+    iter: type[C]
     elem: type[L]
 
-    def __init__(self: "Self", paths: "Iterable[Path]") -> None:
+    def __init__(self: "Self", paths: "Collection[Path]") -> None:
         super().__init__()
-        self.paths: Iterable[Path] = paths
-        self._obj: I[L] = self.iter(self.elem(p) for p in self.paths)
+        self.paths: Collection[Path] = paths
+        self._obj: C[L] = self.iter(self.elem(p) for p in self.paths)
 
     def __getitem__(self: "Self", key: int):
         return self._obj[key]
 
     def __setitem__(self: "Self", key: int, val: L) -> None:
         self._obj[key] = val
+
+    def __len__(self: "Self") -> int:
+        return self._obj.__len__()
+
+    def __contains__(self: "Self") -> bool:
+        return self._obj.__contains__()
 
     def __iter__(self: "Self"):
         return self._obj.__iter__()
@@ -93,15 +101,15 @@ class LazyIterable[I: Iterable, L: LazyFile](LazyObj[type[I][L], type[I][L]], It
             elem.clear()
 
 
-class LazyList[L: LazyFile](LazyIterable[list, L]):
+class LazyList[L: LazyFile](LazyCollection[list, L]):
     iter = list
 
 
-class LazySet[L: LazyFile](LazyIterable[set, L]):
+class LazySet[L: LazyFile](LazyCollection[set, L]):
     iter = set
 
 
-class LazyTuple[L: LazyFile](LazyIterable[tuple, L]):
+class LazyTuple[L: LazyFile](LazyCollection[tuple, L]):
     iter = tuple
 
 

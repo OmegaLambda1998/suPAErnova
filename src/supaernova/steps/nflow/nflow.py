@@ -4,7 +4,6 @@ import importlib
 import numpy as np
 
 from supaernova.steps.models import Model, ModelStep
-from supaernova.configs.steps.data import SNPAEData
 from supaernova.configs.steps.nflow import (
     NFlowConfig,
     NFlowStepConfig,
@@ -22,7 +21,7 @@ if TYPE_CHECKING:
 
     from supaernova.steps.pae import PAEModel
     from supaernova.configs.steps.pae import PAEStepResult
-    from supaernova.configs.steps.data import DataStepResult
+    from supaernova.configs.steps.data import LazySNPAEData, DataStepResult
 
     from .tf import TFNFlowModel
 
@@ -36,53 +35,107 @@ class NFlow(ModelStep[NFlowConfig]):
     def __init__(self: Self, config: "NFlowConfig") -> None:
         super().__init__(config)
 
-        # === Previous Step Variables ===
-        self.kfold = self.options.kfold
-        self.pae: PAEModel
-
-        self.data: SNPAEData
-        self.mask: npt.NDArray[bool]
-        self.sn_mask: npt.NDArray[bool]
-        self.spec_mask: npt.NDArray[bool]
-        self.wl_mask: npt.NDArray[bool]
-
-        self.train_data: SNPAEData
-        self.train_mask: npt.NDArray[bool]
-        self.train_sn_mask: npt.NDArray[bool]
-        self.train_spec_mask: npt.NDArray[bool]
-        self.train_wl_mask: npt.NDArray[bool]
-
-        self.test_data: SNPAEData
-        self.test_mask: npt.NDArray[bool]
-        self.test_sn_mask: npt.NDArray[bool]
-        self.test_spec_mask: npt.NDArray[bool]
-        self.test_wl_mask: npt.NDArray[bool]
-
-        self.val_data: SNPAEData
-        self.val_mask: npt.NDArray[bool]
-        self.val_sn_mask: npt.NDArray[bool]
-        self.val_spec_mask: npt.NDArray[bool]
-        self.val_wl_mask: npt.NDArray[bool]
-
         # === Config Variables ===
         # --- Required ---
-        self.physical_latents: bool = self.options.physical_latents
         self.validation_frac: float = self.options.validation_frac
-        self.batch_size: int
         # --- Optional ---
         self.debug: bool = self.options.debug
         self.profile: bool = self.options.profile
+        self.kfold = self.options.kfold
         self.save_best: bool = self.options.save_best
         self.patience: float = self.options.patience
         self.lr: float = self.options.lr
         self.lr_decay_steps: float = self.options.lr_decay_steps
         self.lr_decay_rate: float = self.options.lr_decay_rate
-        self.lr_weight_decay_rate: float = self.options.lr_weight_decay_rate
+        self.lr_weight_decay_rate: float | None = self.options.lr_weight_decay_rate
+        self.repeats: int = self.options.repeats
         self.epochs: int = self.options.epochs
         self.batch_normalisation: bool = self.options.batch_normalisation
         self.n_hidden_units: int = self.options.n_hidden_units
         self.n_layers: int = self.options.n_layers
 
+        # === Setup Variables ===
+        self.setup_attributes: set[str] = {
+            "pae",
+            "data",
+            "mask",
+            "sn_mask",
+            "spec_mask",
+            "wl_mask",
+            "train_data",
+            "train_mask",
+            "train_sn_mask",
+            "train_spec_mask",
+            "train_wl_mask",
+            "test_data",
+            "test_mask",
+            "test_sn_mask",
+            "test_spec_mask",
+            "test_wl_mask",
+            "val_data",
+            "val_mask",
+            "val_sn_mask",
+            "val_spec_mask",
+            "val_wl_mask",
+            "min_redshift",
+            "max_redshift",
+            "min_train_redshift",
+            "max_train_redshift",
+            "min_test_redshift",
+            "max_test_redshift",
+            "min_val_redshift",
+            "max_val_redshift",
+            "min_phase",
+            "max_phase",
+            "min_train_phase",
+            "max_train_phase",
+            "min_test_phase",
+            "max_test_phase",
+            "min_val_phase",
+            "max_val_phase",
+            "min_wavelength",
+            "max_wavelength",
+            "min_train_wavelength",
+            "max_train_wavelength",
+            "min_test_wavelength",
+            "max_test_wavelength",
+            "min_val_wavelength",
+            "max_val_wavelength",
+            "batch_size",
+            "sn_dim",
+            "spec_dim",
+            "wl_dim",
+            "model",
+        }
+
+        # --- Previous Step Variables ---
+        self.pae: PAEModel
+
+        self.data: LazySNPAEData
+        self.mask: npt.NDArray[bool]
+        self.sn_mask: npt.NDArray[bool]
+        self.spec_mask: npt.NDArray[bool]
+        self.wl_mask: npt.NDArray[bool]
+
+        self.train_data: LazySNPAEData
+        self.train_mask: npt.NDArray[bool]
+        self.train_sn_mask: npt.NDArray[bool]
+        self.train_spec_mask: npt.NDArray[bool]
+        self.train_wl_mask: npt.NDArray[bool]
+
+        self.test_data: LazySNPAEData
+        self.test_mask: npt.NDArray[bool]
+        self.test_sn_mask: npt.NDArray[bool]
+        self.test_spec_mask: npt.NDArray[bool]
+        self.test_wl_mask: npt.NDArray[bool]
+
+        self.val_data: LazySNPAEData
+        self.val_mask: npt.NDArray[bool]
+        self.val_sn_mask: npt.NDArray[bool]
+        self.val_spec_mask: npt.NDArray[bool]
+        self.val_wl_mask: npt.NDArray[bool]
+
+        # --- Bounds ---
         self.min_redshift: float
         self.max_redshift: float
         self.min_train_redshift: float
@@ -110,22 +163,30 @@ class NFlow(ModelStep[NFlowConfig]):
         self.min_val_wavelength: float
         self.max_val_wavelength: float
 
-        # === Setup Variables ===
-        self.model: NFlowModel
-        self.savepath: Path
+        self.batch_size: int
 
         # Data Dimensions
         self.sn_dim: int
         self.spec_dim: int
         self.wl_dim: int
 
-        # === Run Variables ===
+        self.model: NFlowModel
+
+        # === Run / Save / Load Variables ===
+        self._run_flag: bool
+        self.run_attributes: set[str] = {"_run_flag"}
+        self.save_attributes: set[str] = self.run_attributes
+        self.load_attributes: set[str] = self.save_attributes
 
         # === Result Variables ===
         self.results: NFlowStepResult
 
         # === Analysis Variables ===
         self.analysis: NFlowStepAnalysis = self.options.analysis or NFlowStepAnalysis()
+
+    @override
+    def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        return self.has_attributes(self.setup_attributes)
 
     @override
     def _setup(
@@ -136,7 +197,7 @@ class NFlow(ModelStep[NFlowConfig]):
         **kwargs: Any,
     ) -> None:
         super()._setup()
-        # === Previous Step Variables ===
+        # --- Previous Step Variables ---
         self.data = data.data
         self.pae = pae.model
         self.train_data = data.train_data[self.kfold % len(data.train_data)]
@@ -144,18 +205,17 @@ class NFlow(ModelStep[NFlowConfig]):
         self.val_data = self.test_data
         if self.validation_frac > 0:
             ind_split = int(data.sn_dim * self.validation_frac)
-            self.val_data = SNPAEData.model_validate({
+            self.val_data.model_validate({
                 k: v[-ind_split:] for k, v in self.train_data.model_dump().items()
             })
-            self.train_data = SNPAEData.model_validate({
+            self.train_data.model_validate({
                 k: v[:-ind_split] for k, v in self.train_data.model_dump().items()
             })
 
-        self.batch_size = max(
-            int(data.train_frac * data.sn_dim / self.options.n_batches),
-            1,
-        )
+        n_batches = self.options.n_batches
+        self.batch_size = max(int(data.train_frac * data.sn_dim / n_batches), 1)
 
+        # --- Bounds ---
         self.min_redshift = self.options.min_redshift or max(
             pae.min_redshift, data.min_redshift
         )
@@ -206,32 +266,54 @@ class NFlow(ModelStep[NFlowConfig]):
         self.spec_dim = data.spec_dim
         self.wl_dim = data.wl_dim
 
-        self.is_setup = True
+    @override
+    def _has_run(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        return self.has_attributes(self.run_attributes)
 
     @override
-    def _completed(self: Self, *args: Any, **kwargs: Any) -> bool:
-        self.savepath = self.paths.results / self.model.name
-        savepath = self.savepath / self.model.ckpt_path
+    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
+        savepath = self.paths.results / self.model.name
+        self.model = self.model.__class__(self)
+        best_model = self.model
+        best_loss = np.inf
+        for i in range(self.repeats):
+            self.model = self.model.__class__(self)
+            history = self.model.train_model(savepath=savepath / str(i))
+            val_loss = history.history["val_loss"][-1]
+            if val_loss < best_loss:
+                best_model = self.model
+                best_loss = val_loss
+        self.model = best_model
+        self.model.save_checkpoint(savepath)
+        self._run_flag = True
 
+    @override
+    def _is_saved(self: Self, *args: Any, **kwargs: Any) -> bool:
+        savepath = self.paths.results / self.model.name / self.model.ckpt_path
         if not (savepath.exists() and any(savepath.iterdir())):
-            self.log.debug(
-                f"{self.name} has not completed as {savepath} does not exist"
-            )
+            self.log.debug(f"{self.name} is not saved as {savepath} does not exist")
             return False
         return True
 
     @override
-    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
-        self.log.debug(f"Loading final NFlow model weights from {self.savepath}")
-        self.model.load_checkpoint(self.savepath)
-
-        self.is_loaded = True
+    def _save(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        savepath = self.paths.results / self.model.name
+        self.model = self.model.__class__(self)
+        self.model.load_checkpoint(savepath)
+        self.log.debug(f"Saving final NFlow model weights to {savepath}")
+        self.model.save_checkpoint(savepath)
 
     @override
-    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
-        self.model.train_model(savepath=self.savepath)
+    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
+        savepath = self.paths.results / self.model.name
+        self.model = self.model.__class__(self)
+        self.log.debug(f"Loading final NFlow model weights from {savepath}")
+        self.model.load_checkpoint(savepath)
+        self._run_flag = True
 
-        self.is_loaded = True
+    @override
+    def _has_results(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        return self.has_attributes(["results"])
 
     @override
     def _result(self: Self, *args: Any, **kwargs: Any) -> None:
@@ -243,14 +325,18 @@ class NFlow(ModelStep[NFlowConfig]):
         nflow_results["min_wavelength"] = self.min_wavelength
         nflow_results["max_wavelength"] = self.max_wavelength
 
-        self.log.debug(f"Saving final NFlow model weights to {self.savepath}")
-        self.model.save_checkpoint(self.savepath)
+        self._load(*args, **kwargs)
 
         nflow_results["model"] = self.model
 
         dt_results: dict[str, NFlowStepResult] = {}
         for dt in ["train_", "test_"]:
             data = getattr(self, f"{dt}data")
+            input_ind = data.ind
+            input_sn_name = data.sn_name
+            input_spectra_id = data.spectra_id
+            data.clear()
+
             mask = getattr(self.model, f"{dt}mask")
             z_latents = getattr(self.model, f"{dt}latents")
 
@@ -261,9 +347,9 @@ class NFlow(ModelStep[NFlowConfig]):
             u_to_z_latents = self.model.u_to_z(u_latents)
 
             model_results = {
-                "ind": data.ind,
-                "sn_name": data.sn_name,
-                "spectra_id": data.spectra_id,
+                "ind": input_ind,
+                "sn_name": input_sn_name,
+                "spectra_id": input_spectra_id,
                 "z_latents": z_latents.numpy(),
                 "u_latents": u_latents.numpy(),
                 "u_to_z_latents": u_to_z_latents.numpy(),
@@ -275,7 +361,92 @@ class NFlow(ModelStep[NFlowConfig]):
         nflow_results["models"] = dt_results
         self.results = NFlowStepResult.model_validate(nflow_results)
 
-        self.has_results = True
+    @override
+    def _was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        for dt in ["train_", "test_"]:
+            if self.analysis.plot_u_latents is not None:
+                if not isinstance(self.analysis.plot_u_latents, list):
+                    self.analysis.plot_u_latents = [self.analysis.plot_u_latents]
+                for opts in self.analysis.plot_u_latents:
+                    name = "u_latents" if opts.name is None else opts.name
+                    savepath = (
+                        self.paths.plots
+                        / dt[:-1]
+                        / str(self.model.seed)
+                        / f"{name}.{opts.ext}"
+                        if opts.savepath is None
+                        else opts.savepath
+                    )
+                    if not savepath.exists():
+                        self.log.debug(
+                            f"{self.name} is missing analyses as {savepath} does not exist"
+                        )
+                        return False
+
+            if self.analysis.plot_z_latents is not None:
+                if not isinstance(self.analysis.plot_z_latents, list):
+                    self.analysis.plot_z_latents = [self.analysis.plot_z_latents]
+                for opts in self.analysis.plot_z_latents:
+                    name = "z_latents" if opts.name is None else opts.name
+                    savepath = (
+                        self.paths.plots
+                        / dt[:-1]
+                        / str(self.model.seed)
+                        / f"{name}.{opts.ext}"
+                        if opts.savepath is None
+                        else opts.savepath
+                    )
+                    if not savepath.exists():
+                        self.log.debug(
+                            f"{self.name} is missing analyses as {savepath} does not exist"
+                        )
+                        return False
+
+            if self.analysis.plot_latents is not None:
+                if not isinstance(self.analysis.plot_latents, list):
+                    self.analysis.plot_latents = [self.analysis.plot_latents]
+                for opts in self.analysis.plot_latents:
+                    name = "latents" if opts.name is None else opts.name
+                    savepath = (
+                        self.paths.plots
+                        / dt[:-1]
+                        / str(self.model.seed)
+                        / f"{name}.{opts.ext}"
+                        if opts.savepath is None
+                        else opts.savepath
+                    )
+                    if not savepath.exists():
+                        self.log.debug(
+                            f"{self.name} is missing analyses as {savepath} does not exist"
+                        )
+                        return False
+
+            if self.analysis.plot_latent_steps is not None:
+                if not isinstance(self.analysis.plot_latent_steps, list):
+                    self.analysis.plot_latent_steps = [self.analysis.plot_latent_steps]
+                for opts in self.analysis.plot_latent_steps:
+                    num_steps = len(self.model.flow.bijector.bijectors) + 1
+                    for step in range(num_steps):
+                        name = (
+                            f"step_{step}_latent_steps"
+                            if opts.name is None
+                            else opts.name
+                        )
+                        savepath = (
+                            self.paths.plots
+                            / dt[:-1]
+                            / str(self.model.seed)
+                            / "steps"
+                            / f"{name}.{opts.ext}"
+                            if opts.savepath is None
+                            else opts.savepath
+                        )
+                        if not savepath.exists():
+                            self.log.debug(
+                                f"{self.name} is missing analyses as {savepath} does not exist"
+                            )
+                            return False
+        return True
 
     @override
     def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:
@@ -328,8 +499,8 @@ class NFlow(ModelStep[NFlowConfig]):
                         statistics="max_central",
                         shade_alpha=0.0,
                         plot_cloud={"u_latents": True},
-                        smooth={"u_latents": 0},
-                        bins={"u_latents": u_latents.shape[0]},
+                        # smooth={"u_latents": 0},
+                        bins={"u_latents": int(np.sqrt(u_latents.shape[0]))},
                     )
 
             if self.analysis.plot_z_latents is not None:
@@ -384,9 +555,9 @@ class NFlow(ModelStep[NFlowConfig]):
                         statistics="max_central",
                         shade_alpha=0.0,
                         plot_cloud=True,
-                        smooth={"u_latents": 0, "z_latents": 0},
+                        smooth={"z_latents": 0},
                         bins={
-                            "u_latents": u_latents.shape[0],
+                            "u_latents": int(np.sqrt(u_latents.shape[0])),
                             "z_latents": z_latents.shape[0],
                         },
                     )
@@ -435,53 +606,39 @@ class NFlow(ModelStep[NFlowConfig]):
                             statistics="max_central",
                             shade_alpha=0.0,
                             plot_cloud={f"step_{step}_latents": True},
-                            smooth={
-                                f"step_{step}_latents": 0,
-                            },
+                            # smooth={
+                            #     f"step_{step}_latents": 0,
+                            # },
                             bins={
-                                f"step_{step}_latents": step_latents.shape[0],
+                                f"step_{step}_latents": int(
+                                    np.sqrt(step_latents.shape[0])
+                                ),
                             },
                         )
-
-        self.was_analysed = True
 
     @override
     def _clear(
         self: Self,
         *args: "Any",
         setup: bool = False,
+        run: bool = False,
+        save: bool = False,
         load: bool = False,
         result: bool = False,
         analyse: bool = False,
         **kwargs: "Any",
     ) -> None:
         if setup:
-            self.clear_attributes([
-                "data",
-                "pae",
-                "mask",
-                "sn_mask",
-                "spec_mask",
-                "wl_mask",
-                "train_data",
-                "train_mask",
-                "train_sn_mask",
-                "train_spec_mask",
-                "train_wl_mask",
-                "test_data",
-                "test_mask",
-                "test_sn_mask",
-                "test_spec_mask",
-                "test_wl_mask",
-                "val_data",
-                "val_mask",
-                "val_sn_mask",
-                "val_spec_mask",
-                "val_wl_mask",
-            ])
+            self.clear_attributes(self.setup_attributes)
+
+        if run:
+            self.clear_attributes(self.run_attributes)
+
+        if save:
+            self.clear_attributes(self.save_attributes)
 
         if load:
-            self.clear_attributes("model")
+            self.clear_attributes(self.load_attributes)
 
         if result:
             self.clear_attributes("results")
@@ -492,6 +649,8 @@ class NFlow(ModelStep[NFlowConfig]):
         super()._clear(
             *args,
             setup=setup,
+            run=run,
+            save=save,
             load=load,
             result=result,
             analyse=analyse,
@@ -502,20 +661,24 @@ class NFlow(ModelStep[NFlowConfig]):
 
     def setup_data_masks(self: Self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
-            data: SNPAEData = getattr(self, f"{mask_type}data")
-            mask = data.mask
+            data: LazySNPAEData = getattr(self, f"{mask_type}data")
+            input_redshift = data.redshift
+            input_phase = data.phase
+            input_wavelength = data.wavelength
+            input_mask = data.mask
+            data.clear()
 
             min_redshift: float = getattr(self, f"min_{mask_type}redshift")
             max_redshift: float = getattr(self, f"max_{mask_type}redshift")
             redshift_mask = (
-                (data.redshift >= min_redshift) & (data.redshift <= max_redshift)
+                (input_redshift >= min_redshift) & (input_redshift <= max_redshift)
             )[:, 0:1, 0:1]
             # Mask out SNe outside the redshift range
             sn_mask = redshift_mask.astype(np.int32)
 
             min_phase: float = getattr(self, f"min_{mask_type}phase")
             max_phase: float = getattr(self, f"max_{mask_type}phase")
-            phase_mask = ((data.phase >= min_phase) & (data.phase <= max_phase))[
+            phase_mask = ((input_phase >= min_phase) & (input_phase <= max_phase))[
                 ..., 0:1
             ]
             # Mask out spectra outside the phase range
@@ -523,13 +686,13 @@ class NFlow(ModelStep[NFlowConfig]):
 
             min_wavelength: float = getattr(self, f"min_{mask_type}wavelength")
             max_wavelength: float = getattr(self, f"max_{mask_type}wavelength")
-            wavelength_mask = (data.wavelength >= min_wavelength) & (
-                data.wavelength <= max_wavelength
+            wavelength_mask = (input_wavelength >= min_wavelength) & (
+                input_wavelength <= max_wavelength
             )
             # Mask out wavelengths outside the wavelength range
             wl_mask = wavelength_mask.astype(np.int32)
 
-            setattr(self, f"{mask_type}mask", mask)
+            setattr(self, f"{mask_type}mask", input_mask)
             setattr(self, f"{mask_type}sn_mask", sn_mask)
             setattr(self, f"{mask_type}spec_mask", spec_mask)
             setattr(self, f"{mask_type}wl_mask", wl_mask)

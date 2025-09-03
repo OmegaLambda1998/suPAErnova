@@ -18,7 +18,7 @@ from pydantic import (
 
 from supaernova.configs.base import BaseConfig
 from supaernova.analysis.spectra import ComparisonPlot
-from supaernova.configs.steps.data import SNPAEData, DataStepConfig
+from supaernova.configs.steps.data import LazySNPAEData, DataStepConfig
 from supaernova.configs.steps.steps import StepResult, StepAnalysis
 from supaernova.configs.steps.models import ModelConfig, BackendConfig
 from supaernova.analysis.distribution import DistributionPlot
@@ -42,25 +42,25 @@ class PAEStage(BaseConfig):
     learning_rate_decay_rate: PositiveFloat
     learning_rate_weight_decay_rate: PositiveFloat
 
-    data: SNPAEData
+    data: LazySNPAEData
     mask: npt.NDArray[bool]
     sn_mask: npt.NDArray[bool]
     spec_mask: npt.NDArray[bool]
     wl_mask: npt.NDArray[bool]
 
-    train_data: SNPAEData
+    train_data: LazySNPAEData
     train_mask: npt.NDArray[bool]
     train_sn_mask: npt.NDArray[bool]
     train_spec_mask: npt.NDArray[bool]
     train_wl_mask: npt.NDArray[bool]
 
-    test_data: SNPAEData
+    test_data: LazySNPAEData
     test_mask: npt.NDArray[bool]
     test_sn_mask: npt.NDArray[bool]
     test_spec_mask: npt.NDArray[bool]
     test_wl_mask: npt.NDArray[bool]
 
-    val_data: SNPAEData
+    val_data: LazySNPAEData
     val_mask: npt.NDArray[bool]
     val_sn_mask: npt.NDArray[bool]
     val_spec_mask: npt.NDArray[bool]
