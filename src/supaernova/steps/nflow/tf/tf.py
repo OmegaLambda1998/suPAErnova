@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from supaernova.steps.pae import TFPAEModel
     from supaernova.steps.nflow import NFlow
-    from supaernova.configs.steps.data import SNPAEData
+    from supaernova.configs.steps.data import LazySNPAEData
     from supaernova.typing.backends.tf import Loss, LearningRateSchedule
     from supaernova.configs.steps.nflow.tf import TFNFlowConfig
 
@@ -54,7 +54,7 @@ class TFNFlowModel(ks.Model):
         self.wl_dim = config.wl_dim
 
         self.latents: tf.Tensor
-        self.data: SNPAEData = config.data
+        self.data: LazySNPAEData = config.data
         self.data_mask: npt.NDArray[bool] = config.mask
         self.sn_mask: npt.NDArray[bool] = config.sn_mask
         self.spec_mask: npt.NDArray[bool] = config.spec_mask
@@ -77,7 +77,7 @@ class TFNFlowModel(ks.Model):
         self.mask = tf.cast(mask_sn, tf.float32)
 
         self.train_latents: tf.Tensor
-        self.train_data: SNPAEData = config.train_data
+        self.train_data: LazySNPAEData = config.train_data
         self.train_data_mask: npt.NDArray[bool] = config.train_mask
         self.train_sn_mask: npt.NDArray[bool] = config.train_sn_mask
         self.train_spec_mask: npt.NDArray[bool] = config.train_spec_mask
@@ -105,7 +105,7 @@ class TFNFlowModel(ks.Model):
         self.train_mask = tf.cast(train_mask_sn, tf.float32)
 
         self.test_latents: tf.Tensor
-        self.test_data: SNPAEData = config.test_data
+        self.test_data: LazySNPAEData = config.test_data
         self.test_data_mask: npt.NDArray[bool] = config.test_mask
         self.test_sn_mask: npt.NDArray[bool] = config.test_sn_mask
         self.test_spec_mask: npt.NDArray[bool] = config.test_spec_mask
@@ -133,7 +133,7 @@ class TFNFlowModel(ks.Model):
         self.test_mask = tf.cast(test_mask_sn, tf.float32)
 
         self.val_latents: tf.Tensor
-        self.val_data: SNPAEData = config.val_data
+        self.val_data: LazySNPAEData = config.val_data
         self.val_data_mask: npt.NDArray[bool] = config.val_mask
         self.val_sn_mask: npt.NDArray[bool] = config.val_sn_mask
         self.val_spec_mask: npt.NDArray[bool] = config.val_spec_mask
@@ -441,7 +441,7 @@ class TFNFlowModel(ks.Model):
         )
 
         # === Prep Data ===
-        data = tf.concat(
+        _data = tf.concat(
             (self.latents, self.mask),
             axis=-1,
         )
@@ -451,7 +451,7 @@ class TFNFlowModel(ks.Model):
             axis=-1,
         )
 
-        test_data = tf.concat(
+        _test_data = tf.concat(
             (self.test_latents, self.test_mask),
             axis=-1,
         )
@@ -477,9 +477,10 @@ class TFNFlowModel(ks.Model):
 
     def _get_latents(self: "Self") -> None:
         for dt in ["train_", "test_", "val_", ""]:
-            data: SNPAEData = getattr(self, f"{dt}data")
+            data: LazySNPAEData = getattr(self, f"{dt}data")
             phase = tf.convert_to_tensor(data.time, dtype=tf.float32)
             amplitude = tf.convert_to_tensor(data.amplitude, dtype=tf.float32)
+            data.clear()
             data_mask = tf.convert_to_tensor(
                 getattr(self, f"{dt}data_mask"), dtype=tf.int32
             )

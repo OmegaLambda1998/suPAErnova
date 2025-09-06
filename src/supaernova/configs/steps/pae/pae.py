@@ -11,17 +11,24 @@ from pydantic import (
     Field,
     PositiveInt,
     PositiveFloat,
+    AfterValidator,
     NonNegativeFloat,
     field_validator,
     model_validator,
 )
 
+from supaernova.utils.lazy import LazyObj, LazyLambda
 from supaernova.configs.base import BaseConfig
 from supaernova.analysis.spectra import ComparisonPlot
 from supaernova.configs.steps.data import LazySNPAEData, DataStepConfig
 from supaernova.configs.steps.steps import StepResult, StepAnalysis
 from supaernova.configs.steps.models import ModelConfig, BackendConfig
 from supaernova.analysis.distribution import DistributionPlot
+
+
+def clear(value: LazyObj) -> LazyObj:
+    value.clear()
+    return value
 
 
 class PAEStage(BaseConfig):
@@ -42,25 +49,25 @@ class PAEStage(BaseConfig):
     learning_rate_decay_rate: PositiveFloat
     learning_rate_weight_decay_rate: PositiveFloat
 
-    data: LazySNPAEData
+    data: Annotated[LazySNPAEData, AfterValidator(clear)]
     mask: npt.NDArray[bool]
     sn_mask: npt.NDArray[bool]
     spec_mask: npt.NDArray[bool]
     wl_mask: npt.NDArray[bool]
 
-    train_data: LazySNPAEData
+    train_data: Annotated[LazySNPAEData, AfterValidator(clear)]
     train_mask: npt.NDArray[bool]
     train_sn_mask: npt.NDArray[bool]
     train_spec_mask: npt.NDArray[bool]
     train_wl_mask: npt.NDArray[bool]
 
-    test_data: LazySNPAEData
+    test_data: Annotated[LazySNPAEData, AfterValidator(clear)]
     test_mask: npt.NDArray[bool]
     test_sn_mask: npt.NDArray[bool]
     test_spec_mask: npt.NDArray[bool]
     test_wl_mask: npt.NDArray[bool]
 
-    val_data: LazySNPAEData
+    val_data: Annotated[LazySNPAEData, AfterValidator(clear)]
     val_mask: npt.NDArray[bool]
     val_sn_mask: npt.NDArray[bool]
     val_spec_mask: npt.NDArray[bool]
@@ -116,13 +123,17 @@ class PAEStageResult(StepResult):
     # === Static Methods ===
 
 
+class LazyPAEStageResult(LazyLambda[PAEStageResult, PAEStageResult]):
+    pass
+
+
 class PAEStepResult(StepResult):
     # === Class Variables ===
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
     model: Any
-    stages: dict[str, dict[str, PAEStageResult]]
+    stages: dict[str, dict[str, Annotated[LazyPAEStageResult, AfterValidator(clear)]]]
     min_redshift: float
     max_redshift: float
     min_phase: float
@@ -220,34 +231,39 @@ class PAEConfig(BackendConfig):
     loss_decorrelate_all: bool = True
     loss_decorrelate_dust: bool = True
     loss_clip_delta: PositiveFloat = 25
-    delta_av_epochs: PositiveInt = 2000
-    delta_av_patience: PositiveFloat | PositiveInt = 0.35
+
+    delta_av_epochs: PositiveInt = 1000
+    delta_av_patience: PositiveFloat | PositiveInt = 0.5  # Run for 50%
     delta_av_lr: PositiveFloat = 0.005
-    delta_av_lr_decay_steps: PositiveInt = 300
+    delta_av_lr_decay_steps: PositiveInt | PositiveFloat = 300
     delta_av_lr_decay_rate: PositiveFloat = 0.95
     delta_av_lr_weight_decay_rate: PositiveFloat = 0.0001
-    zs_epochs: PositiveInt = 2000
-    zs_patience: PositiveFloat | PositiveInt = 0.30
+
+    zs_epochs: PositiveInt = 1000
+    zs_patience: PositiveFloat | PositiveInt = 0.5  # Run for 50%
     zs_lr: PositiveFloat = 0.005
-    zs_lr_decay_steps: PositiveInt = 300
+    zs_lr_decay_steps: PositiveInt | PositiveFloat = 300
     zs_lr_decay_rate: PositiveFloat = 0.95
     zs_lr_weight_decay_rate: PositiveFloat = 0.0001
+
     delta_m_epochs: PositiveInt = 5000
-    delta_m_patience: PositiveFloat | PositiveInt = 0.25
+    delta_m_patience: PositiveFloat | PositiveInt = 0.5  # Run for 50%
     delta_m_lr: PositiveFloat = 0.005
-    delta_m_lr_decay_steps: PositiveInt = 300
+    delta_m_lr_decay_steps: PositiveInt | PositiveFloat = 300
     delta_m_lr_decay_rate: PositiveFloat = 0.95
     delta_m_lr_weight_decay_rate: PositiveFloat = 0.0001
+
     delta_p_epochs: PositiveInt = 5000
-    delta_p_patience: PositiveFloat | PositiveInt = 0.2
+    delta_p_patience: PositiveFloat | PositiveInt = 0.5  # Run for 50%
     delta_p_lr: PositiveFloat = 0.001
-    delta_p_lr_decay_steps: PositiveInt = 300
+    delta_p_lr_decay_steps: PositiveInt | PositiveFloat = 300
     delta_p_lr_decay_rate: PositiveFloat = 0.95
     delta_p_lr_weight_decay_rate: PositiveFloat = 0.0001
+
     final_epochs: PositiveFloat = 5000
-    final_patience: PositiveFloat | PositiveInt = 1.0
+    final_patience: PositiveFloat | PositiveInt = 0.5  # Run for 50%
     final_lr: PositiveFloat = 0.001
-    final_lr_decay_steps: PositiveInt = 300
+    final_lr_decay_steps: PositiveInt | PositiveFloat = 300
     final_lr_decay_rate: PositiveFloat = 0.95
     final_lr_weight_decay_rate: PositiveFloat = 0.0001
 

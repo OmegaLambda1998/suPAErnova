@@ -57,41 +57,6 @@ class Model[C: ModelConfig, S: ModelStep](Variant[C, S]):
         super()._setup(*args, **kwargs)
         self._model(*args, **kwargs)
 
-    @override
-    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
-        self._model(*args, **kwargs)
-        super()._run(*args, **kwargs)
-
-    @override
-    def _save(self: Self, *args: Any, **kwargs: Any) -> None:
-        self._model(*args, **kwargs)
-        super()._save(*args, **kwargs)
-
-    @override
-    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
-        self._model(*args, **kwargs)
-        super()._load(*args, **kwargs)
-
-    @override
-    def _result(self: Self, *args: Any, **kwargs: Any) -> None:
-        self._model(*args, **kwargs)
-        super()._result(*args, **kwargs)
-
-    @override
-    def _analyse(
-        self: Self,
-        *args: "Any",
-        variants: str | list[str] | None = None,
-        **kwargs: "Any",
-    ) -> None:
-        if variants is None:
-            return
-        if not isinstance(variants, list):
-            variants = [variants]
-        for name in variants:
-            self._model(*args, **{**kwargs, "variants": [name]})
-            super()._analyse(*args, **{**kwargs, "variants": [name]})
-
     def _model(
         self: Self,
         *args: Any,

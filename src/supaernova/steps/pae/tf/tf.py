@@ -1,5 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 
+import os
 from typing import (
     TYPE_CHECKING,
     Self,
@@ -33,6 +34,8 @@ if TYPE_CHECKING:
     from supaernova.configs.steps.pae.tf import TFPAEConfig
 
     type StageNum = int
+
+NPROC = os.cpu_count()
 
 
 @ks.utils.register_keras_serializable("SuPAErnova")
@@ -803,14 +806,17 @@ class TFPAEModel(ks.Model):
         # --- Masks ---
         # Data Mask
         input_mask = tf.ones_like(input_amp, dtype=tf.int32) if mask is None else mask
+
         # Wavelength Range Mask
         input_wl_mask = tf.ones_like(input_mask) if wl_mask is None else wl_mask
+
         # Phase Range Mask
         input_spec_mask = (
             tf.reduce_max(input_wl_mask, axis=-1, keepdims=True)
             if spec_mask is None
             else spec_mask
         )
+
         # Redshift Range Mask
         input_sn_mask = (
             tf.reduce_max(input_spec_mask, axis=-2, keepdims=True)
@@ -930,7 +936,7 @@ class TFPAEModel(ks.Model):
             loss_terms[self.delta_loss_tracker.name] = physical_latents_penalty
 
         if self.loss_covariance_penalty > 0:
-            eps = tf.constant(1e-3)
+            eps = tf.constant(1e-10)
             mask_latents = tf.cast(mask_sn, tf.float32)
             n_unmasked_latents = tf.cast(
                 # tf.math.maximum(
@@ -1172,7 +1178,7 @@ class TFPAEModel(ks.Model):
             patience = int(self.stage.epochs * patience)
         callbacks.append(
             ks.callbacks.EarlyStopping(
-                monitor="val_loss",
+                monitor="val_loss_pred",
                 patience=patience,
                 mode="min",
                 start_from_epoch=patience,
@@ -1560,6 +1566,7 @@ class TFPAEModel(ks.Model):
             shuffled_inds = tf.map_fn(
                 shuffle_and_pad,
                 n_unmasked_spectra_per_sn[:, 0],
+                parallel_iterations=NPROC,
             )
 
             shuffled_mask = tf.cast(

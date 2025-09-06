@@ -55,12 +55,12 @@ class SpectraPlotter(Plotter):
         "npt.NDArray[float]",
         "npt.NDArray[float]",
         "npt.NDArray[float]",
-        "npt.NDArray[int]",
-        "npt.NDArray[int]",
-        "npt.NDArray[int]",
-        "npt.NDArray[int]",
         "npt.NDArray[str]",
         "npt.NDArray[float]",
+        "npt.NDArray[int]",
+        "npt.NDArray[int]",
+        "npt.NDArray[int]",
+        "npt.NDArray[int]",
     ]:
         wl = data.wavelength.copy()
         amplitude = data.amplitude.copy()

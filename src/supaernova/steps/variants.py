@@ -67,8 +67,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         if not isinstance(variants, list):
             variants = [variants]
         return all(
-            self.variants[variant].is_setup(*args, **{**kwargs, "variants": [variant]})
-            for variant in variants
+            self.variants[name].is_setup(*args, **{**kwargs, "variants": [name]})
+            for name in variants
         )
 
     @override
@@ -87,16 +87,14 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             variant_kwargs = {}
             self.variant_required_steps[name] = {}
             for key, val in kwargs.items():
-                k = cast("int | str", variant.options.get(key, 0))
-                n = list(val.results.keys())[k] if isinstance(k, int) else k
-                v = (
-                    list(val.results.values())[k]
-                    if isinstance(k, int)
-                    else val.results[k]
-                )
-                variant_kwargs[key] = v
-                val.clear(*args, **{**kwargs, "variants": [n]})
-                self.variant_required_steps[name][key] = (val, n)
+                k = cast("int | str", variant.options.get(key))
+                if k is not None:
+                    n = list(val.results.keys())[k] if isinstance(k, int) else k
+                    val._setup(*args, **{**kwargs, "variants": [n]})
+                    v = val.results[n]
+                    variant_kwargs[key] = v
+                    val.clear(*args, **{**kwargs, "variants": [n]})
+                    self.variant_required_steps[name][key] = (val, n)
             variant.setup(*args, **variant_kwargs)
 
     @override
@@ -106,9 +104,9 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()
             self.log.info(f"Setting up {self.name}")
-            for variant in variants:
-                if not self._is_setup(*args, **{**kwargs, "variants": [variant]}):
-                    self._setup(*args, **{**kwargs, "variants": [variant]})
+            for name in variants:
+                if not self._is_setup(*args, **{**kwargs, "variants": [name]}):
+                    self._setup(*args, **{**kwargs, "variants": [name]})
             self.log.info(f"Finished setting up {self.name}")
 
     @override
@@ -123,8 +121,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         if not isinstance(variants, list):
             variants = [variants]
         return all(
-            self.variants[variant].has_run(*args, **{**kwargs, "variants": [variant]})
-            for variant in variants
+            self.variants[name].has_run(*args, **{**kwargs, "variants": [name]})
+            for name in variants
         )
 
     @override
@@ -138,8 +136,9 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             return
         if not isinstance(variants, list):
             variants = [variants]
-        for variant in variants:
-            self.variants[variant].run(*args, **kwargs)
+        for name in variants:
+            self._setup(*args, **{**kwargs, "variants": [name]})
+            self.variants[name].run(*args, **kwargs)
 
     @override
     @callback
@@ -148,9 +147,9 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()
             self.log.info(f"Running {self.name}")
-            for variant in variants:
-                if not self._has_run(*args, **{**kwargs, "variants": [variant]}):
-                    self._run(*args, **{**kwargs, "variants": [variant]})
+            for name in variants:
+                if not self._has_run(*args, **{**kwargs, "variants": [name]}):
+                    self._run(*args, **{**kwargs, "variants": [name]})
             self.log.info(f"Finished running {self.name}")
 
     @override
@@ -165,8 +164,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         if not isinstance(variants, list):
             variants = [variants]
         return all(
-            self.variants[variant].is_saved(*args, **{**kwargs, "variants": [variant]})
-            for variant in variants
+            self.variants[name].is_saved(*args, **{**kwargs, "variants": [name]})
+            for name in variants
         )
 
     @override
@@ -180,8 +179,9 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             return
         if not isinstance(variants, list):
             variants = [variants]
-        for variant in variants:
-            self.variants[variant].save(*args, **kwargs)
+        for name in variants:
+            self._run(*args, **{**kwargs, "variants": [name]})
+            self.variants[name].save(*args, **kwargs)
 
     @override
     @callback
@@ -190,9 +190,9 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()
             self.log.info(f"Saving {self.name}")
-            for variant in variants:
-                if not self._is_saved(*args, **{**kwargs, "variants": [variant]}):
-                    self._save(*args, **{**kwargs, "variants": [variant]})
+            for name in variants:
+                if not self._is_saved(*args, **{**kwargs, "variants": [name]}):
+                    self._save(*args, **{**kwargs, "variants": [name]})
             self.log.info(f"Finished saving {self.name}")
 
     @override
@@ -207,8 +207,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         if not isinstance(variants, list):
             variants = [variants]
         return all(
-            self.variants[variant].is_loaded(*args, **{**kwargs, "variants": [variant]})
-            for variant in variants
+            self.variants[name].is_loaded(*args, **{**kwargs, "variants": [name]})
+            for name in variants
         )
 
     @override
@@ -222,8 +222,9 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             return
         if not isinstance(variants, list):
             variants = [variants]
-        for variant in variants:
-            self.variants[variant].load(*args, **kwargs)
+        for name in variants:
+            self._setup(*args, **{**kwargs, "variants": [name]})
+            self.variants[name].load(*args, **kwargs)
 
     @override
     @callback
@@ -233,14 +234,14 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             self.set_seed()
             if self.is_saved(*args, **kwargs):
                 self.log.info(f"Loading {self.name}")
-                for variant in variants:
-                    if not self._is_loaded(*args, **{**kwargs, "variants": [variant]}):
-                        self._load(*args, **{**kwargs, "variants": [variant]})
+                for name in variants:
+                    if not self._is_loaded(*args, **{**kwargs, "variants": [name]}):
+                        self._load(*args, **{**kwargs, "variants": [name]})
                 self.log.info(f"Finished loading {self.name}")
             else:
-                for variant in variants:
-                    if not self._is_saved(*args, **{**kwargs, "variants": [variant]}):
-                        self._save(*args, **{**kwargs, "variants": [variant]})
+                for name in variants:
+                    if not self._is_saved(*args, **{**kwargs, "variants": [name]}):
+                        self._save(*args, **{**kwargs, "variants": [name]})
 
     @override
     def _has_results(
@@ -254,10 +255,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         if not isinstance(variants, list):
             variants = [variants]
         return all(
-            self.variants[variant].has_results(
-                *args, **{**kwargs, "variants": [variant]}
-            )
-            for variant in variants
+            self.variants[name].has_results(*args, **{**kwargs, "variants": [name]})
+            for name in variants
         )
 
     @override
@@ -271,8 +270,9 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             return
         if not isinstance(variants, list):
             variants = [variants]
-        for variant_name in variants:
-            variant = self.variants[variant_name]
+        for name in variants:
+            variant = self.variants[name]
+            self._load(*args, **{**kwargs, "variants": [name]})
             variant.result(*args, **kwargs)
 
     @override
@@ -282,9 +282,9 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()
             self.log.info(f"Gathering {self.name} results")
-            for variant in variants:
-                if not self._has_results(*args, **{**kwargs, "variants": [variant]}):
-                    self._result(*args, **{**kwargs, "variants": [variant]})
+            for name in variants:
+                if not self._has_results(*args, **{**kwargs, "variants": [name]}):
+                    self._result(*args, **{**kwargs, "variants": [name]})
             self.log.info(f"Finished gathering {self.name} results")
 
     @override
@@ -299,10 +299,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         if not isinstance(variants, list):
             variants = [variants]
         return all(
-            self.variants[variant].was_analysed(
-                *args, **{**kwargs, "variants": [variant]}
-            )
-            for variant in variants
+            self.variants[name].was_analysed(*args, **{**kwargs, "variants": [name]})
+            for name in variants
         )
 
     @override
@@ -316,24 +314,24 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             return
         if not isinstance(variants, list):
             variants = [variants]
-        for variant_name in variants:
-            variant = self.variants[variant_name]
+        for name in variants:
+            variant = self.variants[name]
+            self._result(*args, **{**kwargs, "variants": [name]})
             variant.analyse(*args, **kwargs)
 
     @override
     @callback
     def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
-        self.setup(*args, **kwargs)
         if self.force or not self.was_analysed(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()
             self.log.info(f"Analysing {self.name}")
-            for variant_name in variants:
+            for name in variants:
                 if self.force or not self._was_analysed(
-                    *args, **{**kwargs, "variants": [variant_name]}
+                    *args, **{**kwargs, "variants": [name]}
                 ):
-                    self._analyse(*args, **{**kwargs, "variants": [variant_name]})
-                    self._clear(variants=[variant_name])
+                    self._analyse(*args, **{**kwargs, "variants": [name]})
+                    self._clear(variants=[name])
             self.log.info(f"Finished analysing {self.name}")
 
     @override
@@ -353,8 +351,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             return
         if not isinstance(variants, list):
             variants = [variants]
-        for variant_name in variants:
-            variant = self.variants[variant_name]
+        for name in variants:
+            variant = self.variants[name]
             variant.clear(
                 *args,
                 setup=setup,
@@ -393,7 +391,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         variants = kwargs.get("variants", self.variants)
         self.set_seed()
         self.log.info(f"Clearing {self.name}")
-        for variant_name in variants:
+        for name in variants:
             self._clear(
                 *args,
                 setup=setup,
@@ -402,7 +400,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
                 load=load,
                 result=result,
                 analyse=analyse,
-                **{**kwargs, "variants": [variant_name]},
+                **{**kwargs, "variants": [name]},
             )
         self.log.info(f"Finished clearing {self.name}")
 

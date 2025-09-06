@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from numpy import typing as npt
     import pandas as pd
 
-    from supaernova.configs.steps.data import SNPAEData
+    from supaernova.configs.steps.data import LazySNPAEData
     from supaernova.configs.steps.posterior import PosteriorStepResult
 
     from .analysis import Axis, Figure
@@ -25,7 +25,7 @@ class DispersionPlot(SpectraPlot):
 class DispersionPlotter(Plotter):
     @staticmethod
     def plot_dispersion(
-        data: "SNPAEData",
+        data: "LazySNPAEData",
         hmcs: "list[PosteriorStepResult]",
         config: "DispersionPlot",
         *,
@@ -83,10 +83,14 @@ class DispersionPlotter(Plotter):
                 config.savepath or Path()
             ) / f"{config.name}_residual.{config.ext}"
 
+        pae_redshift = data.redshift[:, 0, 0]
+
         (
             _wl,
             _amplitude,
             _sigma,
+            sn_name,
+            _time,
             input_mask,
             _input_sn_mask,
             _input_spec_mask,
@@ -108,7 +112,6 @@ class DispersionPlotter(Plotter):
         # Will mask out any SN with *no* unmasked spectra
         mask_sn = mask_spec.max(axis=-1)
 
-        pae_redshift = data.redshift[:, 0, 0]
         pae_order = np.argsort(pae_redshift)
         pae_redshift = pae_redshift[pae_order]
         pae_redshift_error = (pae_redshift * 3e5 + 300.0) / 3e5
@@ -116,7 +119,7 @@ class DispersionPlotter(Plotter):
 
         pae_mask = mask_sn[pae_order]
 
-        pae_names = data.sn_name[:, 0, 0][pae_order]
+        pae_names = sn_name[:, 0, 0][pae_order]
         pae_amplitudes = np.concatenate(
             [np.mean(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
             axis=0,
@@ -425,6 +428,10 @@ class DispersionPlotter(Plotter):
             y_prime=legacy_y,
             yerr_prime=legacy_yerr,
         )
+        spectra_ax.set_ylim(
+            -1.1 * np.abs((pae_y - pae_yerr)[combined_plot_mask].min()),
+            1.1 * (pae_y + pae_yerr)[combined_plot_mask].max(),
+        )
 
         fig_1.align_ylabels([spectra_ax, pull_ax_1])
         spectra_ax.legend(bbox_to_anchor=(1.0, 1.0), ncols=1 if legacy is None else 2)
@@ -432,6 +439,7 @@ class DispersionPlotter(Plotter):
             (config.plot_kwargs or {}).get("title", config.name.capitalize())
         )
         spectra_ax.set_ylabel("ΔM")
+
         pull_ax_1.set_ylabel("Pull")
         pull_ax_1.set_xlabel("z")
 
@@ -445,6 +453,12 @@ class DispersionPlotter(Plotter):
                 + " vs Legacy"
             )
             residual_ax.set_ylabel("Residual")
+            residual_ax.set_ylim(
+                -1.1
+                * np.abs(((pae_y - legacy_y) - pae_yerr)[combined_plot_mask].min()),
+                1.1 * ((pae_y - legacy_y) + pae_yerr)[combined_plot_mask].max(),
+            )
+
             pull_ax_2.set_ylabel("Pull")
             pull_ax_2.set_xlabel("z")
             fig_2 = Plotter.save(fig_2, legacy_savepath)

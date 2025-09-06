@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from supaernova.steps.pae.tf import TFPAEModel
     from supaernova.steps.nflow.tf import TFNFlowModel
     from supaernova.steps.posterior import TFPosteriorModel
-    from supaernova.configs.steps.data import SNPAEData
+    from supaernova.configs.steps.data import LazySNPAEData
     from supaernova.configs.steps.posterior import PosteriorMAPStage
 
 
@@ -41,7 +41,10 @@ class PosteriorMap(tf.Module):
     ) -> None:
         self.random_initial_positions: bool = config.options.random_initial_positions
         # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
-        self.data: SNPAEData = config.data
+        self.data: LazySNPAEData = config.data
+        self.data_time: npt.NDArray[float] = config.data.time
+        self.data_amplitude: npt.NDArray[float] = config.data.amplitude
+        self.data_sigma: npt.NDArray[float] = config.data.sigma
 
         self.data_mask: npt.NDArray[bool] = config.data_mask
         self.sn_mask: npt.NDArray[bool] = config.sn_mask
@@ -276,7 +279,7 @@ class PosteriorMap(tf.Module):
         elif stage.init_latents[0] == "z":
             if stage.init_latents == "z_data":
                 # Generate z_latents directly from data
-                pae_input = tf.concat((self.data.time, self.data.amplitude), axis=-1)
+                pae_input = tf.concat((self.data_time, self.data_amplitude), axis=-1)
                 z_latents = self.pae(
                     pae_input,
                     training=False,

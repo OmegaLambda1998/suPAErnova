@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from supaernova.steps.pae.tf import TFPAEModel
     from supaernova.steps.nflow.tf import TFNFlowModel
     from supaernova.steps.posterior import Posterior
-    from supaernova.configs.steps.data import SNPAEData
+    from supaernova.configs.steps.data import LazySNPAEData
     from supaernova.typing.backends.tf import Loss, TensorLike
     from supaernova.configs.steps.posterior import PosteriorMAPStage
     from supaernova.configs.steps.posterior.tf import TFPosteriorConfig
@@ -43,6 +43,8 @@ class TFPosteriorModel(ks.Model):
     def __init__(
         self: "Self",
         config: "Posterior",
+        subset: "Literal['train', 'test']",
+        seed: int,
         *args: "Any",
         **kwargs: "Any",
     ) -> None:
@@ -54,14 +56,19 @@ class TFPosteriorModel(ks.Model):
         self.log: Logger = config.log
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
-        self.seed: int = self.options.seed
-        self.subset: Literal["train", "test"] = self.options.subset
+        self.seed: int = seed
+        self.subset: Literal["train", "test"] = subset
         self.step_size = config.step_sizes[self.subset]
 
         self.debug: bool = self.options.debug
         self.profile: bool = self.options.profile
 
-        self.data: SNPAEData = getattr(config, f"{self.subset}_data")
+        self.data: LazySNPAEData = getattr(config, f"{self.subset}_data")
+        self.data_time: npt.NDArray[float] = self.data.time
+        self.data_amplitude: npt.NDArray[float] = self.data.amplitude
+        self.data_sigma: npt.NDArray[float] = self.data.sigma
+        self.data.clear()
+
         self.data_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_mask")
         self.sn_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_sn_mask")
         self.spec_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_spec_mask")
@@ -80,7 +87,7 @@ class TFPosteriorModel(ks.Model):
         self.nflow.trainable = False
         self.nflow.flow.trainable = False
 
-        self.sn_dim, self.spec_dim, self.wl_dim = self.data.amplitude.shape
+        self.sn_dim, self.spec_dim, self.wl_dim = self.data_mask.shape
 
         # MAP Variables
         self.map: PosteriorMap
@@ -100,9 +107,9 @@ class TFPosteriorModel(ks.Model):
 
         self.recon_error, _recon_error_edges, self.recon_error_centers = (
             self.pae.recon_error((
-                tf.convert_to_tensor(self.data.time, dtype=tf.float32),
-                tf.convert_to_tensor(self.data.amplitude, dtype=tf.float32),
-                tf.convert_to_tensor(self.data.sigma, dtype=tf.float32),
+                tf.convert_to_tensor(self.data_time, dtype=tf.float32),
+                tf.convert_to_tensor(self.data_amplitude, dtype=tf.float32),
+                tf.convert_to_tensor(self.data_sigma, dtype=tf.float32),
                 tf.convert_to_tensor(self.data_mask, dtype=tf.int32),
                 tf.convert_to_tensor(self.sn_mask, dtype=tf.int32),
                 tf.convert_to_tensor(self.spec_mask, dtype=tf.int32),
@@ -176,7 +183,6 @@ class TFPosteriorModel(ks.Model):
         self.set_seed()
 
     @override
-    @tf.function
     def call(
         self: "Self",
         inputs: tuple[tf.Tensor, ...],
@@ -315,26 +321,17 @@ class TFPosteriorModel(ks.Model):
             tf.cast(mask_sn, tf.bool), mask_sn, -np.inf * tf.ones_like(mask_sn)
         )
 
-        # tf.print("mask_spec", mask_spec, mask_spec.shape)
-        # tf.print("mask_sn", mask_sn, mask_sn.shape)
-
         log_likelihood = likelihood.log_prob(input_amp) * mask_spec
-        # tf.print("likelihood_orig", log_likelihood, log_likelihood.shape)
 
         log_likelihood_num = tf.reduce_sum(log_likelihood, axis=1)  # * mask_sn
-        # tf.print("likelihood_num", log_likelihood_num, log_likelihood_num.shape)
 
         log_likelihood_sum = tf.reduce_sum(
             tf.cast(tf.math.greater(input_amp[:, :, 0], -1), tf.float32), axis=1
         )
-        # tf.print("likelihood_sum", log_likelihood_sum, log_likelihood_sum.shape)
 
         log_likelihood = log_likelihood_num / log_likelihood_sum
-        # tf.print("likelihood_div", log_likelihood, log_likelihood.shape)
 
         log_likelihood += log_prior
-
-        # tf.print("likelihood_prior", log_likelihood, log_likelihood.shape)
 
         inf_likelihood = -tf.ones_like(log_likelihood) * np.inf
 
@@ -343,8 +340,6 @@ class TFPosteriorModel(ks.Model):
             log_likelihood,
             inf_likelihood,
         )
-
-        # tf.print("likelihood", log_likelihood, log_likelihood.shape)
 
     @override
     def __call__(
@@ -588,7 +583,7 @@ class TFPosteriorModel(ks.Model):
         input_position = self.map.get_position(position)
 
         log_prob = self(
-            (input_position, self.data.time, self.data.amplitude, self.data.sigma),
+            (input_position, self.data_time, self.data_amplitude, self.data_sigma),
             training=False,
             mask=self.data_mask,
             sn_mask=self.sn_mask,
@@ -923,27 +918,18 @@ class TFPosteriorModel(ks.Model):
             axis=0,
         )
 
-        # stds = tf.math.reduce_std(self.map.position.original, axis=0)
-        #
-        # step_size = tf.repeat(
-        #     tf.expand_dims(stds, axis=0),
-        #     repeats=initial_position.shape[0],
-        #     axis=0,
-        # )
-
         progress = tqdm(
             total=self.n_samples + 1,
         )
 
         tf.summary.experimental.set_step(tf.Variable(tf.constant(0, dtype=tf.int64)))
 
-        @tf.function
         def unnormalized_posterior_log_prob(
             *pos: tf.Tensor, results=False
         ) -> tf.Tensor:
             input_position = self.map.get_position(*pos)
             log_prob = self(
-                (input_position, self.data.time, self.data.amplitude, self.data.sigma),
+                (input_position, self.data_time, self.data_amplitude, self.data_sigma),
                 training=False,
                 mask=self.data_mask,
                 sn_mask=self.sn_mask,
@@ -995,7 +981,6 @@ class TFPosteriorModel(ks.Model):
         def update_progress() -> None:
             progress.update()
 
-        @tf.function
         def trace_fn(
             state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
         ) -> tuple[tf.Tensor, tf.Tensor]:

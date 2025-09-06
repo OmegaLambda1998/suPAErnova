@@ -186,7 +186,11 @@ class NFlow(ModelStep[NFlowConfig]):
 
     @override
     def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
-        return self.has_attributes(self.setup_attributes)
+        for attr in self.setup_attributes:
+            if not self.has_attributes([attr]):
+                self.log.debug(f"{self.name} is not setup because {attr} is missing")
+                return False
+        return True
 
     @override
     def _setup(
@@ -372,7 +376,7 @@ class NFlow(ModelStep[NFlowConfig]):
                     savepath = (
                         self.paths.plots
                         / dt[:-1]
-                        / str(self.model.seed)
+                        / str(self.options.seed)
                         / f"{name}.{opts.ext}"
                         if opts.savepath is None
                         else opts.savepath
@@ -425,8 +429,10 @@ class NFlow(ModelStep[NFlowConfig]):
                 if not isinstance(self.analysis.plot_latent_steps, list):
                     self.analysis.plot_latent_steps = [self.analysis.plot_latent_steps]
                 for opts in self.analysis.plot_latent_steps:
-                    num_steps = len(self.model.flow.bijector.bijectors) + 1
+                    num_steps = 2 * self.model.n_layers
                     for step in range(num_steps):
+                        if step != 0 and step % 2 == 0:
+                            continue
                         name = (
                             f"step_{step}_latent_steps"
                             if opts.name is None

@@ -16,6 +16,7 @@ from supaernova.configs.steps.pae import (
     PAEStepResult,
     PAEStageResult,
     PAEStepAnalysis,
+    LazyPAEStageResult,
 )
 from supaernova.analysis.distribution import DistributionPlotter
 
@@ -50,6 +51,30 @@ class PAE(ModelStep[PAEConfig]):
         self.n_z_latents: int = self.options.n_z_latents
         self.n_pae_latents = self.n_physical_latents + self.n_z_latents
         self.kfold: int = self.options.kfold
+
+        self.stage_nums: list[int] = []
+        s = 1
+        if self.seperate_latent_training:
+            if self.physical_latents:
+                self.stage_nums.append(s)
+                s += 1
+            if self.seperate_z_latent_training:
+                for i in range(self.n_z_latents):
+                    s += i
+                    self.stage_nums.append(s)
+            else:
+                s += self.n_z_latents
+                self.stage_nums.append(s - 1)
+            if self.physical_latents:
+                self.stage_nums.append(s)
+                self.stage_nums.append(s + 1)
+        else:
+            self.stage_nums.append(self.n_pae_latents)
+
+        self.model_name: str = self.name.rsplit(maxsplit=1)[-1]
+        self.ckpt_path: str = (
+            f"{'best' if self.options.save_best else 'latest'}.model.checkpoint/"
+        )
 
         # === Setup Variables ===
         self.setup_attributes: set[str] = {
@@ -198,7 +223,11 @@ class PAE(ModelStep[PAEConfig]):
 
     @override
     def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
-        return self.has_attributes(self.setup_attributes)
+        for attr in self.setup_attributes:
+            if not self.has_attributes([attr]):
+                self.log.debug(f"{self.name} is not setup because {attr} is missing")
+                return False
+        return True
 
     @override
     def _setup(self: Self, *args: Any, data: "DataStepResult", **kwargs: Any) -> None:
@@ -290,6 +319,11 @@ class PAE(ModelStep[PAEConfig]):
             "profile": self.profile,
         }
 
+        delta_av_decay_steps = self.options.delta_av_lr_decay_steps
+        if isinstance(delta_av_decay_steps, float):
+            delta_av_decay_steps = int(
+                delta_av_decay_steps * self.options.delta_av_epochs
+            )
         self.stage_delta_av = PAEStage.model_validate({
             "stage": 1,
             "prev_stage": None,
@@ -298,12 +332,15 @@ class PAE(ModelStep[PAEConfig]):
             "epochs": self.options.delta_av_epochs,
             "patience": self.options.delta_av_patience,
             "learning_rate": self.options.delta_av_lr,
-            "learning_rate_decay_steps": self.options.delta_av_lr_decay_steps,
+            "learning_rate_decay_steps": delta_av_decay_steps,
             "learning_rate_decay_rate": self.options.delta_av_lr_decay_rate,
             "learning_rate_weight_decay_rate": self.options.delta_av_lr_weight_decay_rate,
             **stage_data,
         })
 
+        zs_decay_steps = self.options.zs_lr_decay_steps
+        if isinstance(zs_decay_steps, float):
+            zs_decay_steps = int(zs_decay_steps * self.options.zs_epochs)
         z0 = 2 if self.physical_latents else 1
         self.stage_zs = [
             PAEStage.model_validate({
@@ -314,7 +351,7 @@ class PAE(ModelStep[PAEConfig]):
                 "epochs": self.options.zs_epochs,
                 "patience": self.options.zs_patience,
                 "learning_rate": self.options.zs_lr,
-                "learning_rate_decay_steps": self.options.zs_lr_decay_steps,
+                "learning_rate_decay_steps": zs_decay_steps,
                 "learning_rate_decay_rate": self.options.zs_lr_decay_rate,
                 "learning_rate_weight_decay_rate": self.options.zs_lr_weight_decay_rate,
                 **stage_data,
@@ -326,6 +363,9 @@ class PAE(ModelStep[PAEConfig]):
             self.stage_zs[0].prev_stage = 1
             self.stage_zs[0].name = "zs"
 
+        delta_m_decay_steps = self.options.delta_m_lr_decay_steps
+        if isinstance(delta_m_decay_steps, float):
+            delta_m_decay_steps = int(delta_m_decay_steps * self.options.delta_m_epochs)
         self.stage_delta_m = PAEStage.model_validate({
             "stage": z0 + self.n_z_latents,
             "prev_stage": z0 + self.n_z_latents - 1,
@@ -334,12 +374,15 @@ class PAE(ModelStep[PAEConfig]):
             "epochs": self.options.delta_m_epochs,
             "patience": self.options.delta_m_patience,
             "learning_rate": self.options.delta_m_lr,
-            "learning_rate_decay_steps": self.options.delta_m_lr_decay_steps,
+            "learning_rate_decay_steps": delta_m_decay_steps,
             "learning_rate_decay_rate": self.options.delta_m_lr_decay_rate,
             "learning_rate_weight_decay_rate": self.options.delta_m_lr_weight_decay_rate,
             **stage_data,
         })
 
+        delta_p_decay_steps = self.options.delta_p_lr_decay_steps
+        if isinstance(delta_p_decay_steps, float):
+            delta_p_decay_steps = int(delta_p_decay_steps * self.options.delta_p_epochs)
         self.stage_delta_p = PAEStage.model_validate({
             "stage": z0 + self.n_z_latents + 1,
             "prev_stage": z0 + self.n_z_latents,
@@ -348,12 +391,15 @@ class PAE(ModelStep[PAEConfig]):
             "epochs": self.options.delta_p_epochs,
             "patience": self.options.delta_p_patience,
             "learning_rate": self.options.delta_p_lr,
-            "learning_rate_decay_steps": self.options.delta_p_lr_decay_steps,
+            "learning_rate_decay_steps": delta_p_decay_steps,
             "learning_rate_decay_rate": self.options.delta_p_lr_decay_rate,
             "learning_rate_weight_decay_rate": self.options.delta_p_lr_weight_decay_rate,
             **stage_data,
         })
 
+        final_decay_steps = self.options.final_lr_decay_steps
+        if isinstance(final_decay_steps, float):
+            final_decay_steps = int(final_decay_steps * self.options.final_epochs)
         self.stage_final = PAEStage.model_validate({
             "stage": self.n_pae_latents,
             "prev_stage": None,
@@ -362,7 +408,7 @@ class PAE(ModelStep[PAEConfig]):
             "epochs": self.options.final_epochs,
             "patience": self.options.final_patience,
             "learning_rate": self.options.final_lr,
-            "learning_rate_decay_steps": self.options.final_lr_decay_steps,
+            "learning_rate_decay_steps": final_decay_steps,
             "learning_rate_decay_rate": self.options.final_lr_decay_rate,
             "learning_rate_weight_decay_rate": self.options.final_lr_weight_decay_rate,
             **stage_data,
@@ -394,11 +440,11 @@ class PAE(ModelStep[PAEConfig]):
             if savepath is not None:
                 stage.loadpath = savepath
             savepath = (
-                self.paths.results / self.model.name / f"{stage.stage}_{stage.fname}"
+                self.paths.results / self.model_name / f"{stage.stage}_{stage.fname}"
             )
             stage.savepath = savepath
 
-            ckpt_path = savepath / self.model.ckpt_path
+            ckpt_path = savepath / self.ckpt_path
             # Don't retrain stages if you don't need to
             if self.force or not (ckpt_path.exists() and any(ckpt_path.iterdir())):
                 self.model.train_model(stage)
@@ -408,7 +454,7 @@ class PAE(ModelStep[PAEConfig]):
 
     @override
     def _is_saved(self: Self, *args: Any, **kwargs: Any) -> bool:
-        final_savepath = self.paths.results / self.model.name / self.model.ckpt_path
+        final_savepath = self.paths.results / self.model_name / self.ckpt_path
         if not (final_savepath.exists() and any(final_savepath.iterdir())):
             self.log.debug(
                 f"{self.name} is not saved as {final_savepath} does not exist"
@@ -419,13 +465,13 @@ class PAE(ModelStep[PAEConfig]):
     @override
     def _save(self: Self, *args: "Any", **kwargs: "Any") -> None:
         self.model = self.model.__class__(self)
-        final_savepath = self.paths.results / self.model.name
+        final_savepath = self.paths.results / self.model_name
         final_stage = self.run_stages[-1]
         final_stage.prev_stage = None
         self.model.stage = final_stage
         savepath = (
             self.paths.results
-            / self.model.name
+            / self.model_name
             / f"{final_stage.stage}_{final_stage.fname}"
         )
         self.model.load_checkpoint(savepath, reset_weights=False)
@@ -438,7 +484,7 @@ class PAE(ModelStep[PAEConfig]):
         final_stage = self.run_stages[-1]
         final_stage.prev_stage = None
         self.model.stage = final_stage
-        final_loadpath = self.paths.results / self.model.name
+        final_loadpath = self.paths.results / self.model_name
         self.log.debug(f"Loading final PAE model weights from {final_loadpath}")
         self.model.load_checkpoint(final_loadpath, reset_weights=False)
         self._run_flag = True
@@ -462,26 +508,26 @@ class PAE(ModelStep[PAEConfig]):
         pae_results["model"] = self.model
 
         self.log.debug("Calculating PAE results")
-        dt_results: dict[str, dict[str, PAEStageResult]] = {}
-        for dt in ["train_", "test_"]:
-            model_results: dict[str, PAEStageResult] = {}
-            data = getattr(self, f"{dt}data")
-            input_ind = data.ind
-            input_sn_name = data.sn_name
-            input_spectra_id = data.spectra_id
-            input_phase = data.time
-            input_amplitude = data.amplitude
-            input_d_amplitude = data.sigma
-            data.clear()
-            input_mask = getattr(self, f"{dt}mask")
-            input_sn_mask = getattr(self, f"{dt}sn_mask")
-            input_spec_mask = getattr(self, f"{dt}spec_mask")
-            input_wl_mask = getattr(self, f"{dt}wl_mask")
-            for stage in self.run_stages:
+
+        def _stage_results(dt: str, stage: PAEStage) -> "Callable[[], PAEStageResult]":
+            def _wrapped():
+                data = getattr(self, f"{dt}data")
+                input_ind = data.ind
+                input_sn_name = data.sn_name
+                input_spectra_id = data.spectra_id
+                input_phase = data.time
+                input_amplitude = data.amplitude
+                input_d_amplitude = data.sigma
+                data.clear()
+                input_mask = getattr(self, f"{dt}mask")
+                input_sn_mask = getattr(self, f"{dt}sn_mask")
+                input_spec_mask = getattr(self, f"{dt}spec_mask")
+                input_wl_mask = getattr(self, f"{dt}wl_mask")
+
                 self.model = self.model.__class__(self)
                 savepath = (
                     self.paths.results
-                    / self.model.name
+                    / self.model_name
                     / f"{stage.stage}_{stage.fname}"
                 )
                 stage.prev_stage = None
@@ -538,18 +584,30 @@ class PAE(ModelStep[PAEConfig]):
                     "delta_loss": delta_loss,
                     "cov_loss": cov_loss,
                 }
-                stage_results = PAEStageResult.model_validate(results)
-                model_results[str(stage.stage)] = stage_results
+                return PAEStageResult.model_validate(results)
+
+            return _wrapped
+
+        dt_results: dict[str, dict[str, PAEStageResult]] = {}
+        for dt in ["train_", "test_"]:
+            model_results: dict[str, PAEStageResult] = {}
+            for stage in self.run_stages:
+                model_results[str(stage.stage)] = LazyPAEStageResult(
+                    _stage_results(dt, stage)
+                )
             dt_results[dt[:-1]] = model_results
 
         pae_results["stages"] = dt_results
 
         self.results = PAEStepResult.model_validate(pae_results)
+        for dt in self.results.stages.values():
+            for stage_result in dt.values():
+                stage_result.clear()
 
     @override
     def _was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
         for dt in ["train_", "test_"]:
-            for stage in self.run_stages:
+            for stage in self.stage_nums:
                 if self.analysis.plot_comparison is not None:
                     if not isinstance(self.analysis.plot_comparison, list):
                         self.analysis.plot_comparison = [self.analysis.plot_comparison]
@@ -558,8 +616,8 @@ class PAE(ModelStep[PAEConfig]):
                         savepath = (
                             self.paths.plots
                             / dt[:-1]
-                            / str(self.model.seed)
-                            / str(stage.stage)
+                            / str(self.options.seed)
+                            / str(stage)
                             / f"{name}.{opts.ext}"
                             if opts.savepath is None
                             else opts.savepath
@@ -578,8 +636,8 @@ class PAE(ModelStep[PAEConfig]):
                         savepath = (
                             self.paths.plots
                             / dt[:-1]
-                            / str(self.model.seed)
-                            / str(stage.stage)
+                            / str(self.options.seed)
+                            / str(stage)
                             / f"{name}.{opts.ext}"
                             if opts.savepath is None
                             else opts.savepath
@@ -598,7 +656,7 @@ class PAE(ModelStep[PAEConfig]):
                     savepath = (
                         self.paths.plots
                         / dt[:-1]
-                        / str(self.model.seed)
+                        / str(self.options.seed)
                         / f"{name}.{opts.ext}"
                         if opts.savepath is None
                         else opts.savepath
@@ -617,7 +675,7 @@ class PAE(ModelStep[PAEConfig]):
                     savepath = (
                         self.paths.plots
                         / dt[:-1]
-                        / str(self.model.seed)
+                        / str(self.options.seed)
                         / f"{name}.{opts.ext}"
                         if opts.savepath is None
                         else opts.savepath
@@ -646,11 +704,15 @@ class PAE(ModelStep[PAEConfig]):
         for dt in ["train_", "test_"]:
             for stage in self.run_stages:
                 results = self.results.stages[dt[:-1]][str(stage.stage)]
-
                 input_mask = results.input_mask
                 input_sn_mask = results.input_sn_mask
                 input_spec_mask = results.input_spec_mask
                 input_wl_mask = results.input_wl_mask
+                loss = results.loss
+                pred_loss = results.pred_loss
+                output_amp = results.output_amp
+                latents = results.latents
+                results.clear()
 
                 if self.analysis.plot_comparison is not None:
                     if not isinstance(self.analysis.plot_comparison, list):
@@ -670,7 +732,7 @@ class PAE(ModelStep[PAEConfig]):
                         o.savepath.mkdir(parents=True, exist_ok=True)
                         if o.plot_kwargs is None:
                             o.plot_kwargs = {
-                                "label": f"{dt}{self.name}_{stage.name}\n({results.loss:.2E})",
+                                "label": f"{dt}{self.name}_{stage.name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})",
                                 "title": f"{dt}{self.name}_{stage.name} {o.name}",
                             }
 
@@ -698,7 +760,7 @@ class PAE(ModelStep[PAEConfig]):
                         o.base_sigma = sigma
                         o.base_mask = np.logical_not(mask)
 
-                        data.amplitude = results.output_amp
+                        data.amplitude = output_amp
                         data.sigma *= 0
 
                         SpectraPlotter.plot_comparison(
@@ -765,7 +827,7 @@ class PAE(ModelStep[PAEConfig]):
                         # Will mask out any SN with *no* unmasked spectra
                         mask_sn = np.max(mask_spec, axis=-2)[:, 0]
 
-                        chains = results.latents[:, : stage.stage][mask_sn]
+                        chains = latents[:, : stage.stage][mask_sn]
 
                         DistributionPlotter.plot_corner(
                             chains,
@@ -779,6 +841,16 @@ class PAE(ModelStep[PAEConfig]):
 
             if self.analysis.plot_comparison is not None:
                 results = self.results.stages[dt[:-1]][str(self.run_stages[0].stage)]
+                input_mask = results.input_mask
+                input_sn_mask = results.input_sn_mask
+                input_spec_mask = results.input_spec_mask
+                input_wl_mask = results.input_wl_mask
+                loss = results.loss
+                pred_loss = results.pred_loss
+                output_amp = results.output_amp
+                latents = results.latents
+                results.clear()
+
                 if not isinstance(self.analysis.plot_comparison, list):
                     self.analysis.plot_comparison = [self.analysis.plot_comparison]
                 for opts in self.analysis.plot_comparison:
@@ -792,16 +864,11 @@ class PAE(ModelStep[PAEConfig]):
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {}
                     o.plot_kwargs["label"] = (
-                        f"{dt}{self.name}_{self.run_stages[0].name}\n({results.loss:.2E})",
+                        f"{dt}{self.name}_{self.run_stages[0].name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})",
                     )
                     o.plot_kwargs["title"] = f"{dt}{self.name} {o.name}"
                     savepath = (o.savepath or Path()) / f"{o.name}.{o.ext}"
                     if not savepath.exists():
-                        input_mask = results.input_mask
-                        input_sn_mask = results.input_sn_mask
-                        input_spec_mask = results.input_spec_mask
-                        input_wl_mask = results.input_wl_mask
-
                         data = getattr(self, f"{dt}data")
                         (
                             wl,
@@ -826,7 +893,7 @@ class PAE(ModelStep[PAEConfig]):
                         o.base_sigma = sigma
                         o.base_mask = np.logical_not(mask)
 
-                        data.amplitude = results.output_amp
+                        data.amplitude = output_amp
                         data.sigma *= 0
 
                         fig, ax = SpectraPlotter.plot_comparison(
@@ -844,6 +911,11 @@ class PAE(ModelStep[PAEConfig]):
                             input_sn_mask = results.input_sn_mask
                             input_spec_mask = results.input_spec_mask
                             input_wl_mask = results.input_wl_mask
+                            loss = results.loss
+                            pred_loss = results.pred_loss
+                            output_amp = results.output_amp
+                            latents = results.latents
+                            results.clear()
 
                             data = getattr(self, f"{dt}data")
                             (
@@ -869,11 +941,11 @@ class PAE(ModelStep[PAEConfig]):
                             o.base_sigma = sigma
                             o.base_mask = np.logical_not(mask)
 
-                            data.amplitude = results.output_amp
+                            data.amplitude = output_amp
                             data.sigma *= 0
 
                             o.plot_kwargs["label"] = (
-                                f"{dt}{self.name}_{stage.name}\n({results.loss:.2E})"
+                                f"{dt}{self.name}_{stage.name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})"
                             )
                             o.plot_base = False
 
@@ -894,6 +966,16 @@ class PAE(ModelStep[PAEConfig]):
 
             if self.analysis.plot_latents is not None:
                 results = self.results.stages[dt[:-1]][str(self.run_stages[0].stage)]
+                input_mask = results.input_mask
+                input_sn_mask = results.input_sn_mask
+                input_spec_mask = results.input_spec_mask
+                input_wl_mask = results.input_wl_mask
+                loss = results.loss
+                pred_loss = results.pred_loss
+                output_amp = results.output_amp
+                latents = results.latents
+                results.clear()
+
                 if not isinstance(self.analysis.plot_latents, list):
                     self.analysis.plot_latents = [self.analysis.plot_latents]
                 for opts in self.analysis.plot_latents:
@@ -911,10 +993,6 @@ class PAE(ModelStep[PAEConfig]):
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {"title": f"{dt}{self.name}"}
-                    input_mask = results.input_mask
-                    input_sn_mask = results.input_sn_mask
-                    input_spec_mask = results.input_spec_mask
-                    input_wl_mask = results.input_wl_mask
 
                     data = getattr(self, f"{dt}data")
                     (
@@ -1073,10 +1151,10 @@ class PAEStep(Model[PAEStepConfig, PAE]):
         if not isinstance(variants, list):
             variants = [variants]
 
-        for variant_name in variants:
-            variant = self.variants[variant_name]
+        for name in variants:
+            variant = self.variants[name]
 
-            super()._analyse(*args, **{**kwargs, "variants": [variant_name]})
+            super()._analyse(*args, **{**kwargs, "variants": [name]})
 
             labels = {}
             ind = 0
@@ -1092,11 +1170,15 @@ class PAEStep(Model[PAEStepConfig, PAE]):
             for dt in ["train_", "test_"]:
                 for stage in variant.run_stages:
                     results = variant.results.stages[dt[:-1]][str(stage.stage)]
-
                     input_mask = results.input_mask
                     input_sn_mask = results.input_sn_mask
                     input_spec_mask = results.input_spec_mask
                     input_wl_mask = results.input_wl_mask
+                    loss = results.loss
+                    pred_loss = results.pred_loss
+                    output_amp = results.output_amp
+                    latents = results.latents
+                    results.clear()
 
                     if variant.analysis.plot_comparison is not None:
                         for opts in variant.analysis.plot_comparison:
@@ -1104,8 +1186,8 @@ class PAEStep(Model[PAEStepConfig, PAE]):
                             o.name = "comparison"
                             self.log.debug(f"Plotting {o.name}")
                             o.plot_kwargs = {
-                                "label": f"{variant.name}\n({results.loss:.2E})",
-                                "title": f"{self.name} {o.name}",
+                                "label": f"{variant.name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})",
+                                "title": f"{self.name} {stage.name} {o.name}",
                             }
 
                             name = f"{dt[:-1]}/{stage.stage}/{o.name}.{o.ext}"
@@ -1140,7 +1222,7 @@ class PAEStep(Model[PAEStepConfig, PAE]):
                             o.base_sigma = sigma
                             o.base_mask = np.logical_not(mask)
 
-                            data.amplitude = results.output_amp
+                            data.amplitude = output_amp
                             data.sigma *= 0
 
                             fig, ax = SpectraPlotter.plot_comparison(

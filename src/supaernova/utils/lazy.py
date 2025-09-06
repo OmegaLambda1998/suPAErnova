@@ -8,6 +8,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from typing import Self, ClassVar
     from pathlib import Path
+    from collections.abc import Callable
 
 
 class LazyObj[O, I]:
@@ -45,6 +46,20 @@ class LazyObj[O, I]:
 
     def clear(self: "Self") -> None:
         self.obj = None
+
+
+class LazyLambda[O, I](LazyObj[O, I]):
+    meta_keys: "ClassVar[set[str]]" = LazyObj.meta_keys.union({
+        "fn",
+    })
+
+    def __init__(self: "Self", fn: "Callable[[], O]") -> None:
+        super().__init__()
+        self.fn: Callable = fn
+
+    def _lazy_load(self: "Self") -> None:
+        super()._lazy_load()
+        self.obj = self.fn()
 
 
 class LazyFile[O, I](LazyObj[O, I]):

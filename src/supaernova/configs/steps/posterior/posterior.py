@@ -236,7 +236,7 @@ class PosteriorConfig(BackendConfig):
     # - MAP -
     random_initial_positions: bool = False
     tolerance: PositiveFloat = 1e-8
-    x_tolerance: NonNegativeFloat = 1e-3
+    x_tolerance: NonNegativeFloat = 5e-3
     f_relative_tolerance: NonNegativeFloat = 0
     f_absolute_tolerance: NonNegativeFloat = 0
     max_iterations: PositiveInt = 2500

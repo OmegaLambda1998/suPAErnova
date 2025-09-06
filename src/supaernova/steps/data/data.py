@@ -116,16 +116,15 @@ class Data(Step[DataConfig]):
 
     @override
     def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
-        return self.has_attributes(self.setup_attributes)
+        for attr in self.setup_attributes:
+            if not self.has_attributes([attr]):
+                self.log.debug(f"{self.name} is not setup because {attr} is missing")
+                return False
+        return True
 
     @override
     def _setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
-        # === Previous Step Variables ===
-
-        # === Config Variables ===
-        # --- Required ---
-
-        # --- Optional ---
+        super()._setup()
         colourlaw = self.options.colourlaw
         if colourlaw is not None:
             _, colourlaw = np.loadtxt(colourlaw, unpack=True)
