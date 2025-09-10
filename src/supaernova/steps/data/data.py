@@ -832,11 +832,11 @@ class Data(Step[DataConfig]):
         data["time"][~spec_mask] = -1
 
         # Remove negative amplitude from unmasked amplitudes
-        data["amplitude"][data["mask"]] = np.clip(
-            data["amplitude"][data["mask"]],
-            0,
-            np.inf,
-        )
+        # data["amplitude"][data["mask"]] = np.clip(
+        #     data["amplitude"][data["mask"]],
+        #     0,
+        #     np.inf,
+        # )
 
         # Scale observed uncertainty to account for fitting degrees of freedom, and an error floor
         data["sigma"] = 1.4 * data["sigma"] + 4e-10

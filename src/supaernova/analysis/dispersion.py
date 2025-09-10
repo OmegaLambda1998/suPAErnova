@@ -47,32 +47,80 @@ class DispersionPlotter(Plotter):
             fig_1, fig_2 = fig
         if ax is None:
             n_rows = 2
-            n_cols = 1
+            n_cols = 2
             spectra_ax = Plotter.axis(fig_1, n_rows, n_cols, 1)
             spectra_ax.tick_params("x", labelbottom=False)
+            spectra_hist_ax = Plotter.axis(fig_1, n_rows, n_cols, 2, sharey=spectra_ax)
+            spectra_hist_ax.tick_params("x", labelbottom=False)
+            spectra_hist_ax.tick_params("y", labelleft=False)
+            pull_ax = Plotter.axis(fig_1, n_rows, n_cols, 3, sharex=spectra_ax)
+            pull_hist_ax = Plotter.axis(
+                fig_1, n_rows, n_cols, 4, sharey=pull_ax, sharex=spectra_hist_ax
+            )
+            pull_hist_ax.tick_params("y", labelleft=False)
+            fig_1.subplots_adjust(hspace=0, wspace=0)
 
-            pull_ax_1 = Plotter.axis(fig_1, n_rows, n_cols, 2, sharex=spectra_ax)
-            if legacy is not None:
+            if fig_2 is not None:
                 residual_ax = Plotter.axis(fig_2, n_rows, n_cols, 1)
                 residual_ax.tick_params("x", labelbottom=False)
-
-                pull_ax_2 = Plotter.axis(fig_2, n_rows, n_cols, 2, sharex=residual_ax)
-                fig_2.subplots_adjust(hspace=0)
+                residual_hist_ax = Plotter.axis(
+                    fig_2, n_rows, n_cols, 2, sharey=residual_ax
+                )
+                residual_hist_ax.tick_params("x", labelbottom=False)
+                residual_hist_ax.tick_params("y", labelleft=False)
+                legacy_pull_ax = Plotter.axis(
+                    fig_2, n_rows, n_cols, 3, sharex=residual_ax
+                )
+                legacy_pull_hist_ax = Plotter.axis(
+                    fig_2,
+                    n_rows,
+                    n_cols,
+                    4,
+                    sharey=legacy_pull_ax,
+                    sharex=residual_hist_ax,
+                )
+                legacy_pull_hist_ax.tick_params("y", labelleft=False)
+                fig_2.subplots_adjust(hspace=0, wspace=0)
             else:
                 residual_ax = None
-                pull_ax_2 = None
-            fig_1.subplots_adjust(hspace=0)
-            ax = [spectra_ax, pull_ax_1, residual_ax, pull_ax_2]
+                residual_hist_ax = None
+                legacy_pull_ax = None
+                legacy_pull_hist_ax = None
+            ax = [
+                spectra_ax,
+                spectra_hist_ax,
+                pull_ax,
+                pull_hist_ax,
+                residual_ax,
+                residual_hist_ax,
+                legacy_pull_ax,
+                legacy_pull_hist_ax,
+            ]
         else:
-            spectra_ax, pull_ax_1, residual_ax, pull_ax_2 = ax
+            (
+                spectra_ax,
+                spectra_hist_ax,
+                pull_ax,
+                pull_hist_ax,
+                residual_ax,
+                residual_hist_ax,
+                legacy_pull_ax,
+                legacy_pull_hist_ax,
+            ) = ax
 
         fig_1, spectra_ax, _hline = Plotter.axhline(
             0, fig=fig_1, ax=spectra_ax, color="black"
+        )
+        fig_1, spectra_hist_ax, _hline = Plotter.axhline(
+            0, fig=fig_1, ax=spectra_hist_ax, color="black"
         )
 
         if legacy is not None:
             fig_2, residual_ax, _hline = Plotter.axhline(
                 0, fig=fig_2, ax=residual_ax, color="black"
+            )
+            fig_2, residual_hist_ax, _hline = Plotter.axhline(
+                0, fig=fig_2, ax=residual_hist_ax, color="black"
             )
 
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
@@ -169,19 +217,40 @@ class DispersionPlotter(Plotter):
             yerr: "npt.NDArray[Any]",
             mask: "npt.NDArray[Any] | None",
             fig: "tuple(Figure, Figure | None)",
-            ax: "tuple[Axis, Axis, Axis | None, Axis | None]",
+            ax: "tuple[Axis, Axis, Axis, Axis, Axis | None, Axis | None, Axis | None, Axis | None]",
             color: str,
             marker: str,
             alpha: float,
             title: str,
+            residual_bins: "npt.NDArray[float]",
+            pull_bins: "npt.NDArray[float]",
+            hist: bool = True,
             y_prime: "npt.NDArray[Any] | None" = None,
             yerr_prime: "npt.NDArray[Any] | None" = None,
         ) -> tuple[
             tuple["Figure", "Figure | None"],
-            tuple["Axis", "Axis", "Axis | None", "Axis | None"],
+            tuple[
+                "Axis",
+                "Axis",
+                "Axis",
+                "Axis",
+                "Axis | None",
+                "Axis | None",
+                "Axis | None",
+                "Axis | None",
+            ],
         ]:
             fig_1, fig_2 = fig
-            s_ax, p_ax_1, r_ax, p_ax_2 = ax
+            (
+                s_ax,
+                s_h_ax,
+                p_ax,
+                p_h_ax,
+                r_ax,
+                r_h_ax,
+                l_p_ax,
+                l_p_h_ax,
+            ) = ax
 
             if mask is not None:
                 x = x[mask]
@@ -193,7 +262,7 @@ class DispersionPlotter(Plotter):
             k = 1.4826
 
             w_rms = np.std(y, axis=0)
-            w_nmad = k * np.median(np.abs(y) - np.median(y))
+            w_nmad = k * np.median(np.abs(y - np.median(y, axis=0)))
 
             fig_1, s_ax, _ebar = Plotter.errorbar(
                 x,
@@ -206,16 +275,42 @@ class DispersionPlotter(Plotter):
                 alpha=alpha,
                 label=f"{title}\n{np.size(y)} SN\nRMS: {w_rms:.3f}\nNMAD: {w_nmad:.3f}",
             )
+            if hist:
+                fig_1, s_h_ax, _hist = Plotter.hist(
+                    y,
+                    bins=residual_bins,
+                    norm=True,
+                    orientation="horizontal",
+                    fig=fig_1,
+                    ax=s_h_ax,
+                    color=color,
+                    alpha=alpha,
+                )
 
-            fig_1, p_ax_1, _ebar = Plotter.errorbar(
+            fig_1, p_ax, _hline = Plotter.axhline(1, color="black", fig=fig_1, ax=p_ax)
+            fig_1, p_h_ax, _hline = Plotter.axhline(
+                1, color="black", fig=fig_1, ax=p_h_ax
+            )
+            fig_1, p_ax, _ebar = Plotter.errorbar(
                 x,
                 np.abs(y) / yerr,
                 fig=fig_1,
-                ax=p_ax_1,
+                ax=p_ax,
                 color=color,
                 marker=marker,
                 alpha=alpha,
             )
+            if hist:
+                fig_1, p_h_ax, _hist = Plotter.hist(
+                    np.abs(y) / yerr,
+                    bins=pull_bins,
+                    norm=True,
+                    orientation="horizontal",
+                    fig=fig_1,
+                    ax=p_h_ax,
+                    color=color,
+                    alpha=alpha,
+                )
 
             if (y_prime is not None) and (yerr_prime is not None):
                 y_residual = y - y_prime
@@ -232,18 +327,54 @@ class DispersionPlotter(Plotter):
                     marker=marker,
                     alpha=alpha,
                 )
+                fig_2, r_h_ax, _hist = Plotter.hist(
+                    y_residual,
+                    # xerr=err,
+                    bins=residual_bins,
+                    norm=True,
+                    orientation="horizontal",
+                    fig=fig_2,
+                    ax=r_h_ax,
+                    color=color,
+                    alpha=alpha,
+                )
 
-                fig_2, p_ax_2, _ebar = Plotter.errorbar(
+                fig_2, l_p_ax, _hline = Plotter.axhline(
+                    1, color="black", fig=fig_2, ax=l_p_ax
+                )
+                fig_2, l_p_h_ax, _hline = Plotter.axhline(
+                    1, color="black", fig=fig_2, ax=l_p_h_ax
+                )
+                fig_2, l_p_ax, _ebar = Plotter.errorbar(
                     x,
                     y_pull,
                     fig=fig_2,
-                    ax=p_ax_2,
+                    ax=l_p_ax,
                     color=color,
                     marker=marker,
                     alpha=alpha,
                 )
+                fig_2, l_p_h_ax, _hist = Plotter.hist(
+                    y_pull,
+                    bins=pull_bins,
+                    norm=True,
+                    orientation="horizontal",
+                    fig=fig_2,
+                    ax=l_p_h_ax,
+                    color=color,
+                    alpha=alpha,
+                )
 
-            return (fig_1, fig_2), (s_ax, p_ax_1, r_ax, p_ax_2)
+            return (fig_1, fig_2), (
+                s_ax,
+                s_h_ax,
+                p_ax,
+                p_h_ax,
+                r_ax,
+                r_h_ax,
+                l_p_ax,
+                l_p_h_ax,
+            )
 
         pae_x = pae_redshift
         pae_y = pae_weighted_amplitudes
@@ -252,6 +383,50 @@ class DispersionPlotter(Plotter):
         sn_plot_mask = pae_mask.astype(bool)
         twins_plot_mask = pae_twins_mask.astype(bool)
         combined_plot_mask = (pae_mask * pae_twins_mask).astype(bool)
+
+        residual_max = np.log10(np.max(np.abs(pae_y[combined_plot_mask])))
+        residual_scale_min = np.floor(residual_max)
+        residual_scale_max = np.ceil(residual_max)
+        residual_scale = 10 ** (
+            residual_scale_min
+            if np.abs(10**residual_max - 10**residual_scale_min)
+            < np.abs(10**residual_max - 10**residual_scale_max)
+            else residual_scale_max
+        )
+        residual_step = residual_scale / 4
+        if residual_step == 0:
+            return
+
+        residual_bins = np.arange(
+            -5 * residual_scale - 0.5 * residual_step,
+            5 * residual_scale + 1.5 * residual_step,
+            residual_step,
+        )
+        print(
+            10**residual_max,
+            residual_scale,
+            residual_step,
+            residual_bins.min(),
+            residual_bins.max(),
+        )
+
+        pull_max = np.log10(
+            np.max(np.abs((np.abs(pae_y) / pae_yerr)[combined_plot_mask]))
+        )
+        pull_scale_min = np.floor(pull_max)
+        pull_scale_max = np.ceil(pull_max)
+        pull_scale = 10 ** (
+            pull_scale_min
+            if np.abs(10**pull_max - 10**pull_scale_min)
+            < 2 * np.abs(10**pull_max - 10**pull_scale_max)
+            else pull_scale_max
+        )
+
+        pull_step = pull_scale / 4
+        pull_bins = np.arange(
+            0 - 0.5 * pull_step, 5 * pull_scale + 1.5 * pull_step, pull_step
+        )
+        print(10**pull_max, pull_scale, pull_step, pull_bins.min(), pull_bins.max())
 
         legacy_y = None
         legacy_yerr = None
@@ -319,6 +494,9 @@ class DispersionPlotter(Plotter):
                 "s",
                 0.25,
                 "Legacy No Mask",
+                residual_bins=residual_bins,
+                pull_bins=pull_bins,
+                hist=False,
             )
 
             if twins is not None:
@@ -334,6 +512,9 @@ class DispersionPlotter(Plotter):
                     "s",
                     0.25,
                     "Legacy SN Mask",
+                    residual_bins=residual_bins,
+                    pull_bins=pull_bins,
+                    hist=False,
                 )
 
                 # === Twins Mask ===
@@ -348,6 +529,9 @@ class DispersionPlotter(Plotter):
                     "s",
                     0.25,
                     "Legacy Twins Mask",
+                    residual_bins=residual_bins,
+                    pull_bins=pull_bins,
+                    hist=False,
                 )
 
             # === Combined Mask ===
@@ -362,6 +546,9 @@ class DispersionPlotter(Plotter):
                 "s",
                 1,
                 "Legacy Final",
+                residual_bins=residual_bins,
+                pull_bins=pull_bins,
+                hist=False,
             )
 
         # === No Mask ===
@@ -376,6 +563,8 @@ class DispersionPlotter(Plotter):
             "o",
             0.25,
             "No Mask",
+            residual_bins=residual_bins,
+            pull_bins=pull_bins,
             y_prime=legacy_y,
             yerr_prime=legacy_yerr,
         )
@@ -393,6 +582,8 @@ class DispersionPlotter(Plotter):
                 "o",
                 0.25,
                 "SN Mask",
+                residual_bins=residual_bins,
+                pull_bins=pull_bins,
                 y_prime=legacy_y,
                 yerr_prime=legacy_yerr,
             )
@@ -409,6 +600,8 @@ class DispersionPlotter(Plotter):
                 "o",
                 0.25,
                 "Twins Mask",
+                residual_bins=residual_bins,
+                pull_bins=pull_bins,
                 y_prime=legacy_y,
                 yerr_prime=legacy_yerr,
             )
@@ -425,41 +618,64 @@ class DispersionPlotter(Plotter):
             "o",
             1,
             "Final",
+            residual_bins=residual_bins,
+            pull_bins=pull_bins,
             y_prime=legacy_y,
             yerr_prime=legacy_yerr,
         )
         spectra_ax.set_ylim(
             -1.1 * np.abs((pae_y - pae_yerr)[combined_plot_mask].min()),
-            1.1 * (pae_y + pae_yerr)[combined_plot_mask].max(),
+            1.1 * np.abs(pae_y + pae_yerr)[combined_plot_mask].max(),
+        )
+        pull_ax.set_ylim(
+            0,
+            1.1 * np.abs(pae_y / pae_yerr)[combined_plot_mask].max(),
         )
 
-        fig_1.align_ylabels([spectra_ax, pull_ax_1])
-        spectra_ax.legend(bbox_to_anchor=(1.0, 1.0), ncols=1 if legacy is None else 2)
-        spectra_ax.set_title(
+        # fig_1.align_ylabels([spectra_ax, pull_ax])
+        # fig_1.align_ylabels([spectra_hist_ax, pull_hist_ax])
+        spectra_ax.legend(bbox_to_anchor=(2.0, 1.0), ncols=1 if legacy is None else 2)
+        fig_1.suptitle(
             (config.plot_kwargs or {}).get("title", config.name.capitalize())
         )
         spectra_ax.set_ylabel("ΔM")
 
-        pull_ax_1.set_ylabel("Pull")
-        pull_ax_1.set_xlabel("z")
+        pull_ax.set_ylabel("Pull")
+        pull_ax.set_xlabel("z")
+        pull_hist_ax.set_xlabel("PDF")
 
         fig_1 = Plotter.save(fig_1, savepath)
-        Plotter.close(fig_1, [spectra_ax, pull_ax_1])
+        Plotter.close(fig_1, [spectra_ax, spectra_hist_ax, pull_ax, pull_hist_ax])
 
-        if legacy is not None:
-            fig_2.align_ylabels([residual_ax, pull_ax_2])
-            residual_ax.set_title(
+        if (
+            fig_2 is not None
+            and residual_ax is not None
+            and legacy_pull_ax is not None
+            and legacy_pull_hist_ax is not None
+        ):
+            # fig_2.align_ylabels([residual_ax, legacy_pull_ax])
+            # fig_2.align_ylabels([residual_hist_ax, legacy_pull_hist_ax])
+            fig_2.suptitle(
                 (config.plot_kwargs or {}).get("title", config.name.capitalize())
                 + " vs Legacy"
             )
             residual_ax.set_ylabel("Residual")
+
             residual_ax.set_ylim(
                 -1.1
                 * np.abs(((pae_y - legacy_y) - pae_yerr)[combined_plot_mask].min()),
-                1.1 * ((pae_y - legacy_y) + pae_yerr)[combined_plot_mask].max(),
+                1.1 * np.abs((pae_y - legacy_y) + pae_yerr)[combined_plot_mask].max(),
+            )
+            legacy_pull_ax.set_ylim(
+                0,
+                1.1 * np.abs((pae_y - legacy_y) / pae_yerr)[combined_plot_mask].max(),
             )
 
-            pull_ax_2.set_ylabel("Pull")
-            pull_ax_2.set_xlabel("z")
+            legacy_pull_ax.set_ylabel("Pull")
+            legacy_pull_ax.set_xlabel("z")
+            legacy_pull_hist_ax.set_xlabel("PDF")
             fig_2 = Plotter.save(fig_2, legacy_savepath)
-            Plotter.close(fig_2, [residual_ax, pull_ax_2])
+            Plotter.close(
+                fig_2,
+                [residual_ax, residual_hist_ax, legacy_pull_ax, legacy_pull_hist_ax],
+            )

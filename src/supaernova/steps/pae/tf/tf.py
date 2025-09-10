@@ -1587,7 +1587,9 @@ class TFPAEModel(ks.Model):
             tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor
         ],
     ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        (phase, amp_true, d_amp, mask, sn_mask, spec_mask, wl_mask) = data
+        (phase, amp_true, d_amp, mask, sn_mask, spec_mask, wl_mask) = (
+            tf.convert_to_tensor(d, dtype=tf.float32) for d in data
+        )
         _, amp_pred = self(
             (phase, amp_true),
             training=False,
@@ -1607,7 +1609,7 @@ class TFPAEModel(ks.Model):
 
         # === Setup Masks ===
         # Apply sn and spec masks
-        recon_mask = mask * sn_mask * spec_mask * wl_mask
+        recon_mask = tf.cast(mask * sn_mask * spec_mask * wl_mask, tf.int32)
 
         # ~(~input_mask & input_wl_mask)
         # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask

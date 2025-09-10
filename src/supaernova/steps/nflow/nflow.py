@@ -395,7 +395,7 @@ class NFlow(ModelStep[NFlowConfig]):
                     savepath = (
                         self.paths.plots
                         / dt[:-1]
-                        / str(self.model.seed)
+                        / str(self.seed)
                         / f"{name}.{opts.ext}"
                         if opts.savepath is None
                         else opts.savepath
@@ -414,7 +414,7 @@ class NFlow(ModelStep[NFlowConfig]):
                     savepath = (
                         self.paths.plots
                         / dt[:-1]
-                        / str(self.model.seed)
+                        / str(self.seed)
                         / f"{name}.{opts.ext}"
                         if opts.savepath is None
                         else opts.savepath
@@ -429,7 +429,7 @@ class NFlow(ModelStep[NFlowConfig]):
                 if not isinstance(self.analysis.plot_latent_steps, list):
                     self.analysis.plot_latent_steps = [self.analysis.plot_latent_steps]
                 for opts in self.analysis.plot_latent_steps:
-                    num_steps = 2 * self.model.n_layers
+                    num_steps = 2 * self.n_layers
                     for step in range(num_steps):
                         if step != 0 and step % 2 == 0:
                             continue
@@ -441,7 +441,7 @@ class NFlow(ModelStep[NFlowConfig]):
                         savepath = (
                             self.paths.plots
                             / dt[:-1]
-                            / str(self.model.seed)
+                            / str(self.seed)
                             / "steps"
                             / f"{name}.{opts.ext}"
                             if opts.savepath is None
@@ -495,7 +495,7 @@ class NFlow(ModelStep[NFlowConfig]):
                         o.name = "u_latents"
                     self.log.debug(f"Plotting {o.name}")
                     if o.savepath is None:
-                        o.savepath = self.paths.plots / dt[:-1] / str(self.model.seed)
+                        o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {"title": f"{dt}{self.name}"}
@@ -520,7 +520,7 @@ class NFlow(ModelStep[NFlowConfig]):
                         o.name = "z_latents"
                     self.log.debug(f"Plotting {o.name}")
                     if o.savepath is None:
-                        o.savepath = self.paths.plots / dt[:-1] / str(self.model.seed)
+                        o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {"title": f"{dt}{self.name}"}
@@ -551,7 +551,7 @@ class NFlow(ModelStep[NFlowConfig]):
                         o.name = "latents"
                     self.log.debug(f"Plotting {o.name}")
                     if o.savepath is None:
-                        o.savepath = self.paths.plots / dt[:-1] / str(self.model.seed)
+                        o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {"title": f"{dt}{self.name}"}
@@ -594,10 +594,7 @@ class NFlow(ModelStep[NFlowConfig]):
                         self.log.debug(f"Plotting {o.name}")
                         if o.savepath is None:
                             o.savepath = (
-                                self.paths.plots
-                                / dt[:-1]
-                                / str(self.model.seed)
-                                / "steps"
+                                self.paths.plots / dt[:-1] / str(self.seed) / "steps"
                             )
                         o.savepath.mkdir(parents=True, exist_ok=True)
                         if o.plot_kwargs is None:

@@ -197,7 +197,7 @@ class PosteriorConfig(BackendConfig):
     n_burnin: PositiveInt
     n_samples: PositiveInt
     n_leapfrog: PositiveInt = 3
-    n_thinning: NonNegativeInt = 1
+    n_thinning: NonNegativeInt = 0
     # --- Optional ---
     debug: bool = False
     profile: bool = False

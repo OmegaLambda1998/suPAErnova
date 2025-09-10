@@ -517,7 +517,7 @@ class SpectraPlotter(Plotter):
 
         residual_ax.set_ylabel("Residual")
 
-        # fig, pull_ax, _hline = Plotter.axhline(0, color="black", fig=fig, ax=pull_ax)
+        fig, pull_ax, _hline = Plotter.axhline(1, color="black", fig=fig, ax=pull_ax)
 
         y_pull_mean = np.abs(y_residual_mean) / yerr_residual_mean
 

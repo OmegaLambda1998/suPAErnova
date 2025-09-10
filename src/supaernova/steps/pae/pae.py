@@ -98,7 +98,6 @@ class PAE(ModelStep[PAEConfig]):
             "val_sn_mask",
             "val_spec_mask",
             "val_wl_mask",
-            "colourlaw",
             "min_redshift",
             "max_redshift",
             "min_train_redshift",
@@ -123,17 +122,12 @@ class PAE(ModelStep[PAEConfig]):
             "max_test_wavelength",
             "min_val_wavelength",
             "max_val_wavelength",
-            "batch_size",
-            "sn_dim",
-            "spec_dim",
-            "wl_dim",
             "stage_delta_av",
             "stage_zs",
             "stage_delta_m",
             "stage_delta_p",
             "stage_final",
             "run_stages",
-            "model",
         }
 
         # --- Previous Step Variables ---
@@ -510,20 +504,20 @@ class PAE(ModelStep[PAEConfig]):
         self.log.debug("Calculating PAE results")
 
         def _stage_results(dt: str, stage: PAEStage) -> "Callable[[], PAEStageResult]":
-            def _wrapped():
-                data = getattr(self, f"{dt}data")
-                input_ind = data.ind
-                input_sn_name = data.sn_name
-                input_spectra_id = data.spectra_id
-                input_phase = data.time
-                input_amplitude = data.amplitude
-                input_d_amplitude = data.sigma
-                data.clear()
-                input_mask = getattr(self, f"{dt}mask")
-                input_sn_mask = getattr(self, f"{dt}sn_mask")
-                input_spec_mask = getattr(self, f"{dt}spec_mask")
-                input_wl_mask = getattr(self, f"{dt}wl_mask")
+            data = getattr(self, f"{dt}data")
+            input_ind = data.ind
+            input_sn_name = data.sn_name
+            input_spectra_id = data.spectra_id
+            input_phase = data.time
+            input_amplitude = data.amplitude
+            input_d_amplitude = data.sigma
+            data.clear()
+            input_mask = getattr(self, f"{dt}mask")
+            input_sn_mask = getattr(self, f"{dt}sn_mask")
+            input_spec_mask = getattr(self, f"{dt}spec_mask")
+            input_wl_mask = getattr(self, f"{dt}wl_mask")
 
+            def _wrapped():
                 self.model = self.model.__class__(self)
                 savepath = (
                     self.paths.results

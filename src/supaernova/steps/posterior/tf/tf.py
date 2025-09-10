@@ -105,17 +105,8 @@ class TFPosteriorModel(ks.Model):
         )
         self.log_path: str = f"{'best' if self.save_best else 'latest'}_logs/"
 
-        self.recon_error, _recon_error_edges, self.recon_error_centers = (
-            self.pae.recon_error((
-                tf.convert_to_tensor(self.data_time, dtype=tf.float32),
-                tf.convert_to_tensor(self.data_amplitude, dtype=tf.float32),
-                tf.convert_to_tensor(self.data_sigma, dtype=tf.float32),
-                tf.convert_to_tensor(self.data_mask, dtype=tf.int32),
-                tf.convert_to_tensor(self.sn_mask, dtype=tf.int32),
-                tf.convert_to_tensor(self.spec_mask, dtype=tf.int32),
-                tf.convert_to_tensor(self.wl_mask, dtype=tf.int32),
-            ))
-        )
+        self.recon_error = config.recon_error[self.subset]
+        self.recon_error_centers = config.recon_error_centers[self.subset]
 
         loss: Loss = self.options.loss_cls()
         loss.model = self

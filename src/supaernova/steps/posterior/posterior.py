@@ -348,10 +348,11 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.wl_dim = data.wl_dim
 
         self.step_sizes = {}
+        self.recon_error = {}
+        self.recon_error_centers = {}
         for subset in self.subsets:
-            z_latents = pae.stages[subset][
-                str(list(pae.stages[subset].keys())[-1])
-            ].latents
+            stage = pae.stages[subset][str(list(pae.stages[subset].keys())[-1])]
+            z_latents = stage.latents
             zs = z_latents[..., :-2] if pae.model.physical_latents else z_latents
             u_latents = self.nflow.z_to_u(zs, permute=True)
 
@@ -377,6 +378,18 @@ class Posterior(ModelStep[PosteriorConfig]):
             step_sizes.append(u_latent_step_size)
 
             self.step_sizes[subset] = np.concatenate(step_sizes, axis=-1)
+
+            recon_error, _, recon_error_centers = pae.model.recon_error((
+                stage.input_phase,
+                stage.input_amp,
+                stage.input_d_amp,
+                stage.input_mask,
+                stage.input_sn_mask,
+                stage.input_spec_mask,
+                stage.input_wl_mask,
+            ))
+            self.recon_error[subset] = recon_error
+            self.recon_error_centers[subset] = recon_error_centers
 
         # --- Stages ---
         self.map_stage_init = PosteriorMAPStage.model_validate({
