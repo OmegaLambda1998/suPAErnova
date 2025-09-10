@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Any, Self, ClassVar, get_args, override
 
-from supaernova.configs.steps.models import BACKENDS
+from supaernova.configs.steps.models import BACKENDS, ModelConfig, BackendConfig
 
 from .steps import Step
 from .variants import Variant
@@ -9,22 +9,21 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from supaernova.configs.steps import StepResult
-    from supaernova.configs.steps.models import ModelConfig
 
 
-class ModelStep[C: ModelConfig](Step[C]):
+class ModelStep[C: BackendConfig](Step[C]):
     def __init__(self: Self, config: C) -> None:
         super().__init__(config)
         self.model: Any
 
 
-class Model[C: ModelConfig](Variant[C]):
+class Model[C: ModelConfig, S: ModelStep](Variant[C, S]):
     # --- Class Variables ---
     model_backend: ClassVar[dict[str, "Callable[[], type[Any]]"]]
 
     class ModelResult(Variant.VariantResult):
         def __init__(self: Self, instance: "Model") -> None:
-            self.instance: Model = instance
+            self.instance: Model[C, S] = instance
             super().__init__(instance)
 
         @override
@@ -46,8 +45,6 @@ class Model[C: ModelConfig](Variant[C]):
 
         self.models_cls: dict[str, type[Any]] = {}
 
-        self.variants: dict[str, ModelStep[C]]
-
         self.results: Model.ModelResult[str, StepResult] = Model.ModelResult(self)
 
         for backend_name, backend_args in BACKENDS.items():
@@ -59,41 +56,6 @@ class Model[C: ModelConfig](Variant[C]):
     def _setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
         super()._setup(*args, **kwargs)
         self._model(*args, **kwargs)
-
-    @override
-    def _completed(self: Self, *args: Any, **kwargs: Any) -> bool:
-        self._model(*args, **kwargs)
-        return super()._completed(*args, **kwargs)
-
-    @override
-    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
-        self._model(*args, **kwargs)
-        super()._load(*args, **kwargs)
-
-    @override
-    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
-        self._model(*args, **kwargs)
-        super()._run(*args, **kwargs)
-
-    @override
-    def _result(self: Self, *args: Any, **kwargs: Any) -> None:
-        self._model(*args, **kwargs)
-        super()._result(*args, **kwargs)
-
-    @override
-    def _analyse(
-        self: Self,
-        *args: "Any",
-        variants: str | list[str] | None = None,
-        **kwargs: "Any",
-    ) -> None:
-        if variants is None:
-            return
-        if not isinstance(variants, list):
-            variants = [variants]
-        for name in variants:
-            self._model(*args, **{**kwargs, "variants": [name]})
-            super()._analyse(*args, **{**kwargs, "variants": [name]})
 
     def _model(
         self: Self,

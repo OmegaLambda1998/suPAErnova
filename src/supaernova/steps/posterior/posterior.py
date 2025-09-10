@@ -4,9 +4,8 @@ import importlib
 import numpy as np
 import pandas as pd
 
-from supaernova.steps import Step
-from supaernova.steps.data import SNPAEData, DataStepResult
-from supaernova.steps.models import Model
+from supaernova.steps.models import Model, ModelStep
+from supaernova.configs.steps.data import DataStepResult
 from supaernova.analysis.dispersion import DispersionPlotter
 from supaernova.analysis.distribution import DistributionPlotter
 from supaernova.configs.steps.posterior import (
@@ -25,53 +24,16 @@ if TYPE_CHECKING:
 
     from supaernova.steps.pae import PAEModel, PAEStepResult
     from supaernova.steps.nflow import NFlowModel, NFlowStepResult
-    from supaernova.configs.steps.data import DataStepResult
+    from supaernova.configs.steps.data import LazySNPAEData, DataStepResult
 
     from .tf import TFPosteriorModel
 
     PosteriorModel = TFPosteriorModel
 
 
-class Posterior(Step[PosteriorConfig]):
+class Posterior(ModelStep[PosteriorConfig]):
     def __init__(self: Self, config: "PosteriorConfig") -> None:
         super().__init__(config)
-
-        # === Previous Step Variables ===
-        self.nflow: NFlowModel
-        self.pae: PAEModel
-
-        self.data: SNPAEData
-        self.mask: npt.NDArray[bool]
-        self.sn_mask: npt.NDArray[bool]
-        self.spec_mask: npt.NDArray[bool]
-        self.wl_mask: npt.NDArray[bool]
-
-        self.train_data: SNPAEData
-        self.train_mask: npt.NDArray[bool]
-        self.train_sn_mask: npt.NDArray[bool]
-        self.train_spec_mask: npt.NDArray[bool]
-        self.train_wl_mask: npt.NDArray[bool]
-
-        self.test_data: SNPAEData
-        self.test_mask: npt.NDArray[bool]
-        self.test_sn_mask: npt.NDArray[bool]
-        self.test_spec_mask: npt.NDArray[bool]
-        self.test_wl_mask: npt.NDArray[bool]
-
-        self.val_data: SNPAEData
-        self.val_mask: npt.NDArray[bool]
-        self.val_sn_mask: npt.NDArray[bool]
-        self.val_spec_mask: npt.NDArray[bool]
-        self.val_wl_mask: npt.NDArray[bool]
-
-        self.step_sizes: dict[str, npt.NDArray[float]]
-
-        self.data_dir: Path
-        self.kfold: int = self.options.kfold
-
-        self.sn_dim: int
-        self.spec_dim: int
-        self.wl_dim: int
 
         # === Config Variables ===
         # --- Required ---
@@ -90,6 +52,7 @@ class Posterior(Step[PosteriorConfig]):
         # --- Optional ---
         self.debug: bool = self.options.debug
         self.profile: bool = self.options.profile
+        self.kfold: int = self.options.kfold
         self.save_best: bool = self.options.save_best
         self.subsets = (["train"] if self.options.train_subset else []) + (
             ["test"] if self.options.test_subset else []
@@ -97,33 +60,6 @@ class Posterior(Step[PosteriorConfig]):
         self.tolerance: float = self.options.tolerance
         self.target_acceptance_rate: float = self.options.target_acceptance_rate
         self.random_initial_positions: bool = self.options.random_initial_positions
-
-        self.min_redshift: float
-        self.max_redshift: float
-        self.min_train_redshift: float
-        self.max_train_redshift: float
-        self.min_test_redshift: float
-        self.max_test_redshift: float
-        self.min_val_redshift: float
-        self.max_val_redshift: float
-
-        self.min_phase: float
-        self.max_phase: float
-        self.min_train_phase: float
-        self.max_train_phase: float
-        self.min_test_phase: float
-        self.max_test_phase: float
-        self.min_val_phase: float
-        self.max_val_phase: float
-
-        self.min_wavelength: float
-        self.max_wavelength: float
-        self.min_train_wavelength: float
-        self.max_train_wavelength: float
-        self.min_test_wavelength: float
-        self.max_test_wavelength: float
-        self.min_val_wavelength: float
-        self.max_val_wavelength: float
 
         self.u_delta_av_min: float = self.options.u_delta_av_min
         self.u_delta_av_max: float = self.options.u_delta_av_max
@@ -166,17 +102,142 @@ class Posterior(Step[PosteriorConfig]):
         self.bias_std: float = self.options.bias_std
 
         # === Setup Variables ===
-        self.savepath: Path
+        self.setup_attributes: set[str] = {
+            "nflow",
+            "pae",
+            "data",
+            "mask",
+            "sn_mask",
+            "spec_mask",
+            "wl_mask",
+            "train_data",
+            "train_mask",
+            "train_sn_mask",
+            "train_spec_mask",
+            "train_wl_mask",
+            "test_data",
+            "test_mask",
+            "test_sn_mask",
+            "test_spec_mask",
+            "test_wl_mask",
+            "val_data",
+            "val_mask",
+            "val_sn_mask",
+            "val_spec_mask",
+            "val_wl_mask",
+            "min_redshift",
+            "max_redshift",
+            "min_train_redshift",
+            "max_train_redshift",
+            "min_test_redshift",
+            "max_test_redshift",
+            "min_val_redshift",
+            "max_val_redshift",
+            "min_phase",
+            "max_phase",
+            "min_train_phase",
+            "max_train_phase",
+            "min_test_phase",
+            "max_test_phase",
+            "min_val_phase",
+            "max_val_phase",
+            "min_wavelength",
+            "max_wavelength",
+            "min_train_wavelength",
+            "max_train_wavelength",
+            "min_test_wavelength",
+            "max_test_wavelength",
+            "min_val_wavelength",
+            "max_val_wavelength",
+            "data_dir",
+            "sn_dim",
+            "spec_dim",
+            "wl_dim",
+            "step_sizes",
+            "model",
+            "map_stage_init",
+            "map_stage_random",
+            "map_stage_delta_m",
+            "map_stage_delta_av",
+            "map_stages",
+        }
+
+        self.nflow: NFlowModel
+        self.pae: PAEModel
+
+        self.data: LazySNPAEData
+        self.mask: npt.NDArray[bool]
+        self.sn_mask: npt.NDArray[bool]
+        self.spec_mask: npt.NDArray[bool]
+        self.wl_mask: npt.NDArray[bool]
+
+        self.train_data: LazySNPAEData
+        self.train_mask: npt.NDArray[bool]
+        self.train_sn_mask: npt.NDArray[bool]
+        self.train_spec_mask: npt.NDArray[bool]
+        self.train_wl_mask: npt.NDArray[bool]
+
+        self.test_data: LazySNPAEData
+        self.test_mask: npt.NDArray[bool]
+        self.test_sn_mask: npt.NDArray[bool]
+        self.test_spec_mask: npt.NDArray[bool]
+        self.test_wl_mask: npt.NDArray[bool]
+
+        self.val_data: LazySNPAEData
+        self.val_mask: npt.NDArray[bool]
+        self.val_sn_mask: npt.NDArray[bool]
+        self.val_spec_mask: npt.NDArray[bool]
+        self.val_wl_mask: npt.NDArray[bool]
+
+        self.min_redshift: float
+        self.max_redshift: float
+        self.min_train_redshift: float
+        self.max_train_redshift: float
+        self.min_test_redshift: float
+        self.max_test_redshift: float
+        self.min_val_redshift: float
+        self.max_val_redshift: float
+
+        self.min_phase: float
+        self.max_phase: float
+        self.min_train_phase: float
+        self.max_train_phase: float
+        self.min_test_phase: float
+        self.max_test_phase: float
+        self.min_val_phase: float
+        self.max_val_phase: float
+
+        self.min_wavelength: float
+        self.max_wavelength: float
+        self.min_train_wavelength: float
+        self.max_train_wavelength: float
+        self.min_test_wavelength: float
+        self.max_test_wavelength: float
+        self.min_val_wavelength: float
+        self.max_val_wavelength: float
+
+        self.data_dir: Path
+
+        self.sn_dim: int
+        self.spec_dim: int
+        self.wl_dim: int
+
+        self.step_sizes: dict[str, npt.NDArray[float]]
+
         self.model: PosteriorModel
 
-        # MAPStages
+        # MAP Stages
         self.map_stage_init: PosteriorMAPStage
         self.map_stage_random: PosteriorMAPStage
         self.map_stage_delta_m: PosteriorMAPStage
         self.map_stage_delta_av: PosteriorMAPStage
         self.map_stages: list[PosteriorMAPStage]
 
-        # === Run Variables ===
+        # === Run / Save / Load Variables ===
+        self.run_attributes: set[str] = {"models"}
+        self.save_attributes: set[str] = self.run_attributes
+        self.load_attributes: set[str] = self.save_attributes
+
         self.models: dict[str, dict[str, PosteriorModel]]
 
         # === Result Variables ===
@@ -188,6 +249,14 @@ class Posterior(Step[PosteriorConfig]):
         )
 
     @override
+    def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        for attr in self.setup_attributes:
+            if not self.has_attributes([attr]):
+                self.log.debug(f"{self.name} is not setup because {attr} is missing")
+                return False
+        return True
+
+    @override
     def _setup(
         self: Self,
         *args: Any,
@@ -196,25 +265,22 @@ class Posterior(Step[PosteriorConfig]):
         nflow: "NFlowStepResult",
         **kwargs: Any,
     ) -> None:
+        super()._setup()
         # === Previous Step Variables ===
-        self.data_dir = data.dir
-        self.data = data.data
-        self.pae = pae.model
         self.nflow = nflow.model
+        self.pae = pae.model
+
+        self.data = data.data
         self.train_data = data.train_data[self.kfold % len(data.train_data)]
         self.test_data = data.test_data[self.kfold % len(data.test_data)]
         self.val_data = self.test_data
 
-        self.sn_dim = data.sn_dim
-        self.spec_dim = data.spec_dim
-        self.wl_dim = data.wl_dim
-
         if self.validation_frac > 0:
             ind_split = int(data.sn_dim * self.validation_frac)
-            self.val_data = SNPAEData.model_validate({
+            self.val_data.model_validate({
                 k: v[-ind_split:] for k, v in self.train_data.model_dump().items()
             })
-            self.train_data = SNPAEData.model_validate({
+            self.train_data.model_validate({
                 k: v[:-ind_split] for k, v in self.train_data.model_dump().items()
             })
 
@@ -275,11 +341,18 @@ class Posterior(Step[PosteriorConfig]):
 
         self.setup_data_masks()
 
+        self.data_dir = data.dir
+
+        self.sn_dim = data.sn_dim
+        self.spec_dim = data.spec_dim
+        self.wl_dim = data.wl_dim
+
         self.step_sizes = {}
+        self.recon_error = {}
+        self.recon_error_centers = {}
         for subset in self.subsets:
-            z_latents = pae.stages[subset][
-                str(list(pae.stages[subset].keys())[-1])
-            ].latents
+            stage = pae.stages[subset][str(list(pae.stages[subset].keys())[-1])]
+            z_latents = stage.latents
             zs = z_latents[..., :-2] if pae.model.physical_latents else z_latents
             u_latents = self.nflow.z_to_u(zs, permute=True)
 
@@ -305,6 +378,18 @@ class Posterior(Step[PosteriorConfig]):
             step_sizes.append(u_latent_step_size)
 
             self.step_sizes[subset] = np.concatenate(step_sizes, axis=-1)
+
+            recon_error, _, recon_error_centers = pae.model.recon_error((
+                stage.input_phase,
+                stage.input_amp,
+                stage.input_d_amp,
+                stage.input_mask,
+                stage.input_sn_mask,
+                stage.input_spec_mask,
+                stage.input_wl_mask,
+            ))
+            self.recon_error[subset] = recon_error
+            self.recon_error_centers[subset] = recon_error_centers
 
         # --- Stages ---
         self.map_stage_init = PosteriorMAPStage.model_validate({
@@ -358,44 +443,9 @@ class Posterior(Step[PosteriorConfig]):
             self.map_stage_delta_av,
         ]
 
-        self.is_setup = True
-
     @override
-    def _completed(self: Self, *args: Any, **kwargs: Any) -> bool:
-        for subset in self.subsets:
-            for seed in self.seeds:
-                self.options.subset = subset
-                self.options.seed = seed
-                self.model = self.model.__class__(self)
-                self.savepath = self.paths.results / self.model.name
-                savepath = self.savepath / subset / str(seed) / self.model.ckpt_path
-                if not (savepath.exists() and any(savepath.iterdir())):
-                    self.log.debug(
-                        f"{self.name} has not completed as {savepath} does not exist"
-                    )
-                    return False
-        return True
-
-    @override
-    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
-        models = {}
-        for subset in self.subsets:
-            models[subset] = {}
-            for seed in self.seeds:
-                self.options.subset = subset
-                self.options.seed = seed
-                self.model = self.model.__class__(self)
-                self.savepath = self.paths.results / self.model.name
-                self.log.debug(
-                    f"Loading final Posterior model weights from {self.savepath / subset / str(seed)}"
-                )
-                self.model.load_checkpoint(
-                    self.savepath / subset / str(seed), load_map=True, load_hmc=True
-                )
-                models[subset][str(seed)] = self.model
-        self.models = models
-
-        self.is_loaded = True
+    def _has_run(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        return self.has_attributes(self.run_attributes)
 
     @override
     def _run(self: Self, *args: Any, **kwargs: Any) -> None:
@@ -403,28 +453,65 @@ class Posterior(Step[PosteriorConfig]):
         for subset in self.subsets:
             models[subset] = {}
             for seed in self.seeds:
-                self.options.subset = subset
-                self.options.seed = seed
-                self.model = self.model.__class__(self)
-                self.savepath = self.paths.results / self.model.name
-                ckpt_path = self.savepath / subset / str(seed) / self.model.ckpt_path
+                self.model = self.model.__class__(self, subset, seed)
+                savepath = self.paths.results / self.model.name / subset / str(seed)
+                ckpt_path = savepath / self.model.ckpt_path
                 # Don't retrain stages if you don't need to
                 if self.force or not (ckpt_path.exists() and any(ckpt_path.iterdir())):
-                    self.model.train_model(
-                        self.map_stages, savepath=self.savepath / subset / str(seed)
-                    )
+                    self.model.train_model(self.map_stages, savepath=savepath)
+                    self.model.save_checkpoint(savepath, save_map=True, save_hmc=True)
                 else:
-                    self.log.debug(f"Loading weights from {ckpt_path}")
-                    self.model.load_checkpoint(
-                        self.savepath / subset / str(seed), load_map=True, load_hmc=True
+                    self.log.debug(
+                        f"Loading Posterior {subset}_{seed} weights from {ckpt_path}"
                     )
-                self.model.save_checkpoint(
-                    self.savepath / subset / str(seed), save_map=True, save_hmc=True
-                )
+                    self.model.load_checkpoint(savepath, load_map=True, load_hmc=True)
                 models[subset][str(seed)] = self.model
         self.models = models
 
-        self.is_loaded = True
+    @override
+    def _is_saved(self: Self, *args: Any, **kwargs: Any) -> bool:
+        for subset in self.subsets:
+            for seed in self.seeds:
+                self.model = self.model.__class__(self, subset, seed)
+                savepath = self.paths.results / self.model.name
+                ckpt_path = savepath / subset / str(seed) / self.model.ckpt_path
+                if not (ckpt_path.exists() and any(ckpt_path.iterdir())):
+                    self.log.debug(
+                        f"{self.name} is not saved as {savepath} does not exist"
+                    )
+                    return False
+        return True
+
+    @override
+    def _save(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        for subset in self.subsets:
+            for seed in self.seeds:
+                self.model = self.models[subset][str(seed)]
+                savepath = self.paths.results / self.model.name / subset / str(seed)
+                self.model.load_checkpoint(savepath, load_map=True, load_hmc=True)
+                self.log.debug(
+                    f"Saving Posterior {subset}_{seed} model weights to {savepath}"
+                )
+                self.model.save_checkpoint(savepath, save_map=True, save_hmc=True)
+
+    @override
+    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
+        models = {}
+        for subset in self.subsets:
+            models[subset] = {}
+            for seed in self.seeds:
+                self.model = self.model.__class__(self, subset, seed)
+                savepath = self.paths.results / self.model.name / subset / str(seed)
+                self.log.debug(
+                    f"Loading Posterior {subset}_{seed} model weights from {savepath}"
+                )
+                self.model.load_checkpoint(savepath, load_map=True, load_hmc=True)
+                models[subset][str(seed)] = self.model
+        self.models = models
+
+    @override
+    def _has_results(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        return self.has_attributes(["results"])
 
     @override
     def _result(self: Self, *args: Any, **kwargs: Any) -> None:
@@ -432,10 +519,12 @@ class Posterior(Step[PosteriorConfig]):
         for subset in self.subsets:
             results[subset] = {}
             for seed in self.seeds:
-                self.options.subset = subset
-                self.options.seed = seed
                 model = self.models[subset][str(seed)]
                 data = getattr(self, f"{subset}_data")
+                input_ind = data.ind
+                input_sn_name = data.sn_name
+                input_spectra_id = data.spectra_id
+                data.clear()
 
                 map_results = {
                     "chain_min": model.map.chain_min.numpy(),
@@ -459,12 +548,18 @@ class Posterior(Step[PosteriorConfig]):
                 samples = model.hmc.samples.numpy()
                 mean_samples = samples.mean(axis=0)
                 input_position = model.map.get_position(mean_samples)
+
+                input_time = model.data.time
+                input_amplitude = model.data.amplitude
+                input_sigma = model.data.sigma
+                model.data.clear()
+
                 log_prob = model(
                     (
                         input_position,
-                        model.data.time,
-                        model.data.amplitude,
-                        model.data.sigma,
+                        input_time,
+                        input_amplitude,
+                        input_sigma,
                     ),
                     training=False,
                     mask=model.data_mask,
@@ -487,9 +582,9 @@ class Posterior(Step[PosteriorConfig]):
                 }
 
                 model_results = {
-                    "ind": data.ind,
-                    "sn_name": data.sn_name,
-                    "spectra_id": data.spectra_id,
+                    "ind": input_ind,
+                    "sn_name": input_sn_name,
+                    "spectra_id": input_spectra_id,
                     "map": map_results,
                     "hmc": hmc_results,
                 }
@@ -499,7 +594,147 @@ class Posterior(Step[PosteriorConfig]):
 
         self.results = results
 
-        self.has_results = True
+    @override
+    def _was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        for subset in self.subsets:
+            for seed in self.seeds:
+                if self.analysis.plot_map_init is not None:
+                    if not isinstance(self.analysis.plot_map_init, list):
+                        self.analysis.plot_map_init = [self.analysis.plot_map_init]
+                    for opts in self.analysis.plot_map_init:
+                        name = "map_init" if opts.name is None else opts.name
+                        savepath = (
+                            self.paths.plots
+                            / str(self.seeds[0])
+                            / subset
+                            / str(seed)
+                            / f"{name}.{opts.ext}"
+                            if opts.savepath is None
+                            else opts.savepath
+                        )
+                        if not savepath.exists():
+                            self.log.debug(
+                                f"{self.name} is missing analyses as {savepath} does not exist"
+                            )
+                            return False
+
+                if self.analysis.plot_map_best is not None:
+                    if not isinstance(self.analysis.plot_map_best, list):
+                        self.analysis.plot_map_best = [self.analysis.plot_map_best]
+                    for opts in self.analysis.plot_map_best:
+                        name = "map_best" if opts.name is None else opts.name
+                        savepath = (
+                            self.paths.plots
+                            / str(self.seeds[0])
+                            / subset
+                            / str(seed)
+                            / f"{name}.{opts.ext}"
+                            if opts.savepath is None
+                            else opts.savepath
+                        )
+                        if not savepath.exists():
+                            self.log.debug(
+                                f"{self.name} is missing analyses as {savepath} does not exist"
+                            )
+                            return False
+
+                if self.analysis.plot_hmc is not None:
+                    if not isinstance(self.analysis.plot_hmc, list):
+                        self.analysis.plot_hmc = [self.analysis.plot_hmc]
+                    for opts in self.analysis.plot_hmc:
+                        name = "hmc" if opts.name is None else opts.name
+                        savepath = (
+                            self.paths.plots
+                            / str(self.seeds[0])
+                            / subset
+                            / str(seed)
+                            / f"{name}.{opts.ext}"
+                            if opts.savepath is None
+                            else opts.savepath
+                        )
+                        if not savepath.exists():
+                            self.log.debug(
+                                f"{self.name} is missing analyses as {savepath} does not exist"
+                            )
+                            return False
+                if self.analysis.plot_dispersion is not None:
+                    if not isinstance(self.analysis.plot_dispersion, list):
+                        self.analysis.plot_hmc = [self.analysis.plot_dispersion]
+                    for opts in self.analysis.plot_dispersion:
+                        name = "dispersion" if opts.name is None else opts.name
+                        savepath = (
+                            self.paths.plots
+                            / str(self.seeds[0])
+                            / subset
+                            / str(seed)
+                            / f"{name}.{opts.ext}"
+                            if opts.savepath is None
+                            else opts.savepath
+                        )
+                        if not savepath.exists():
+                            self.log.debug(
+                                f"{self.name} is missing analyses as {savepath} does not exist"
+                            )
+                            return False
+
+            if len(self.seeds) > 1:
+                if self.analysis.plot_map_init is not None:
+                    if not isinstance(self.analysis.plot_map_init, list):
+                        self.analysis.plot_map_init = [self.analysis.plot_map_init]
+                    for opts in self.analysis.plot_map_init:
+                        name = "map_init" if opts.name is None else opts.name
+                        savepath = (
+                            self.paths.plots
+                            / str(self.seeds[0])
+                            / subset
+                            / f"{name}.{opts.ext}"
+                            if opts.savepath is None
+                            else opts.savepath
+                        )
+                        if not savepath.exists():
+                            self.log.debug(
+                                f"{self.name} is missing analyses as {savepath} does not exist"
+                            )
+                            return False
+
+                if self.analysis.plot_map_best is not None:
+                    if not isinstance(self.analysis.plot_map_best, list):
+                        self.analysis.plot_map_best = [self.analysis.plot_map_best]
+                    for opts in self.analysis.plot_map_best:
+                        name = "map_best" if opts.name is None else opts.name
+                        savepath = (
+                            self.paths.plots
+                            / str(self.seeds[0])
+                            / subset
+                            / f"{name}.{opts.ext}"
+                            if opts.savepath is None
+                            else opts.savepath
+                        )
+                        if not savepath.exists():
+                            self.log.debug(
+                                f"{self.name} is missing analyses as {savepath} does not exist"
+                            )
+                            return False
+
+                if self.analysis.plot_hmc is not None:
+                    if not isinstance(self.analysis.plot_hmc, list):
+                        self.analysis.plot_hmc = [self.analysis.plot_hmc]
+                    for opts in self.analysis.plot_hmc:
+                        name = "hmc" if opts.name is None else opts.name
+                        savepath = (
+                            self.paths.plots
+                            / str(self.seeds[0])
+                            / subset
+                            / f"{name}.{opts.ext}"
+                            if opts.savepath is None
+                            else opts.savepath
+                        )
+                        if not savepath.exists():
+                            self.log.debug(
+                                f"{self.name} is missing analyses as {savepath} does not exist"
+                            )
+                            return False
+        return True
 
     @override
     def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:
@@ -509,11 +744,8 @@ class Posterior(Step[PosteriorConfig]):
             subset_map_labels = {}
             subset_hmc_samples = {}
             subset_hmc_labels = {}
-            self.options.subset = subset
 
             for seed in self.seeds:
-                self.options.seed = seed
-
                 model = self.models[subset][str(seed)]
                 results = self.results[subset][str(seed)]
 
@@ -676,7 +908,7 @@ class Posterior(Step[PosteriorConfig]):
                             )
                         o.savepath.mkdir(parents=True, exist_ok=True)
 
-                        data = getattr(self, f"{o.subset}_data").model_copy(deep=True)
+                        data = getattr(self, f"{o.subset}_data")
                         mask = getattr(self, f"{o.subset}_mask")
                         sn_mask = getattr(self, f"{o.subset}_sn_mask")
                         spec_mask = getattr(self, f"{o.subset}_spec_mask")
@@ -785,59 +1017,29 @@ class Posterior(Step[PosteriorConfig]):
                             statistics="max_central",
                         )
 
-        self.was_analysed = True
-
     @override
     def _clear(
         self: Self,
         *args: "Any",
         setup: bool = False,
+        run: bool = False,
+        save: bool = False,
         load: bool = False,
         result: bool = False,
         analyse: bool = False,
-        complete: bool = False,
         **kwargs: "Any",
     ) -> None:
-        if not any((setup, load, result, analyse, complete)):
-            setup = True
-            load = True
-            result = True
-            analyse = True
-
         if setup:
-            self.clear_attributes([
-                "data",
-                "pae",
-                "nflow",
-                "mask",
-                "sn_mask",
-                "spec_mask",
-                "wl_mask",
-                "train_data",
-                "train_mask",
-                "train_sn_mask",
-                "train_spec_mask",
-                "train_wl_mask",
-                "test_data",
-                "test_mask",
-                "test_sn_mask",
-                "test_spec_mask",
-                "test_wl_mask",
-                "val_data",
-                "val_mask",
-                "val_sn_mask",
-                "val_spec_mask",
-                "val_wl_mask",
-                "map_stage_init",
-                "map_stage_random",
-                "map_stage_delta_m",
-                "map_stage_delta_av",
-                "map_stages",
-            ])
+            self.clear_attributes(self.setup_attributes)
+
+        if run:
+            self.clear_attributes(self.run_attributes)
+
+        if save:
+            self.clear_attributes(self.save_attributes)
 
         if load:
-            self.clear_attributes("model")
-            self.clear_attributes("models")
+            self.clear_attributes(self.load_attributes)
 
         if result:
             self.clear_attributes("results")
@@ -848,10 +1050,11 @@ class Posterior(Step[PosteriorConfig]):
         super()._clear(
             *args,
             setup=setup,
+            run=run,
+            save=save,
             load=load,
             result=result,
             analyse=analyse,
-            complete=complete,
             **kwargs,
         )
 
@@ -859,20 +1062,24 @@ class Posterior(Step[PosteriorConfig]):
 
     def setup_data_masks(self: Self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
-            data: SNPAEData = getattr(self, f"{mask_type}data")
-            mask = data.mask
+            data: LazySNPAEData = getattr(self, f"{mask_type}data")
+            input_redshift = data.redshift
+            input_phase = data.phase
+            input_wavelength = data.wavelength
+            input_mask = data.mask
+            data.clear()
 
             min_redshift: float = getattr(self, f"min_{mask_type}redshift")
             max_redshift: float = getattr(self, f"max_{mask_type}redshift")
             redshift_mask = (
-                (data.redshift >= min_redshift) & (data.redshift <= max_redshift)
+                (input_redshift >= min_redshift) & (input_redshift <= max_redshift)
             )[:, 0:1, 0:1]
             # Mask out SNe outside the redshift range
             sn_mask = redshift_mask.astype(np.int32)
 
             min_phase: float = getattr(self, f"min_{mask_type}phase")
             max_phase: float = getattr(self, f"max_{mask_type}phase")
-            phase_mask = ((data.phase >= min_phase) & (data.phase <= max_phase))[
+            phase_mask = ((input_phase >= min_phase) & (input_phase <= max_phase))[
                 ..., 0:1
             ]
             # Mask out spectra outside the phase range
@@ -880,25 +1087,45 @@ class Posterior(Step[PosteriorConfig]):
 
             min_wavelength: float = getattr(self, f"min_{mask_type}wavelength")
             max_wavelength: float = getattr(self, f"max_{mask_type}wavelength")
-            wavelength_mask = (data.wavelength >= min_wavelength) & (
-                data.wavelength <= max_wavelength
+            wavelength_mask = (input_wavelength >= min_wavelength) & (
+                input_wavelength <= max_wavelength
             )
             # Mask out wavelengths outside the wavelength range
             wl_mask = wavelength_mask.astype(np.int32)
 
-            setattr(self, f"{mask_type}mask", mask)
+            setattr(self, f"{mask_type}mask", input_mask)
             setattr(self, f"{mask_type}sn_mask", sn_mask)
             setattr(self, f"{mask_type}spec_mask", spec_mask)
             setattr(self, f"{mask_type}wl_mask", wl_mask)
 
 
-class PosteriorStep(Model[PosteriorStepConfig]):
+class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
     id: "ClassVar[str]" = "posterior"
     model_backend: "ClassVar[dict[str, Callable[[], type[PosteriorModel]]]]" = {
         "TensorFlow": lambda: importlib.import_module(
             ".tf", __package__
         ).TFPosteriorModel,
     }
+
+    @override
+    def _model(
+        self: Self,
+        *args: Any,
+        force: bool = False,
+        variants: str | list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if variants is None:
+            return
+        if not isinstance(variants, list):
+            variants = [variants]
+        for name in variants:
+            variant = self.variants[name]
+            if force or not hasattr(variant, "model"):
+                model = self.models_cls[name](variant, variant.subsets[0], variant.seed)
+            else:
+                model = variant.model
+            variant.model = model
 
 
 PosteriorStep.register_step(Posterior)

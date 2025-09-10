@@ -1,6 +1,7 @@
 # Copyright 2025 Patrick Armstrong
 from typing import TYPE_CHECKING, Self, cast, override
 
+import numpy as np
 import tensorflow as tf
 from tensorflow import keras as ks
 from tqdm.keras import TqdmCallback
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
 
     from supaernova.steps.pae import TFPAEModel
     from supaernova.steps.nflow import NFlow
-    from supaernova.configs.steps.data import SNPAEData
+    from supaernova.configs.steps.data import LazySNPAEData
     from supaernova.typing.backends.tf import Loss, LearningRateSchedule
     from supaernova.configs.steps.nflow.tf import TFNFlowConfig
 
@@ -53,7 +54,7 @@ class TFNFlowModel(ks.Model):
         self.wl_dim = config.wl_dim
 
         self.latents: tf.Tensor
-        self.data: SNPAEData = config.data
+        self.data: LazySNPAEData = config.data
         self.data_mask: npt.NDArray[bool] = config.mask
         self.sn_mask: npt.NDArray[bool] = config.sn_mask
         self.spec_mask: npt.NDArray[bool] = config.spec_mask
@@ -69,14 +70,14 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_mask, axis=-1),
             tf.int32,
         )
-        mask_sn = tf.reduce_max(mask_spec, axis=-2)
+        mask_sn = tf.reduce_max(mask_spec, axis=-1, keepdims=True)
         self.mask = tf.cast(mask_sn, tf.float32)
 
         self.train_latents: tf.Tensor
-        self.train_data: SNPAEData = config.train_data
+        self.train_data: LazySNPAEData = config.train_data
         self.train_data_mask: npt.NDArray[bool] = config.train_mask
         self.train_sn_mask: npt.NDArray[bool] = config.train_sn_mask
         self.train_spec_mask: npt.NDArray[bool] = config.train_spec_mask
@@ -97,14 +98,14 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         train_mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_train_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_train_mask, axis=-1),
             tf.int32,
         )
-        train_mask_sn = tf.reduce_max(train_mask_spec, axis=-2)
+        train_mask_sn = tf.reduce_max(train_mask_spec, axis=-1, keepdims=True)
         self.train_mask = tf.cast(train_mask_sn, tf.float32)
 
         self.test_latents: tf.Tensor
-        self.test_data: SNPAEData = config.test_data
+        self.test_data: LazySNPAEData = config.test_data
         self.test_data_mask: npt.NDArray[bool] = config.test_mask
         self.test_sn_mask: npt.NDArray[bool] = config.test_sn_mask
         self.test_spec_mask: npt.NDArray[bool] = config.test_spec_mask
@@ -125,14 +126,14 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         test_mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_test_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_test_mask, axis=-1),
             tf.int32,
         )
-        test_mask_sn = tf.reduce_max(test_mask_spec, axis=-2)
+        test_mask_sn = tf.reduce_max(test_mask_spec, axis=-1, keepdims=True)
         self.test_mask = tf.cast(test_mask_sn, tf.float32)
 
         self.val_latents: tf.Tensor
-        self.val_data: SNPAEData = config.val_data
+        self.val_data: LazySNPAEData = config.val_data
         self.val_data_mask: npt.NDArray[bool] = config.val_mask
         self.val_sn_mask: npt.NDArray[bool] = config.val_sn_mask
         self.val_spec_mask: npt.NDArray[bool] = config.val_spec_mask
@@ -153,10 +154,10 @@ class TFNFlowModel(ks.Model):
             tf.int32,
         )
         val_mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_val_mask, axis=-1, keepdims=True),
+            tf.reduce_max(valid_wl_val_mask, axis=-1),
             tf.int32,
         )
-        val_mask_sn = tf.reduce_max(val_mask_spec, axis=-2)
+        val_mask_sn = tf.reduce_max(val_mask_spec, axis=-1, keepdims=True)
         self.val_mask = tf.cast(val_mask_sn, tf.float32)
 
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
@@ -300,7 +301,6 @@ class TFNFlowModel(ks.Model):
         )
 
     @override
-    @tf.function
     def call(
         self: "Self",
         inputs: tf.Tensor,
@@ -310,10 +310,21 @@ class TFNFlowModel(ks.Model):
 
         # === Unpack Inputs ===
         latents = inputs[..., :-1]
-        mask = inputs[..., -1:][:, 0]
-        mask = tf.cast(mask, tf.bool)
-        masked_flow = tfd.Masked(self.flow, mask)
-        return masked_flow.log_prob(latents)
+        mask = inputs[..., -1:][..., 0]
+
+        # === Calculate Log Probability ===
+        log_prob = self.flow.log_prob(latents)
+
+        # Replace NaN and inf with infinitely low log prob
+        inf_log_prob = -np.inf * tf.ones_like(log_prob)
+
+        masked_log_prob = tf.where(tf.cast(mask, tf.bool), log_prob, inf_log_prob)
+
+        return tf.where(
+            tf.math.is_finite(masked_log_prob),
+            masked_log_prob,
+            inf_log_prob,
+        )
 
     def u_to_z(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         # If permute is True, then the incoming u_latents need to be permuted correctly
@@ -430,7 +441,7 @@ class TFNFlowModel(ks.Model):
         )
 
         # === Prep Data ===
-        data = tf.concat(
+        _data = tf.concat(
             (self.latents, self.mask),
             axis=-1,
         )
@@ -440,7 +451,7 @@ class TFNFlowModel(ks.Model):
             axis=-1,
         )
 
-        test_data = tf.concat(
+        _test_data = tf.concat(
             (self.test_latents, self.test_mask),
             axis=-1,
         )
@@ -466,9 +477,10 @@ class TFNFlowModel(ks.Model):
 
     def _get_latents(self: "Self") -> None:
         for dt in ["train_", "test_", "val_", ""]:
-            data: SNPAEData = getattr(self, f"{dt}data")
+            data: LazySNPAEData = getattr(self, f"{dt}data")
             phase = tf.convert_to_tensor(data.time, dtype=tf.float32)
             amplitude = tf.convert_to_tensor(data.amplitude, dtype=tf.float32)
+            data.clear()
             data_mask = tf.convert_to_tensor(
                 getattr(self, f"{dt}data_mask"), dtype=tf.int32
             )

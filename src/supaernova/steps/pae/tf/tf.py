@@ -1,5 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 
+import os
 from typing import (
     TYPE_CHECKING,
     Self,
@@ -33,6 +34,8 @@ if TYPE_CHECKING:
     from supaernova.configs.steps.pae.tf import TFPAEConfig
 
     type StageNum = int
+
+NPROC = os.cpu_count()
 
 
 @ks.utils.register_keras_serializable("SuPAErnova")
@@ -803,14 +806,17 @@ class TFPAEModel(ks.Model):
         # --- Masks ---
         # Data Mask
         input_mask = tf.ones_like(input_amp, dtype=tf.int32) if mask is None else mask
+
         # Wavelength Range Mask
         input_wl_mask = tf.ones_like(input_mask) if wl_mask is None else wl_mask
+
         # Phase Range Mask
         input_spec_mask = (
             tf.reduce_max(input_wl_mask, axis=-1, keepdims=True)
             if spec_mask is None
             else spec_mask
         )
+
         # Redshift Range Mask
         input_sn_mask = (
             tf.reduce_max(input_spec_mask, axis=-2, keepdims=True)
@@ -930,7 +936,7 @@ class TFPAEModel(ks.Model):
             loss_terms[self.delta_loss_tracker.name] = physical_latents_penalty
 
         if self.loss_covariance_penalty > 0:
-            eps = tf.constant(1e-3)
+            eps = tf.constant(1e-10)
             mask_latents = tf.cast(mask_sn, tf.float32)
             n_unmasked_latents = tf.cast(
                 # tf.math.maximum(
@@ -1158,7 +1164,7 @@ class TFPAEModel(ks.Model):
             self.stage.val_wl_mask, dtype=tf.int32
         )
 
-        n_batches_per_epoch = self.stage.train_data.amplitude.shape[0] / self.batch_size
+        n_batches_per_epoch = self.stage.train_mask.shape[0] / self.batch_size
 
         # === Setup Callbacks ===
         callbacks: list[ks.callbacks.Callback] = []
@@ -1172,7 +1178,7 @@ class TFPAEModel(ks.Model):
             patience = int(self.stage.epochs * patience)
         callbacks.append(
             ks.callbacks.EarlyStopping(
-                monitor="val_loss",
+                monitor="val_loss_pred",
                 patience=patience,
                 mode="min",
                 start_from_epoch=patience,
@@ -1230,6 +1236,7 @@ class TFPAEModel(ks.Model):
             self.stage.spec_mask,
             self.stage.wl_mask,
         )
+        self.stage.data.clear()
 
         train_data = (
             self.stage.train_data.time,
@@ -1241,6 +1248,7 @@ class TFPAEModel(ks.Model):
             self.stage.train_spec_mask,
             self.stage.train_wl_mask,
         )
+        self.stage.train_data.clear()
 
         _test_data = (
             self.stage.test_data.time,
@@ -1252,6 +1260,7 @@ class TFPAEModel(ks.Model):
             self.stage.test_spec_mask,
             self.stage.test_wl_mask,
         )
+        self.stage.test_data.clear()
 
         val_data = (
             self.stage.val_data.time,
@@ -1263,6 +1272,7 @@ class TFPAEModel(ks.Model):
             self.stage.val_spec_mask,
             self.stage.val_wl_mask,
         )
+        self.stage.val_data.clear()
 
         # === Train ===
         self._epoch = 0
@@ -1319,6 +1329,7 @@ class TFPAEModel(ks.Model):
                 amplitude = tf.convert_to_tensor(
                     self.stage.data.amplitude, dtype=tf.float32
                 )
+                self.stage.data.clear()
                 pae_input = tf.concat((phase, amplitude), axis=-1)
 
                 mask = tf.convert_to_tensor(self.stage.mask, dtype=tf.int32)
@@ -1371,6 +1382,9 @@ class TFPAEModel(ks.Model):
             self.stage.train_data.amplitude, dtype=tf.float32
         )
         sigma = tf.convert_to_tensor(self.stage.train_data.sigma, dtype=tf.float32)
+
+        self.stage.train_data.clear()
+
         mask = tf.convert_to_tensor(self.stage.train_mask, dtype=tf.int32)
         sn_mask = tf.convert_to_tensor(self.stage.train_sn_mask, dtype=tf.int32)
         spec_mask = tf.convert_to_tensor(self.stage.train_spec_mask, dtype=tf.int32)
@@ -1552,6 +1566,7 @@ class TFPAEModel(ks.Model):
             shuffled_inds = tf.map_fn(
                 shuffle_and_pad,
                 n_unmasked_spectra_per_sn[:, 0],
+                parallel_iterations=NPROC,
             )
 
             shuffled_mask = tf.cast(
@@ -1572,7 +1587,9 @@ class TFPAEModel(ks.Model):
             tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor
         ],
     ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        (phase, amp_true, d_amp, mask, sn_mask, spec_mask, wl_mask) = data
+        (phase, amp_true, d_amp, mask, sn_mask, spec_mask, wl_mask) = (
+            tf.convert_to_tensor(d, dtype=tf.float32) for d in data
+        )
         _, amp_pred = self(
             (phase, amp_true),
             training=False,
@@ -1592,7 +1609,7 @@ class TFPAEModel(ks.Model):
 
         # === Setup Masks ===
         # Apply sn and spec masks
-        recon_mask = mask * sn_mask * spec_mask * wl_mask
+        recon_mask = tf.cast(mask * sn_mask * spec_mask * wl_mask, tf.int32)
 
         # ~(~input_mask & input_wl_mask)
         # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask

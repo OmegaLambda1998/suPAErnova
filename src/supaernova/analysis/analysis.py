@@ -35,11 +35,14 @@ mpl.rcParams["axes.prop_cycle"] = cycler(color=COLOURS)
 
 
 if TYPE_CHECKING:
+    from typing import Literal
+    from collections.abc import Sequence
+
     import pandas as pd
     from matplotlib.lines import Line2D
     from matplotlib.colors import Colormap, Normalize
     from matplotlib.colorbar import Colorbar
-    from matplotlib.container import Container, ErrorbarContainer
+    from matplotlib.container import Container, BarContainer, ErrorbarContainer
     from matplotlib.collections import (
         Collection,
         PathCollection,
@@ -53,12 +56,12 @@ if TYPE_CHECKING:
 
 class AbstractPlot(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(
-        arbitrary_types_allowed=True, allow="extra"
+        arbitrary_types_allowed=True, extra="allow"
     )
 
     name: str | None = None
     savepath: Path | None = None
-    ext: str = "svg"
+    ext: str = "png"
     plot_args: list[Any] | None = None
     plot_kwargs: dict[str, Any] | None = None
 
@@ -171,6 +174,37 @@ class Plotter:
         return Plotter._plot("plot", x, y, *args, fig=fig, ax=ax, **kwargs)
 
     @staticmethod
+    def hist(
+        x,
+        *args: "Any",
+        fig: "Figure | None" = None,
+        ax: "Axis | None" = None,
+        bins: "int | Sequence | str" = "fd",
+        density: bool = True,
+        norm: bool = False,
+        xerr=None,
+        orientation: "Literal['vertical', 'horizontal']" = "horizontal",
+        **kwargs: "Any",
+    ) -> "tuple[Figure, Axis, tuple[Sequence[int] | list[Sequence[int]], Sequence[float], BarContainer]]":
+        weights = np.ones_like(x) if xerr is None else xerr
+        if norm:
+            weights /= len(x)
+            density = False
+
+        return Plotter._plot(
+            "hist",
+            x,
+            *args,
+            fig=fig,
+            ax=ax,
+            bins=bins,
+            density=density,
+            weights=weights,
+            orientation=orientation,
+            **kwargs,
+        )
+
+    @staticmethod
     def axvline(
         x,
         *args: "Any",
@@ -281,7 +315,7 @@ class Plotter:
 
     @staticmethod
     def save(fig: "Figure", savepath: "Path", *, clear: bool = True) -> "Figure":
-        fig.savefig(savepath, transparent=True, bbox_inches="tight")
+        fig.savefig(savepath, transparent=True, bbox_inches="tight", dpi=300)
         if clear:
             fig, _ = Plotter.clear(fig=fig)
         return fig
