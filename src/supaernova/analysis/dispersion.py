@@ -393,7 +393,17 @@ class DispersionPlotter(Plotter):
             < np.abs(10**residual_max - 10**residual_scale_max)
             else residual_scale_max
         )
-        residual_step = residual_scale / 4
+        residual_step = (
+            10
+            ** (
+                residual_scale_min
+                if np.abs(10**residual_max - 10**residual_scale_min)
+                < 2 * np.abs(10**residual_max - 10**residual_scale_max)
+                else residual_scale_max - np.log10(2)
+            )
+            / 4
+        )
+
         if residual_step == 0:
             return
 
@@ -418,11 +428,11 @@ class DispersionPlotter(Plotter):
         pull_scale = 10 ** (
             pull_scale_min
             if np.abs(10**pull_max - 10**pull_scale_min)
-            < 2 * np.abs(10**pull_max - 10**pull_scale_max)
+            < np.abs(10**pull_max - 10**pull_scale_max)
             else pull_scale_max
         )
+        pull_step = (10**pull_scale_min) / 4
 
-        pull_step = pull_scale / 4
         pull_bins = np.arange(
             0 - 0.5 * pull_step, 5 * pull_scale + 1.5 * pull_step, pull_step
         )
