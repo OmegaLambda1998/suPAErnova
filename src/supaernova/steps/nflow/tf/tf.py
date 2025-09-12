@@ -184,7 +184,9 @@ class TFNFlowModel(ks.Model):
         self.lr_decay_rate: float = self.options.lr_decay_rate
         self.lr_weight_decay_rate: float = self.options.lr_weight_decay_rate
 
-        self.activation: Callable[[tf.Tensor], tf.Tensor] = self.options.activation_fn
+        self.activation: Callable[[tf.Tensor], tf.Tensor] | None = (
+            self.options.activation_fn
+        )
         self._scheduler: type[LearningRateSchedule] = self.options.scheduler_cls
         self._optimiser: type[ks.optimizers.Optimizer] = self.options.optimiser_cls
         loss: Loss = self.options.loss_cls()
@@ -317,8 +319,9 @@ class TFNFlowModel(ks.Model):
 
         # Replace NaN and inf with infinitely low log prob
         inf_log_prob = -np.inf * tf.ones_like(log_prob)
+        zero_log_prob = tf.zeros_like(log_prob)
 
-        masked_log_prob = tf.where(tf.cast(mask, tf.bool), log_prob, inf_log_prob)
+        masked_log_prob = tf.where(tf.cast(mask, tf.bool), log_prob, zero_log_prob)
 
         return tf.where(
             tf.math.is_finite(masked_log_prob),
@@ -473,6 +476,7 @@ class TFNFlowModel(ks.Model):
             verbose=0,
             validation_data=(val_data, tf.zeros_like(self.val_latents)),
             validation_freq=1,
+            shuffle=True,
         )
 
     def _get_latents(self: "Self") -> None:

@@ -449,6 +449,9 @@ class TFPosteriorModel(ks.Model):
                 self.train_map(stage, c, chain, savepath=savepath)
 
                 log_prob = -self.map.negative_log_prob
+                num_total = tf.reduce_sum(tf.ones_like(log_prob)).numpy()
+                num_finite = tf.math.count_nonzero(tf.math.is_finite(log_prob)).numpy()
+                finite_ratio = num_finite / num_total
                 min_log_prob = float(
                     tf.reduce_min(
                         tf.where(
@@ -486,6 +489,7 @@ class TFPosteriorModel(ks.Model):
                         * tf.cast(self.map.improved, tf.int32)
                     ).numpy(),
                     "log_prob": (
+                        f"{finite_ratio:.2%}",
                         f"{min_log_prob:.2E}",
                         f"{mean_log_prob:.2E}",
                         f"{max_log_prob:.2E}",
@@ -496,8 +500,11 @@ class TFPosteriorModel(ks.Model):
                 # TODO: Remove non-finite log_prob parameters
                 if summary_writer is not None:
                     with summary_writer.as_default():
+                        converged = self.map.converged
                         tf.summary.histogram(
-                            "chain_min", self.map.chain_min, step=chain
+                            "chain_min",
+                            tf.boolean_mask(self.map.chain_min, converged),
+                            step=chain,
                         )
                         tf.summary.scalar(
                             "converged",
@@ -506,6 +513,15 @@ class TFPosteriorModel(ks.Model):
                                 * tf.cast(self.map.converged, tf.int32)
                             )
                             / self.map.converged.shape[0],
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "failed",
+                            tf.reduce_sum(
+                                tf.ones_like(self.map.failed, dtype=tf.int32)
+                                * tf.cast(self.map.failed, tf.int32)
+                            )
+                            / self.map.failed.shape[0],
                             step=chain,
                         )
                         tf.summary.scalar(
@@ -541,25 +557,45 @@ class TFPosteriorModel(ks.Model):
                             step=chain,
                         )
                         tf.summary.histogram(
-                            "u_delta_av", self.map.u_delta_av.best, step=chain
+                            "u_delta_av",
+                            tf.boolean_mask(self.map.u_delta_av.best, converged),
+                            step=chain,
                         )
                         tf.summary.histogram(
-                            "delta_av", self.map.delta_av.best, step=chain
+                            "delta_av",
+                            tf.boolean_mask(self.map.delta_av.best, converged),
+                            step=chain,
                         )
                         tf.summary.histogram(
-                            "delta_m", self.map.delta_m.best, step=chain
+                            "delta_m",
+                            tf.boolean_mask(self.map.delta_m.best, converged),
+                            step=chain,
                         )
                         tf.summary.histogram(
-                            "delta_p", self.map.delta_p.best, step=chain
+                            "delta_p",
+                            tf.boolean_mask(self.map.delta_p.best, converged),
+                            step=chain,
                         )
-                        tf.summary.histogram("bias", self.map.bias.best, step=chain)
+                        tf.summary.histogram(
+                            "bias",
+                            tf.boolean_mask(self.map.bias.best, converged),
+                            step=chain,
+                        )
                         for i in range(self.map.n_u_latents):
                             tf.summary.histogram(
-                                f"u_{i}", self.map.u_latents.best[..., i], step=chain
+                                f"u_{i}",
+                                tf.boolean_mask(
+                                    self.map.u_latents.best[..., i], converged
+                                ),
+                                step=chain,
                             )
                         for i in range(self.map.n_z_latents):
                             tf.summary.histogram(
-                                f"z_{i}", self.map.z_latents.best[..., i], step=chain
+                                f"z_{i}",
+                                tf.boolean_mask(
+                                    self.map.z_latents.best[..., i], converged
+                                ),
+                                step=chain,
                             )
                 chain += 1
         self.log.info(f"Minimum found at chains:\n{self.map.chain_min}")
@@ -568,35 +604,6 @@ class TFPosteriorModel(ks.Model):
 
         if savepath is not None:
             self.save_checkpoint(savepath, save_map=True, save_hmc=True)
-
-    @tf.function
-    def vals_and_grads(self: "Self", position: tf.Tensor) -> tf.Tensor:
-        input_position = self.map.get_position(position)
-
-        log_prob = self(
-            (input_position, self.data_time, self.data_amplitude, self.data_sigma),
-            training=False,
-            mask=self.data_mask,
-            sn_mask=self.sn_mask,
-            spec_mask=self.spec_mask,
-            wl_mask=self.wl_mask,
-        )
-        return self._loss(tf.zeros_like(log_prob), log_prob)
-
-    def lbfgs(self: "Self") -> "LBfgsOptimizerResults":
-        return tfp.optimizer.lbfgs_minimize(
-            lambda x: tfp.math.value_and_gradient(
-                self.vals_and_grads, x, auto_unpack_single_arg=False
-            ),
-            initial_position=self.map.position.current,
-            num_correction_pairs=1,
-            tolerance=self.tolerance,
-            x_tolerance=self.x_tolerance,
-            f_relative_tolerance=self.f_relative_tolerance,
-            f_absolute_tolerance=self.f_absolute_tolerance,
-            max_iterations=self.max_iterations,
-            parallel_iterations=NPROC,
-        )
 
     def train_map(
         self: "Self",
@@ -620,9 +627,84 @@ class TFPosteriorModel(ks.Model):
 
         self.map.setup(stage, chain)
 
-        results = self.lbfgs()
+        progress = tqdm()
 
-        improved = results.objective_value < self.map.negative_log_prob
+        @tf.py_function(Tout=[])
+        def update_progress(log_prob) -> None:
+            num_total = tf.math.reduce_sum(tf.ones_like(log_prob)).numpy()
+            num_finite = tf.math.count_nonzero(tf.math.is_finite(log_prob)).numpy()
+            finite_ratio = num_finite / num_total
+
+            min_log_prob = float(
+                tf.reduce_min(
+                    tf.where(
+                        tf.math.is_finite(log_prob),
+                        log_prob,
+                        np.inf * tf.ones_like(log_prob),
+                    )
+                ).numpy()
+            )
+            mean_log_prob = float(
+                tf.reduce_mean(
+                    tf.where(
+                        tf.math.is_finite(log_prob),
+                        log_prob,
+                        tf.zeros_like(log_prob),
+                    )
+                ).numpy()
+            )
+            max_log_prob = float(
+                tf.reduce_max(
+                    tf.where(
+                        tf.math.is_finite(log_prob),
+                        log_prob,
+                        -np.inf * tf.ones_like(log_prob),
+                    )
+                ).numpy()
+            )
+            progress.set_postfix({
+                "log_prob": (
+                    f"{finite_ratio:.2%}",
+                    f"{min_log_prob:.2E}",
+                    f"{mean_log_prob:.2E}",
+                    f"{max_log_prob:.2E}",
+                ),
+            })
+            progress.update()
+
+        @tf.function
+        def vals_and_grads(position: tf.Tensor) -> tf.Tensor:
+            input_position = self.map.get_position(position)
+            log_prob = self(
+                (input_position, self.data_time, self.data_amplitude, self.data_sigma),
+                training=False,
+                mask=self.data_mask,
+                sn_mask=self.sn_mask,
+                spec_mask=self.spec_mask,
+                wl_mask=self.wl_mask,
+            )
+            update_progress(log_prob)
+            return self._loss(tf.zeros_like(log_prob), log_prob)
+
+        def lbfgs() -> "LBfgsOptimizerResults":
+            return tfp.optimizer.lbfgs_minimize(
+                lambda x: tfp.math.value_and_gradient(
+                    vals_and_grads, x, auto_unpack_single_arg=False
+                ),
+                initial_position=self.map.position.current,
+                tolerance=self.tolerance,
+                x_tolerance=self.x_tolerance,
+                f_relative_tolerance=self.f_relative_tolerance,
+                f_absolute_tolerance=self.f_absolute_tolerance,
+                max_iterations=self.max_iterations,
+                parallel_iterations=NPROC,
+            )
+
+        results = lbfgs()
+
+        improved = (
+            results.objective_value < self.map.negative_log_prob
+        ) * results.converged
         self.map.improved.assign(improved)
 
         self.map.chain_min.assign(
@@ -638,6 +720,13 @@ class TFPosteriorModel(ks.Model):
                 improved,
                 results.converged,
                 self.map.converged,
+            )
+        )
+        self.map.failed.assign(
+            tf.where(
+                improved,
+                results.failed,
+                self.map.failed,
             )
         )
         self.map.num_evaluations.assign_add(results.num_objective_evaluations)
@@ -903,8 +992,12 @@ class TFPosteriorModel(ks.Model):
             log_dir = savepath.parent / self.log_path / savepath.stem / "hmc"
             summary_writer = tf.summary.create_file_writer(str(log_dir))
 
+        step_size_std = tf.math.reduce_std(initial_position, axis=0)
+        step_size_inner = tf.where(
+            self.step_size > step_size_std, self.step_size, step_size_std
+        )
         step_size = tf.repeat(
-            tf.expand_dims(self.step_size, axis=0),
+            tf.expand_dims(step_size_inner, axis=0),
             repeats=initial_position.shape[0],
             axis=0,
         )
@@ -994,6 +1087,7 @@ class TFPosteriorModel(ks.Model):
                 inner_kernel=sampler,
                 num_adaptation_steps=int(self.n_burnin * 0.8),
                 target_accept_prob=self.target_acceptance_rate,
+                # reduce_fn=tfp.math.reduce_log_harmonic_mean_exp,
             )
 
             samples, [step_sizes_final, is_accepted] = tfp.mcmc.sample_chain(

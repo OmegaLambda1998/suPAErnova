@@ -156,6 +156,7 @@ class Posterior(ModelStep[PosteriorConfig]):
             "step_sizes",
             "model",
             "map_stage_init",
+            "map_stage_constant",
             "map_stage_random",
             "map_stage_delta_m",
             "map_stage_delta_av",
@@ -228,6 +229,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
         # MAP Stages
         self.map_stage_init: PosteriorMAPStage
+        self.map_stage_constant: PosteriorMAPStage
         self.map_stage_random: PosteriorMAPStage
         self.map_stage_delta_m: PosteriorMAPStage
         self.map_stage_delta_av: PosteriorMAPStage
@@ -392,15 +394,27 @@ class Posterior(ModelStep[PosteriorConfig]):
             self.recon_error_centers[subset] = recon_error_centers
 
         # --- Stages ---
-        self.map_stage_init = PosteriorMAPStage.model_validate({
+        self.map_stage_constant = PosteriorMAPStage.model_validate({
             "stage": 0,
+            "name": "constant",
+            "fname": "constant",
+            "n_chains": 1,
+            "init_u_delta_av": "constant",
+            "init_latents": "u_constant",
+            "init_delta_av": "constant",
+            "init_delta_m": "constant",
+            "init_delta_p": "constant",
+            "init_bias": "constant",
+        })
+        self.map_stage_init = PosteriorMAPStage.model_validate({
+            "stage": 1,
             "name": "init",
             "fname": "init",
             "n_chains": 1,
             "init": True,
         })
         self.map_stage_random = PosteriorMAPStage.model_validate({
-            "stage": 1,
+            "stage": 2,
             "name": "random",
             "fname": "random",
             "n_chains": self.n_random_chains,
@@ -412,7 +426,7 @@ class Posterior(ModelStep[PosteriorConfig]):
             "init_bias": "current",
         })
         self.map_stage_delta_m = PosteriorMAPStage.model_validate({
-            "stage": 2,
+            "stage": 3,
             "name": "delta_m",
             "fname": "delta_m",
             "n_chains": self.n_delta_m_chains,
@@ -424,7 +438,7 @@ class Posterior(ModelStep[PosteriorConfig]):
             "init_bias": "current",
         })
         self.map_stage_delta_av = PosteriorMAPStage.model_validate({
-            "stage": 3,
+            "stage": 4,
             "name": "delta_av",
             "fname": "delta_av",
             "n_chains": self.n_delta_av_chains,
@@ -437,6 +451,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         })
 
         self.map_stages = [
+            self.map_stage_constant,
             self.map_stage_init,
             self.map_stage_random,
             self.map_stage_delta_m,

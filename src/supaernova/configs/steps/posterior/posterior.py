@@ -196,7 +196,7 @@ class PosteriorConfig(BackendConfig):
     # - HMC -
     n_burnin: PositiveInt
     n_samples: PositiveInt
-    n_leapfrog: PositiveInt = 3
+    n_leapfrog: PositiveInt = 5
     n_thinning: NonNegativeInt = 0
     # --- Optional ---
     debug: bool = False
@@ -236,42 +236,47 @@ class PosteriorConfig(BackendConfig):
     # - MAP -
     random_initial_positions: bool = False
     tolerance: PositiveFloat = 1e-8
-    x_tolerance: NonNegativeFloat = 5e-3
+    x_tolerance: NonNegativeFloat = 0
     f_relative_tolerance: NonNegativeFloat = 0
     f_absolute_tolerance: NonNegativeFloat = 0
     max_iterations: PositiveInt = 2500
     target_acceptance_rate: PositiveFloat = 0.651
 
-    u_delta_av_min: float = -np.inf
-    u_delta_av_max: float = np.inf
-    u_delta_av_start: float = -1.0
-    u_delta_av_end: float = 1.0
+    u_delta_av_min: float = -0.1
+    u_delta_av_max: float = 0.1
+    u_delta_av_start: float = -0.1
+    u_delta_av_end: float = 0.1
     u_delta_av_mean: float = 0.0
     u_delta_av_std: float = 1.0
-    u_latents_min: float = -np.inf
-    u_latents_max: float = np.inf
+
+    u_latents_min: float = -0.1
+    u_latents_max: float = 0.1
     u_latents_mean: float = 0.0
     u_latents_std: float = 1.0
-    delta_av_min: float = -np.inf
-    delta_av_max: float = np.inf
+
+    delta_av_min: float = -0.5
+    delta_av_max: float = 0.5
     delta_av_start: float = -0.5
     delta_av_end: float = 0.5
     delta_av_mean: float = 0.0
     delta_av_std: float = 0.5
-    delta_m_min: float = -np.inf
-    delta_m_max: float = np.inf
-    delta_m_start: float = -1.5
-    delta_m_end: float = 1.5
+
+    delta_m_min: float = -0.1
+    delta_m_max: float = 0.1
+    delta_m_start: float = -0.5
+    delta_m_end: float = 0.5
     delta_m_mean: float = 0.0
     delta_m_std: float = 0.1
-    delta_p_min: float = -np.inf
-    delta_p_max: float = np.inf
-    delta_p_start: float = -1.0
-    delta_p_end: float = 1.0
+
+    delta_p_min: float = -0.001
+    delta_p_max: float = 0.001
+    delta_p_start: float = -0.005
+    delta_p_end: float = 0.005
     delta_p_mean: float = 0.0
-    delta_p_std: float = 0.01
-    bias_min: float = -np.inf
-    bias_max: float = np.inf
+    delta_p_std: float = 0.001
+
+    bias_min: float = -1.0
+    bias_max: float = 1.0
     bias_start: float = -1.0
     bias_end: float = 1.0
     bias_mean: float = 0.0

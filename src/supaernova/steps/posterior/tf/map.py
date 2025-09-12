@@ -71,6 +71,9 @@ class PosteriorMap(tf.Module):
         self.converged = tf.Variable(
             tf.cast(tf.zeros(self.sn_dim, dtype=tf.int32), tf.bool)
         )
+        self.failed = tf.Variable(
+            tf.cast(tf.ones(self.sn_dim, dtype=tf.int32), tf.bool)
+        )
         self.improved = tf.Variable(
             tf.cast(tf.zeros(self.sn_dim, dtype=tf.int32), tf.bool)
         )
@@ -543,18 +546,19 @@ class PosteriorMap(tf.Module):
             i += 1
         u_latents = position[:, i:]
 
-        delta_m = tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max)
-        delta_p = tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max)
-        bias = tf.clip_by_value(bias, self.bias_min, self.bias_max)
-        u_delta_av = tf.clip_by_value(
-            u_delta_av, self.u_delta_av_min, self.u_delta_av_max
-        )
-        u_latents = tf.clip_by_value(u_latents, self.u_latents_min, self.u_latents_max)
+        # delta_m = tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max)
+        # delta_p = tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max)
+        # bias = tf.clip_by_value(bias, self.bias_min, self.bias_max)
+        # u_delta_av = tf.clip_by_value(
+        #     u_delta_av, self.u_delta_av_min, self.u_delta_av_max
+        # )
+        # u_latents = tf.clip_by_value(u_latents, self.u_latents_min, self.u_latents_max)
 
         return tf.concat([delta_m, delta_p, bias, u_delta_av, u_latents], axis=-1)
 
     def prior(self: Self, position: tf.Tensor) -> tf.Tensor:
-        log_prior = tf.zeros((position.shape[0],))
+        zero_prior = tf.zeros((position.shape[0],))
+        log_prior = zero_prior
         inf_prior = -tf.ones_like(log_prior) * np.inf
 
         delta_m = position[:, 0:1]
@@ -564,32 +568,78 @@ class PosteriorMap(tf.Module):
         u_latents = position[:, 4:]
 
         u_latents_log_prior = self.u_latents_prior.log_prob(u_latents)
+        u_latents_log_prior = tf.where(
+            tf.math.reduce_all(
+                u_latents
+                == tf.clip_by_value(u_latents, self.u_latents_min, self.u_latents_max),
+                axis=-1,
+            ),
+            u_latents_log_prior,
+            0.5 * u_latents_log_prior,
+        )
         log_prior += tf.where(
-            tf.math.is_nan(u_latents_log_prior), inf_prior, u_latents_log_prior
+            tf.math.is_finite(u_latents_log_prior), u_latents_log_prior, inf_prior
         )
 
         if self.train_delta_m:
             delta_m_log_prior = self.delta_m_prior.log_prob(delta_m)[:, 0]
-            log_prior += tf.where(
-                tf.math.is_nan(delta_m_log_prior), inf_prior, delta_m_log_prior
-            )
+        else:
+            delta_m_log_prior = zero_prior
+        delta_m_log_prior = tf.where(
+            (delta_m == tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max))[
+                :, 0
+            ],
+            delta_m_log_prior,
+            0.5 * delta_m_log_prior,
+        )
+        log_prior += tf.where(
+            tf.math.is_finite(delta_m_log_prior), delta_m_log_prior, inf_prior
+        )
 
         if self.train_delta_p:
             delta_p_log_prior = self.delta_p_prior.log_prob(delta_p)[:, 0]
-            log_prior += tf.where(
-                tf.math.is_nan(delta_p_log_prior), inf_prior, delta_p_log_prior
-            )
+        else:
+            delta_p_log_prior = zero_prior
+        delta_p_log_prior = tf.where(
+            (delta_p == tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max))[
+                :, 0
+            ],
+            delta_p_log_prior,
+            0.5 * delta_p_log_prior,
+        )
+        log_prior += tf.where(
+            tf.math.is_finite(delta_p_log_prior), delta_p_log_prior, inf_prior
+        )
 
         if self.train_bias:
             bias_log_prior = self.bias_prior.log_prob(bias)[:, 0]
-            log_prior += tf.where(
-                tf.math.is_nan(bias_log_prior), inf_prior, bias_log_prior
-            )
+        else:
+            bias_log_prior = zero_prior
+        bias_log_prior = tf.where(
+            (bias == tf.clip_by_value(bias, self.bias_min, self.bias_max))[:, 0],
+            bias_log_prior,
+            0.5 * bias_log_prior,
+        )
+        log_prior += tf.where(
+            tf.math.is_finite(bias_log_prior), bias_log_prior, inf_prior
+        )
 
         if self.nflow.physical_latents:
             u_delta_av_log_prior = self.u_delta_av_prior.log_prob(u_delta_av)[:, 0]
-            log_prior += tf.where(
-                tf.math.is_nan(u_delta_av_log_prior), inf_prior, u_delta_av_log_prior
-            )
+        else:
+            u_delta_av_log_prior = zero_prior
+        u_delta_av_log_prior = tf.where(
+            (
+                u_delta_av
+                == tf.clip_by_value(
+                    u_delta_av, self.u_delta_av_min, self.u_delta_av_max
+                )
+            )[:, 0],
+            u_delta_av_log_prior,
+            0.5 * u_delta_av_log_prior,
+        )
+        log_prior += tf.where(
+            tf.math.is_finite(u_delta_av_log_prior), u_delta_av_log_prior, inf_prior
+        )
 
         return log_prior

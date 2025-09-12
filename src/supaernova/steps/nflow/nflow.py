@@ -281,6 +281,7 @@ class NFlow(ModelStep[NFlowConfig]):
         best_model = self.model
         best_loss = np.inf
         for i in range(self.repeats):
+            self.log.debug(f"{self.name}: ({i}/{self.repeats})")
             self.model = self.model.__class__(self)
             history = self.model.train_model(savepath=savepath / str(i))
             val_loss = history.history["val_loss"][-1]

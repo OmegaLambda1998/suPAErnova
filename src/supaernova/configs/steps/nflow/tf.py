@@ -84,12 +84,14 @@ class TFNFlowConfig(NFlowConfig):
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    activation: ConfigInputObject[ActivationObject]
+    activation: ConfigInputObject[ActivationObject] | None = None
 
     @computed_field
     @cached_property
-    def activation_fn(self: Self) -> ActivationObject:
-        return validate_activation(self.activation)
+    def activation_fn(self: Self) -> ActivationObject | None:
+        if self.activation is not None:
+            return validate_activation(self.activation)
+        return None
 
     optimiser: ConfigInputObject[OptimiserObject]
 
