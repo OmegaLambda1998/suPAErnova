@@ -575,7 +575,7 @@ class PosteriorMap(tf.Module):
                 axis=-1,
             ),
             u_latents_log_prior,
-            0.5 * u_latents_log_prior,
+            inf_prior,
         )
         log_prior += tf.where(
             tf.math.is_finite(u_latents_log_prior), u_latents_log_prior, inf_prior
@@ -589,8 +589,9 @@ class PosteriorMap(tf.Module):
             (delta_m == tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max))[
                 :, 0
             ],
-            delta_m_log_prior,
-            0.5 * delta_m_log_prior,
+            # delta_m_log_prior,
+            zero_prior,
+            inf_prior,
         )
         log_prior += tf.where(
             tf.math.is_finite(delta_m_log_prior), delta_m_log_prior, inf_prior
@@ -604,8 +605,9 @@ class PosteriorMap(tf.Module):
             (delta_p == tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max))[
                 :, 0
             ],
-            delta_p_log_prior,
-            0.5 * delta_p_log_prior,
+            # delta_p_log_prior,
+            zero_prior,
+            inf_prior,
         )
         log_prior += tf.where(
             tf.math.is_finite(delta_p_log_prior), delta_p_log_prior, inf_prior
@@ -617,8 +619,9 @@ class PosteriorMap(tf.Module):
             bias_log_prior = zero_prior
         bias_log_prior = tf.where(
             (bias == tf.clip_by_value(bias, self.bias_min, self.bias_max))[:, 0],
-            bias_log_prior,
-            0.5 * bias_log_prior,
+            # bias_log_prior,
+            zero_prior,
+            inf_prior,
         )
         log_prior += tf.where(
             tf.math.is_finite(bias_log_prior), bias_log_prior, inf_prior
@@ -636,7 +639,7 @@ class PosteriorMap(tf.Module):
                 )
             )[:, 0],
             u_delta_av_log_prior,
-            0.5 * u_delta_av_log_prior,
+            inf_prior,
         )
         log_prior += tf.where(
             tf.math.is_finite(u_delta_av_log_prior), u_delta_av_log_prior, inf_prior

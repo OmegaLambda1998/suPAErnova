@@ -394,8 +394,15 @@ class Posterior(ModelStep[PosteriorConfig]):
             self.recon_error_centers[subset] = recon_error_centers
 
         # --- Stages ---
-        self.map_stage_constant = PosteriorMAPStage.model_validate({
+        self.map_stage_init = PosteriorMAPStage.model_validate({
             "stage": 0,
+            "name": "init",
+            "fname": "init",
+            "n_chains": 1,
+            "init": True,
+        })
+        self.map_stage_constant = PosteriorMAPStage.model_validate({
+            "stage": 1,
             "name": "constant",
             "fname": "constant",
             "n_chains": 1,
@@ -405,13 +412,6 @@ class Posterior(ModelStep[PosteriorConfig]):
             "init_delta_m": "constant",
             "init_delta_p": "constant",
             "init_bias": "constant",
-        })
-        self.map_stage_init = PosteriorMAPStage.model_validate({
-            "stage": 1,
-            "name": "init",
-            "fname": "init",
-            "n_chains": 1,
-            "init": True,
         })
         self.map_stage_random = PosteriorMAPStage.model_validate({
             "stage": 2,
@@ -451,8 +451,8 @@ class Posterior(ModelStep[PosteriorConfig]):
         })
 
         self.map_stages = [
-            self.map_stage_constant,
             self.map_stage_init,
+            self.map_stage_constant,
             self.map_stage_random,
             self.map_stage_delta_m,
             self.map_stage_delta_av,

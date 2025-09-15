@@ -297,7 +297,7 @@ class TFPosteriorModel(ks.Model):
         )
 
         # Determine which spectra to keep
-        # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+        # Will mask out any spectrum with *no* unmasked wavelengths in the valid wavelength range
         mask_spec = tf.reduce_max(posterior_mask, axis=-1)
 
         # Determine which SNe to keep
@@ -314,11 +314,14 @@ class TFPosteriorModel(ks.Model):
 
         log_likelihood = likelihood.log_prob(input_amp) * mask_spec
 
-        log_likelihood_num = tf.reduce_sum(log_likelihood, axis=1)  # * mask_sn
+        log_likelihood_num = tf.reduce_sum(log_likelihood, axis=-1)  # * mask_sn
 
-        log_likelihood_sum = tf.reduce_sum(
-            tf.cast(tf.math.greater(input_amp[:, :, 0], -1), tf.float32), axis=1
-        )
+        # The number of unmasked spectra
+        log_likelihood_sum = tf.reduce_sum(mask_spec, axis=-1)
+
+        # log_likelihood_sum = tf.reduce_sum(
+        #     tf.cast(tf.math.greater(input_amp[:, :, 0], -1), tf.float32), axis=1
+        # )
 
         log_likelihood = log_likelihood_num / log_likelihood_sum
 
@@ -462,10 +465,17 @@ class TFPosteriorModel(ks.Model):
                     ).numpy()
                 )
                 mean_log_prob = float(
-                    tf.reduce_mean(
+                    tf.reduce_sum(
                         tf.where(
                             tf.math.is_finite(log_prob),
                             log_prob,
+                            tf.zeros_like(log_prob),
+                        )
+                    ).numpy()
+                    / tf.reduce_sum(
+                        tf.where(
+                            tf.math.is_finite(log_prob),
+                            tf.ones_like(log_prob),
                             tf.zeros_like(log_prob),
                         )
                     ).numpy()
@@ -489,10 +499,9 @@ class TFPosteriorModel(ks.Model):
                         * tf.cast(self.map.improved, tf.int32)
                     ).numpy(),
                     "log_prob": (
-                        f"{finite_ratio:.2%}",
-                        f"{min_log_prob:.2E}",
-                        f"{mean_log_prob:.2E}",
-                        f"{max_log_prob:.2E}",
+                        f"{min_log_prob:.2E} ({(min_log_prob / max_log_prob) * finite_ratio:.2%})",
+                        f"{mean_log_prob:.2E} ({(mean_log_prob / max_log_prob) * finite_ratio:.2%})",
+                        f"{max_log_prob:.2E} ({finite_ratio:.2%})",
                     ),
                 })
                 progress.update()
@@ -547,13 +556,28 @@ class TFPosteriorModel(ks.Model):
                             step=chain,
                         )
                         tf.summary.scalar(
+                            "norm_min_log_prob",
+                            (min_log_prob / max_log_prob) * finite_ratio,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
                             "mean_log_prob",
                             mean_log_prob,
                             step=chain,
                         )
                         tf.summary.scalar(
+                            "norm_mean_log_prob",
+                            (mean_log_prob / max_log_prob) * finite_ratio,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
                             "max_log_prob",
                             max_log_prob,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "norm_max_log_prob",
+                            finite_ratio,
                             step=chain,
                         )
                         tf.summary.histogram(
@@ -645,10 +669,17 @@ class TFPosteriorModel(ks.Model):
                 ).numpy()
             )
             mean_log_prob = float(
-                tf.reduce_mean(
+                tf.reduce_sum(
                     tf.where(
                         tf.math.is_finite(log_prob),
                         log_prob,
+                        tf.zeros_like(log_prob),
+                    )
+                ).numpy()
+                / tf.reduce_sum(
+                    tf.where(
+                        tf.math.is_finite(log_prob),
+                        tf.ones_like(log_prob),
                         tf.zeros_like(log_prob),
                     )
                 ).numpy()
@@ -664,10 +695,9 @@ class TFPosteriorModel(ks.Model):
             )
             progress.set_postfix({
                 "log_prob": (
-                    f"{finite_ratio:.2%}",
-                    f"{min_log_prob:.2E}",
-                    f"{mean_log_prob:.2E}",
-                    f"{max_log_prob:.2E}",
+                    f"{min_log_prob:.2E} ({(min_log_prob / max_log_prob) * finite_ratio:.2%})",
+                    f"{mean_log_prob:.2E} ({(mean_log_prob / max_log_prob) * finite_ratio:.2%})",
+                    f"{max_log_prob:.2E} ({finite_ratio:.2%})",
                 ),
             })
             progress.update()
@@ -993,14 +1023,13 @@ class TFPosteriorModel(ks.Model):
             summary_writer = tf.summary.create_file_writer(str(log_dir))
 
         step_size_std = tf.math.reduce_std(initial_position, axis=0)
-        step_size_inner = tf.where(
-            self.step_size > step_size_std, self.step_size, step_size_std
-        )
+        step_size_inner = tf.math.sqrt(self.step_size * step_size_std)
         step_size = tf.repeat(
             tf.expand_dims(step_size_inner, axis=0),
             repeats=initial_position.shape[0],
             axis=0,
         )
+        tf.print(self.step_size, step_size_std, step_size_inner)
 
         progress = tqdm(
             total=self.n_samples + 1,
@@ -1029,6 +1058,12 @@ class TFPosteriorModel(ks.Model):
                         )
                     )
 
+                    num_total = tf.math.reduce_sum(tf.ones_like(log_prob))
+                    num_finite = tf.math.count_nonzero(
+                        tf.math.is_finite(log_prob), dtype=tf.float32
+                    )
+                    finite_ratio = num_finite / num_total
+
                     min_log_prob = tf.reduce_min(
                         tf.where(
                             tf.math.is_finite(log_prob),
@@ -1036,13 +1071,20 @@ class TFPosteriorModel(ks.Model):
                             np.inf * tf.ones_like(log_prob),
                         )
                     )
-                    mean_log_prob = tf.reduce_mean(
+                    mean_log_prob = tf.reduce_sum(
                         tf.where(
                             tf.math.is_finite(log_prob),
                             log_prob,
                             tf.zeros_like(log_prob),
                         )
+                    ) / tf.reduce_sum(
+                        tf.where(
+                            tf.math.is_finite(log_prob),
+                            tf.ones_like(log_prob),
+                            tf.zeros_like(log_prob),
+                        )
                     )
+
                     max_log_prob = tf.reduce_max(
                         tf.where(
                             tf.math.is_finite(log_prob),
@@ -1051,13 +1093,63 @@ class TFPosteriorModel(ks.Model):
                         )
                     )
 
-                    tf.summary.scalar("min_log_prob", min_log_prob)
-                    tf.summary.scalar("mean_log_prob", mean_log_prob)
+                    tf.summary.scalar(
+                        "min_log_prob",
+                        min_log_prob,
+                        step=tf.summary.experimental.get_step(),
+                    )
+                    tf.summary.scalar(
+                        "norm_min_log_prob",
+                        (min_log_prob / max_log_prob) * finite_ratio,
+                        step=tf.summary.experimental.get_step(),
+                    )
+                    tf.summary.scalar(
+                        "mean_log_prob",
+                        mean_log_prob,
+                        step=tf.summary.experimental.get_step(),
+                    )
+                    tf.summary.scalar(
+                        "norm_mean_log_prob",
+                        (mean_log_prob / max_log_prob) * finite_ratio,
+                        step=tf.summary.experimental.get_step(),
+                    )
                     tf.summary.scalar("max_log_prob", max_log_prob)
+                    tf.summary.scalar(
+                        "norm_max_log_prob",
+                        finite_ratio,
+                        step=tf.summary.experimental.get_step(),
+                    )
                     if results:
-                        tf.summary.scalar("result_min_log_prob", min_log_prob)
-                        tf.summary.scalar("result_mean_log_prob", mean_log_prob)
-                        tf.summary.scalar("result_max_log_prob", max_log_prob)
+                        tf.summary.scalar(
+                            "result_min_log_prob",
+                            min_log_prob,
+                            step=tf.summary.experimental.get_step(),
+                        )
+                        tf.summary.scalar(
+                            "result_norm_min_log_prob",
+                            (min_log_prob / max_log_prob) * finite_ratio,
+                            step=tf.summary.experimental.get_step(),
+                        )
+                        tf.summary.scalar(
+                            "result_mean_log_prob",
+                            mean_log_prob,
+                            step=tf.summary.experimental.get_step(),
+                        )
+                        tf.summary.scalar(
+                            "result_norm_mean_log_prob",
+                            (mean_log_prob / max_log_prob) * finite_ratio,
+                            step=tf.summary.experimental.get_step(),
+                        )
+                        tf.summary.scalar(
+                            "result_max_log_prob",
+                            max_log_prob,
+                            step=tf.summary.experimental.get_step(),
+                        )
+                        tf.summary.scalar(
+                            "result_norm_max_log_prob",
+                            finite_ratio,
+                            step=tf.summary.experimental.get_step(),
+                        )
 
             return log_prob
 
