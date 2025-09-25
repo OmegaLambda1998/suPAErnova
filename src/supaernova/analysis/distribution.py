@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 class DistributionPlot(SpectraPlot):
     labels: "dict[str | int, str | dict[str | int, str]] | None" = None
     mean: bool = False
+    masked: bool = False
 
 
 class DistributionPlotter(Plotter):
@@ -82,7 +83,8 @@ class DistributionPlotter(Plotter):
 
         try:
             fig, ax = Plotter.corner(chains, fig=fig, ax=ax, chain_kwargs=chain_kwargs)
-        except:
+        except Exception as e:
+            print(e)
             return None, None
         fig.suptitle((config.plot_kwargs or {}).get("title", config.name.capitalize()))
 

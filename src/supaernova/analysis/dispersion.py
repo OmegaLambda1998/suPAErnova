@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 
 from .spectra import SpectraPlot, SpectraPlotter
-from .analysis import Plotter
+from .analysis import Plotter, scale_lightness
 
 if TYPE_CHECKING:
     from numpy import typing as npt
@@ -168,10 +168,12 @@ class DispersionPlotter(Plotter):
         pae_mask = mask_sn[pae_order]
 
         pae_names = sn_name[:, 0, 0][pae_order]
+
         pae_amplitudes = np.concatenate(
             [np.mean(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
             axis=0,
         )[..., 0][..., pae_order]
+
         pae_amplitude_stds = np.concatenate(
             [
                 np.sqrt(np.square(np.std(hmc.hmc.delta_m, axis=0, keepdims=True)))
@@ -253,6 +255,7 @@ class DispersionPlotter(Plotter):
             ) = ax
 
             if mask is not None:
+                mask = mask.astype(bool)
                 x = x[mask]
                 y = y[mask]
                 yerr = yerr[mask]
@@ -412,13 +415,6 @@ class DispersionPlotter(Plotter):
             5 * residual_scale + 1.5 * residual_step,
             residual_step,
         )
-        print(
-            10**residual_max,
-            residual_scale,
-            residual_step,
-            residual_bins.min(),
-            residual_bins.max(),
-        )
 
         pull_max = np.log10(
             np.max(np.abs((np.abs(pae_y) / pae_yerr)[combined_plot_mask]))
@@ -436,7 +432,6 @@ class DispersionPlotter(Plotter):
         pull_bins = np.arange(
             0 - 0.5 * pull_step, 5 * pull_scale + 1.5 * pull_step, pull_step
         )
-        print(10**pull_max, pull_scale, pull_step, pull_bins.min(), pull_bins.max())
 
         legacy_y = None
         legacy_yerr = None

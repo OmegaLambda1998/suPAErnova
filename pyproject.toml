@@ -20,16 +20,15 @@ dependencies = [
     "sncosmo",
     "toml",
     "tqdm",
+    "tf_keras>=2.18,<2.19",
+    "tensorflow_probability",
+    "tensorboard>=2.18,<2.19",
 ]
 
 [project.optional-dependencies]
-tf-cpu = [
-    "tensorflow_cpu",
-    "tf_keras",
-    "tensorflow_probability",
-    "tensorboard",
-    "tensorboard_plugin_profile",
-]
+tf = ["tensorflow>=2.18,<2.19"]
+tf-cpu = ["tensorflow_cpu>=2.18,<2.19"]
+tf-rocm = ["tensorflow_rocm>=2.18,<2.19"]
 
 [dependency-groups]
 dev = ["pandas_stubs", "types_tensorflow"]
@@ -43,15 +42,23 @@ build-backend = "hatchling.build"
 
 # === Tools ===
 [tool.uv]
-prerelease = "allow"
-environments = ["sys_platform == 'linux'"]
+environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
 
-# We override the tf_keras dependency metadata to avoid installing multiple version of tensorflow
+[tool.uv.sources]
+tensorflow_rocm = [{ index = "rocm" }]
+
+[[tool.uv.index]]
+name = "rocm"
+url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.0/"
+format = "flat"
+explicit = true
+
 [[tool.uv.dependency-metadata]]
 name = "tf_keras"
 
 [[tool.uv.dependency-metadata]]
 name = "tf_keras_nightly"
+
 
 [tool.pytest.ini_options]
 addopts = ["--import-mode=importlib", "--color=yes", "--tb=short"]

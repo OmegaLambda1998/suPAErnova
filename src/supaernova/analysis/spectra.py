@@ -67,7 +67,7 @@ class SpectraPlotter(Plotter):
         sigma = data.sigma.copy()
         sn_name = data.sn_name.copy()
         time = data.time.copy()
-        input_mask = data.mask.copy() if mask is None else mask
+        input_mask = np.ones_like(data.mask) if mask is None else mask
 
         # Wavelength Range Mask
         input_wl_mask = np.ones_like(input_mask) if wl_mask is None else wl_mask

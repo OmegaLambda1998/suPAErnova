@@ -5,7 +5,6 @@ from time import time
 from typing import TYPE_CHECKING
 from pathlib import Path
 import traceback
-import contextlib
 
 from pydantic import ValidationError
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -109,11 +108,7 @@ def main(
     log = setup_logging(__name__, verbose=verbose)
     log.info("Started SuPAErnova")
     try:
-        # Setup context based on logging verbosity
-        #   If verbose, redirect logging stdout through tqdm
-        #   Otherwise use a nullcontext (which does nothing)
-        cm = logging_redirect_tqdm() if verbose else contextlib.nullcontext()
-        with cm:
+        with logging_redirect_tqdm():
             config = prepare_config(
                 input_config,
                 verbose=verbose,

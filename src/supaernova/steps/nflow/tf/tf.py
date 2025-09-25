@@ -217,23 +217,23 @@ class TFNFlowModel(ks.Model):
         self.n_physical_latents = 1 if self.physical_latents else 0
         self.n_flow_latents = self.n_u_latents + self.n_physical_latents
 
-        self.shift: int = self.n_layers - 1
         self.u_to_z_permute: tf.Tensor = tf.constant(
             tf.roll(
                 tf.range(self.n_flow_latents),
-                shift=self.shift,
+                shift=self.n_layers,
                 axis=0,
             )
         )
         self.z_to_u_permute: tf.Tensor = tf.constant(
             tf.roll(
                 tf.range(self.n_flow_latents),
-                shift=-self.shift,
+                shift=-self.n_layers,
                 axis=0,
             )
         )
 
         # --- Layers ---
+        self.permute: tfb.Chain
         self.flow: tfd.TransformedDistribution
 
         self._get_latents()
@@ -248,9 +248,16 @@ class TFNFlowModel(ks.Model):
 
         permute = tf.constant(tf.roll(tf.range(self.n_flow_latents), shift=1, axis=0))
         bijectors = []
+        permuters = []
         for n in range(self.n_layers):
             # First permute input dimensions
             bijectors.append(
+                tfb.Permute(
+                    permutation=permute,
+                    name=f"NFlowPermute_{n}",
+                )
+            )
+            permuters.append(
                 tfb.Permute(
                     permutation=permute,
                     name=f"NFlowPermute_{n}",
@@ -296,6 +303,8 @@ class TFNFlowModel(ks.Model):
             name="NFlowChain",
         )
 
+        self.permute = tfb.Chain(permuters[1:], name="NFlowPermute")
+
         self.flow = tfd.TransformedDistribution(
             distribution=gaussian,
             bijector=bijectors,
@@ -332,7 +341,8 @@ class TFNFlowModel(ks.Model):
     def u_to_z(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         # If permute is True, then the incoming u_latents need to be permuted correctly
         if permute:
-            inputs = tf.gather(inputs, self.u_to_z_permute, axis=-1)
+            # inputs = tf.gather(inputs, self.u_to_z_permute, axis=-1)
+            inputs = self.permute.inverse(inputs)
         return self.flow.bijector.forward(inputs)
 
     def z_to_u(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
@@ -340,12 +350,13 @@ class TFNFlowModel(ks.Model):
         # If permute is True, then the outgoing u_latents need to be un-permuted correctly
         # Reverse, permute, reverse undoes the initial permutation
         if permute:
-            u_latents = tf.reverse(
-                tf.gather(
-                    tf.reverse(u_latents, axis=(-1,)), self.z_to_u_permute, axis=-1
-                ),
-                axis=(-1,),
-            )
+            u_latents = self.permute.forward(u_latents)
+            # u_latents = tf.reverse(
+            #     tf.gather(
+            #         tf.reverse(u_latents, axis=(-1,)), self.z_to_u_permute, axis=-1
+            #     ),
+            #     axis=(-1,),
+            # )
         return u_latents
 
     def z_to_u_steps(
@@ -360,13 +371,13 @@ class TFNFlowModel(ks.Model):
         for bijector in bijectors[:step]:
             u_latents = bijector.inverse(u_latents)
             if isinstance(bijector, tfb.Permute):
-                shift -= 1
+                shift += 1
         # If permute is True, then the outgoing u_latents need to be un-permuted correctly
         # Reverse, permute, reverse undoes the initial permutation
         if permute:
             z_to_u_permute = tf.roll(
                 tf.range(self.n_flow_latents),
-                shift=shift,
+                shift=-shift,
                 axis=0,
             )
             u_latents = tf.reverse(

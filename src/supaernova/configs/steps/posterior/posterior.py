@@ -45,6 +45,7 @@ class PosteriorMAPStage(BaseConfig):
     loadpath: Path | None = None
     n_chains: int
     init: bool = False
+    setup: bool = False
     init_u_delta_av: InitParams
     init_latents: InitLatents
     init_delta_av: InitParams
@@ -194,9 +195,11 @@ class PosteriorConfig(BackendConfig):
     n_delta_m_chains: int
     n_delta_av_chains: int
     # - HMC -
-    n_burnin: PositiveInt
-    n_samples: PositiveInt
+    max_samples: PositiveInt
+    run_to_burn_ratio: PositiveInt
     n_leapfrog: PositiveInt
+    n_burnin: PositiveInt | None = None
+    n_samples: PositiveInt | None = None
     n_thinning: NonNegativeInt = 0
     # --- Optional ---
     debug: bool = False
@@ -240,44 +243,43 @@ class PosteriorConfig(BackendConfig):
     f_relative_tolerance: NonNegativeFloat = 0
     f_absolute_tolerance: NonNegativeFloat = 0
     max_iterations: PositiveInt = 2500
+    max_line_search_iterations: PositiveInt | None = None
+    num_correction_pairs: PositiveInt | None = None
     target_acceptance_rate: PositiveFloat = 0.651
 
-    u_delta_av_min: float = -10
-    u_delta_av_max: float = 10
+    u_delta_av_min: float | None = None
+    u_delta_av_max: float | None = None
     u_delta_av_start: float = -0.5
     u_delta_av_end: float = 0.5
     u_delta_av_mean: float = 0
     u_delta_av_std: float = 1
 
-    u_latents_min: float = -10
-    u_latents_max: float = 10
+    u_latents_min: float | None = None
+    u_latents_max: float | None = None
     u_latents_mean: float = 0
     u_latents_std: float = 1
 
-    delta_av_min: float = -5
-    delta_av_max: float = 5
-    delta_av_start: float = -0.05
-    delta_av_end: float = 0.05
+    delta_av_start: float = -0.5
+    delta_av_end: float = 0.5
     delta_av_mean: float = 0
-    delta_av_std: float = 0
+    delta_av_std: float = 1
 
-    delta_m_min: float = -5
-    delta_m_max: float = 5
-    delta_m_start: float = -1
-    delta_m_end: float = 1
+    delta_m_min: float | None = None
+    delta_m_max: float | None = None
+    delta_m_start: float = -0.5
+    delta_m_end: float = 0.5
     delta_m_mean: float = 0
-    delta_m_std: float = 0.1
+    delta_m_std: float = 1
 
-    # Allowed to be off by 15 minutes
-    delta_p_min: float = -0.01
-    delta_p_max: float = 0.01
-    delta_p_start: float = -0.005
-    delta_p_end: float = 0.005
+    delta_p_min: float | None = None
+    delta_p_max: float | None = None
+    delta_p_start: float = -0.5
+    delta_p_end: float = 0.5
     delta_p_mean: float = 0
-    delta_p_std: float = 0.001
+    delta_p_std: float = 1
 
-    bias_min: float = -10
-    bias_max: float = 10
+    bias_min: float | None = None
+    bias_max: float | None = None
     bias_start: float = -0.5
     bias_end: float = 0.5
     bias_mean: float = 0

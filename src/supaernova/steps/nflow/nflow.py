@@ -3,6 +3,7 @@ import importlib
 
 import numpy as np
 
+from supaernova.analysis import Plotter
 from supaernova.steps.models import Model, ModelStep
 from supaernova.configs.steps.nflow import (
     NFlowConfig,
@@ -485,13 +486,24 @@ class NFlow(ModelStep[NFlowConfig]):
             z_to_u = u_latents[mask]
             u_to_z = z_latents[mask]
 
+            n_latents = z.shape[0]
+            latents_num = np.log10(n_latents)
+            latents_scale_min = np.floor(latents_num)
+            latents_scale_max = np.ceil(latents_num)
+            latents_scale = latents_scale_min if n_latents > 100 else latents_scale_max
+            n_bins = int(np.sqrt(10**latents_scale))
+
             if self.analysis.plot_u_latents is not None:
                 if not isinstance(self.analysis.plot_u_latents, list):
                     self.analysis.plot_u_latents = [self.analysis.plot_u_latents]
                 for opts in self.analysis.plot_u_latents:
                     o = opts.model_copy(deep=True)
                     if o.labels is None:
-                        o.labels = {"gaussian": u_labels, "u_latents": u_labels}
+                        o.labels = {
+                            "gaussian": u_labels,
+                            "u_latents": u_labels,
+                            "u_latents_smoothed": u_labels,
+                        }
                     if o.name is None:
                         o.name = "u_latents"
                     self.log.debug(f"Plotting {o.name}")
@@ -501,13 +513,25 @@ class NFlow(ModelStep[NFlowConfig]):
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {"title": f"{dt}{self.name}"}
                     DistributionPlotter.plot_corner(
-                        {"gaussian": gaussian, "u_latents": z_to_u},
+                        {
+                            "gaussian": gaussian,
+                            "u_latents": z_to_u,
+                            "u_latents_smoothed": z_to_u,
+                        },
                         o,
                         statistics="max_central",
                         shade_alpha=0.0,
                         plot_cloud={"u_latents": True},
-                        # smooth={"u_latents": 0},
-                        bins={"u_latents": int(np.sqrt(u_latents.shape[0]))},
+                        smooth={"u_latents": 0},
+                        bins={
+                            "u_latents": n_latents,
+                            "u_latents_smoothed": n_bins,
+                        },
+                        color={
+                            "gaussian": Plotter.colour_sequence.colors[0],
+                            "u_latents": Plotter.colour_sequence.colors[1],
+                            "u_latents_smoothed": Plotter.colour_sequence.colors[1],
+                        },
                     )
 
             if self.analysis.plot_z_latents is not None:
@@ -533,8 +557,8 @@ class NFlow(ModelStep[NFlowConfig]):
                         plot_cloud=True,
                         smooth={"z_latents": 0, "u_to_z_latents": 0},
                         bins={
-                            "z_latents": results.z_latents.shape[0],
-                            "u_to_z_latents": z_latents.shape[0],
+                            "z_latents": n_latents,
+                            "u_to_z_latents": n_latents,
                         },
                     )
 
@@ -545,8 +569,10 @@ class NFlow(ModelStep[NFlowConfig]):
                     o = opts.model_copy(deep=True)
                     if o.labels is None:
                         o.labels = {
-                            "z_latents": labels,
                             "u_latents": labels,
+                            "u_latents_smoothed": labels,
+                            "z_latents": labels,
+                            "z_latents_smoothed": labels,
                         }
                     if o.name is None:
                         o.name = "latents"
@@ -557,15 +583,28 @@ class NFlow(ModelStep[NFlowConfig]):
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {"title": f"{dt}{self.name}"}
                     DistributionPlotter.plot_corner(
-                        {"u_latents": z_to_u, "z_latents": u_to_z},
+                        {
+                            "u_latents": z_to_u,
+                            "u_latents_smoothed": z_to_u,
+                            "z_latents": u_to_z,
+                            "z_latents_smoothed": u_to_z,
+                        },
                         o,
                         statistics="max_central",
                         shade_alpha=0.0,
-                        plot_cloud=True,
-                        smooth={"z_latents": 0},
+                        plot_cloud={"u_latents": True, "z_latents": True},
+                        smooth={"u_latents": 0, "z_latents": 0},
                         bins={
-                            "u_latents": int(np.sqrt(u_latents.shape[0])),
-                            "z_latents": z_latents.shape[0],
+                            "u_latents": n_latents,
+                            "u_latents_smoothed": n_bins,
+                            "z_latents": n_latents,
+                            "z_latents_smoothed": n_bins,
+                        },
+                        color={
+                            "u_latents": Plotter.colour_sequence.colors[0],
+                            "u_latents_smoothed": Plotter.colour_sequence.colors[0],
+                            "z_latents": Plotter.colour_sequence.colors[1],
+                            "z_latents_smoothed": Plotter.colour_sequence.colors[1],
                         },
                     )
 
@@ -589,6 +628,7 @@ class NFlow(ModelStep[NFlowConfig]):
                             o.labels = {
                                 "gaussian": labels,
                                 f"step_{step}_latents": labels,
+                                f"step_{step}_latents_smoothed": labels,
                             }
                         if o.name is None:
                             o.name = f"step_{step}_latent_steps"
@@ -605,18 +645,27 @@ class NFlow(ModelStep[NFlowConfig]):
                             {
                                 "gaussian": gaussian,
                                 f"step_{step}_latents": step_u_latents,
+                                f"step_{step}_latents_smoothed": step_u_latents,
                             },
                             o,
                             statistics="max_central",
                             shade_alpha=0.0,
                             plot_cloud={f"step_{step}_latents": True},
-                            # smooth={
-                            #     f"step_{step}_latents": 0,
-                            # },
+                            smooth={
+                                f"step_{step}_latents": 0,
+                            },
                             bins={
-                                f"step_{step}_latents": int(
-                                    np.sqrt(step_latents.shape[0])
-                                ),
+                                f"step_{step}_latents": n_latents,
+                                f"step_{step}_latents_smoothed": n_bins,
+                            },
+                            color={
+                                "gaussian": Plotter.colour_sequence.colors[0],
+                                f"step_{step}_latents": Plotter.colour_sequence.colors[
+                                    1
+                                ],
+                                f"step_{step}_latents_smoothed": Plotter.colour_sequence.colors[
+                                    1
+                                ],
                             },
                         )
 

@@ -3,7 +3,10 @@ from typing import TYPE_CHECKING, Any, Self, ClassVar
 
 import numpy as np
 import tensorflow as tf
-from tensorflow_probability import distributions as tfd
+from tensorflow_probability import (
+    bijectors as tfb,
+    distributions as tfd,
+)
 
 if TYPE_CHECKING:
     from numpy import typing as npt
@@ -40,7 +43,6 @@ class PosteriorMap(tf.Module):
         config: "TFPosteriorModel",
     ) -> None:
         self.random_initial_positions: bool = config.options.random_initial_positions
-        # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
         self.data: LazySNPAEData = config.data
         self.data_time: npt.NDArray[float] = config.data.time
         self.data_amplitude: npt.NDArray[float] = config.data.amplitude
@@ -55,6 +57,7 @@ class PosteriorMap(tf.Module):
         self.spec_dim = config.spec_dim
         self.wl_dim = config.wl_dim
 
+        # Equivalent to `self.name = ...` but avoids tf / ks from tracking self.name
         self.nflow: TFNFlowModel
         vars(self)["nflow"] = config.nflow
         self.n_u_latents = self.nflow.n_u_latents
@@ -84,67 +87,94 @@ class PosteriorMap(tf.Module):
         )
 
         # === Priors ===
-        self.u_delta_av_min: float = config.options.u_delta_av_min
-        self.u_delta_av_max: float = config.options.u_delta_av_max
+        self.u_delta_av_min: float = config.options.u_delta_av_min or -np.inf
+        self.u_delta_av_max: float = config.options.u_delta_av_max or np.inf
         self.u_delta_av_start: float = config.options.u_delta_av_start
         self.u_delta_av_end: float = config.options.u_delta_av_end
         self.u_delta_av_mean: float = config.options.u_delta_av_mean
         self.u_delta_av_std: float = config.options.u_delta_av_std
-        self.u_delta_av_prior = tfd.Normal(
+        self.u_delta_av_prior: tfd.Distribution = tfd.Normal(
             loc=self.u_delta_av_mean, scale=self.u_delta_av_std
         )
+        self.u_delta_av_transform: tfb.Bijector = tfb.Identity()
+        if np.isfinite(self.u_delta_av_min) and np.isfinite(self.u_delta_av_max):
+            self.u_delta_av_transform = tfb.Sigmoid(
+                low=self.u_delta_av_min, high=self.u_delta_av_max
+            )
         if self.nflow.physical_latents:
             self.n_pos += 1
 
-        self.u_latents_min: float = config.options.u_latents_min
-        self.u_latents_max: float = config.options.u_latents_max
+        self.u_latents_min: float = config.options.u_latents_min or -np.inf
+        self.u_latents_max: float = config.options.u_latents_max or np.inf
         self.u_latents_mean: float = config.options.u_latents_mean
         self.u_latents_std: float = config.options.u_latents_std
-        self.u_latents_prior = tfd.MultivariateNormalDiag(
+        self.u_latents_prior: tfd.Distribution = tfd.MultivariateNormalDiag(
             loc=self.u_latents_mean * tf.ones(self.n_u_latents),
             scale_diag=self.u_latents_std * tf.ones(self.n_u_latents),
         )
+        self.u_latents_transform: tfb.Bijector = tfb.Identity()
+        if np.isfinite(self.u_latents_min) and np.isfinite(self.u_latents_max):
+            self.u_latents_transform = tfb.Sigmoid(
+                low=self.u_latents_min, high=self.u_latents_max
+            )
 
-        self.delta_av_min: float = config.options.delta_av_min
-        self.delta_av_max: float = config.options.delta_av_max
         self.delta_av_start: float = config.options.delta_av_start
         self.delta_av_end: float = config.options.delta_av_end
         self.delta_av_mean: float = config.options.delta_av_mean
         self.delta_av_std: float = config.options.delta_av_std
-        self.delta_av_prior = tfd.Normal(
+        self.delta_av_prior: tfd.Distribution = tfd.Normal(
             loc=self.delta_av_mean, scale=self.delta_av_std
         )
 
         self.train_delta_m: bool = config.options.train_delta_m
-        self.delta_m_min: float = config.options.delta_m_min
-        self.delta_m_max: float = config.options.delta_m_max
+        self.delta_m_min: float = config.options.delta_m_min or -np.inf
+        self.delta_m_max: float = config.options.delta_m_max or np.inf
         self.delta_m_start: float = config.options.delta_m_start
         self.delta_m_end: float = config.options.delta_m_end
         self.delta_m_mean: float = config.options.delta_m_mean
         self.delta_m_std: float = config.options.delta_m_std
-        self.delta_m_prior = tfd.Normal(loc=self.delta_m_mean, scale=self.delta_m_std)
+        self.delta_m_prior: tfd.Distribution = tfd.Normal(
+            loc=self.delta_m_mean, scale=self.delta_m_std
+        )
+        self.delta_m_transform: tfb.Bijector = tfb.Identity()
+        if np.isfinite(self.delta_m_min) and np.isfinite(self.delta_m_max):
+            self.delta_m_transform = tfb.Sigmoid(
+                low=self.delta_m_min, high=self.delta_m_max
+            )
         if self.train_delta_m:
             self.n_pos += 1
 
         self.train_delta_p: bool = config.options.train_delta_p
-        self.delta_p_min: float = config.options.delta_p_min
-        self.delta_p_max: float = config.options.delta_p_max
+        self.delta_p_min: float = config.options.delta_p_min or -np.inf
+        self.delta_p_max: float = config.options.delta_p_max or np.inf
         self.delta_p_start: float = config.options.delta_p_start
         self.delta_p_end: float = config.options.delta_p_end
         self.delta_p_mean: float = config.options.delta_p_mean
         self.delta_p_std: float = config.options.delta_p_std
-        self.delta_p_prior = tfd.Normal(loc=self.delta_p_mean, scale=self.delta_p_std)
+        self.delta_p_prior: tfd.Distribution = tfd.Normal(
+            loc=self.delta_p_mean, scale=self.delta_p_std
+        )
+        self.delta_p_transform: tfb.Bijector = tfb.Identity()
+        if np.isfinite(self.delta_p_min) and np.isfinite(self.delta_p_max):
+            self.delta_p_transform = tfb.Sigmoid(
+                low=self.delta_p_min, high=self.delta_p_max
+            )
         if self.train_delta_p:
             self.n_pos += 1
 
         self.train_bias: bool = config.options.train_bias
-        self.bias_min: float = config.options.bias_min
-        self.bias_max: float = config.options.bias_max
+        self.bias_min: float = config.options.bias_min or -np.inf
+        self.bias_max: float = config.options.bias_max or np.inf
         self.bias_start: float = config.options.bias_start
         self.bias_end: float = config.options.bias_end
         self.bias_mean: float = config.options.bias_mean
         self.bias_std: float = config.options.bias_std
-        self.bias_prior = tfd.Normal(loc=self.bias_mean, scale=self.bias_std)
+        self.bias_prior: tfd.Distribution = tfd.Normal(
+            loc=self.bias_mean, scale=self.bias_std
+        )
+        self.bias_transform: tfb.Bijector = tfb.Identity()
+        if np.isfinite(self.bias_min) and np.isfinite(self.bias_max):
+            self.bias_transform = tfb.Sigmoid(low=self.bias_min, high=self.bias_max)
         if self.train_bias:
             self.n_pos += 1
 
@@ -293,16 +323,12 @@ class PosteriorMap(tf.Module):
                 )[0][:, 0, :]
                 if self.pae.physical_latents:
                     if stage.init_delta_av == "data":
-                        delta_av = z_latents[:, 0:1]
+                        delta_av = z_latents[:, :1]
                     if stage.init_delta_m == "data":
-                        delta_m = z_latents[
-                            :, self.n_z_latents + 1 : self.n_z_latents + 2
-                        ]
+                        delta_m = z_latents[:, -2:-1]
                     if stage.init_delta_p == "data":
-                        delta_p = z_latents[
-                            :, self.n_z_latents + 2 : self.n_z_latents + 3
-                        ]
-                    z_latents = z_latents[:, 1 : self.n_z_latents + 1]
+                        delta_p = z_latents[:, -1:]
+                    z_latents = z_latents[:, 1:-2]
                 if self.nflow.physical_latents:
                     zs = tf.concat([delta_av, z_latents], axis=-1)
                 else:
@@ -490,7 +516,7 @@ class PosteriorMap(tf.Module):
         self.bias.current = bias
         self.position.current = position
 
-        if stage.init:
+        if stage.setup:
             self.u_delta_av.original = self.u_delta_av.current
             self.u_delta_av.initial = self.u_delta_av.current
             self.u_delta_av.best = self.u_delta_av.current
@@ -546,103 +572,110 @@ class PosteriorMap(tf.Module):
             i += 1
         u_latents = position[:, i:]
 
-        # delta_m = tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max)
-        # delta_p = tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max)
-        # bias = tf.clip_by_value(bias, self.bias_min, self.bias_max)
-        # u_delta_av = tf.clip_by_value(
-        #     u_delta_av, self.u_delta_av_min, self.u_delta_av_max
-        # )
-        # u_latents = tf.clip_by_value(u_latents, self.u_latents_min, self.u_latents_max)
+        return tf.concat((delta_m, delta_p, bias, u_delta_av, u_latents), axis=-1)
 
-        return tf.concat([delta_m, delta_p, bias, u_delta_av, u_latents], axis=-1)
+    def constrain(self: Self, position: tf.Tensor, *, full: bool = False) -> tf.Tensor:
+        constrained = []
+        i = 0
+        if self.train_delta_m or full:
+            delta_m = position[..., i : i + 1]
+            constrained_delta_m = self.delta_m_transform.forward(delta_m)
+            constrained.append(constrained_delta_m)
+            i += 1
+        if self.train_delta_p or full:
+            delta_p = position[..., i : i + 1]
+            constrained_delta_p = self.delta_p_transform.forward(delta_p)
+            constrained.append(constrained_delta_p)
+            i += 1
+        if self.train_bias or full:
+            bias = position[..., i : i + 1]
+            constrained_bias = self.bias_transform.forward(bias)
+            constrained.append(constrained_bias)
+            i += 1
+        if self.nflow.physical_latents:
+            u_delta_av = position[..., i : i + 1]
+            constrained_u_delta_av = self.u_delta_av_transform.forward(u_delta_av)
+            constrained.append(constrained_u_delta_av)
+            i += 1
+        u_latents = position[..., i:]
+        constrained_u_latents = self.u_latents_transform.forward(u_latents)
+        constrained.append(constrained_u_latents)
+
+        return tf.concat(constrained, axis=-1)
+
+    def unconstrain(
+        self: Self, position: tf.Tensor, *, full: bool = False
+    ) -> tf.Tensor:
+        unconstrained = []
+        i = 0
+        if self.train_delta_m or full:
+            delta_m = position[..., i : i + 1]
+            unconstrained_delta_m = self.delta_m_transform.inverse(delta_m)
+            unconstrained.append(unconstrained_delta_m)
+            i += 1
+        if self.train_delta_p or full:
+            delta_p = position[..., i : i + 1]
+            unconstrained_delta_p = self.delta_p_transform.inverse(delta_p)
+            unconstrained.append(unconstrained_delta_p)
+            i += 1
+        if self.train_bias or full:
+            bias = position[..., i : i + 1]
+            unconstrained_bias = self.bias_transform.inverse(bias)
+            unconstrained.append(unconstrained_bias)
+            i += 1
+        if self.nflow.physical_latents:
+            u_delta_av = position[..., i : i + 1]
+            unconstrained_u_delta_av = self.u_delta_av_transform.inverse(u_delta_av)
+            unconstrained.append(unconstrained_u_delta_av)
+            i += 1
+        u_latents = position[..., i:]
+        unconstrained_u_latents = self.u_latents_transform.inverse(u_latents)
+        unconstrained.append(unconstrained_u_latents)
+
+        return tf.concat(unconstrained, axis=-1)
 
     def prior(self: Self, position: tf.Tensor) -> tf.Tensor:
         zero_prior = tf.zeros((position.shape[0],))
         log_prior = zero_prior
         inf_prior = -tf.ones_like(log_prior) * np.inf
 
-        delta_m = position[:, 0:1]
-        delta_p = position[:, 1:2]
-        bias = position[:, 2:3]
-        u_delta_av = position[:, 3:4]
-        u_latents = position[:, 4:]
+        delta_m = position[..., 0:1]
+        delta_p = position[..., 1:2]
+        bias = position[..., 2:3]
+        u_delta_av = position[..., 3:4]
+        u_latents = position[..., 4:]
 
-        u_latents_log_prior = self.u_latents_prior.log_prob(u_latents)
-        u_latents_log_prior = tf.where(
-            tf.math.reduce_all(
-                u_latents
-                == tf.clip_by_value(u_latents, self.u_latents_min, self.u_latents_max),
-                axis=-1,
-            ),
-            u_latents_log_prior,
-            inf_prior,
-        )
-        log_prior += tf.where(
-            tf.math.is_finite(u_latents_log_prior), u_latents_log_prior, inf_prior
-        )
+        # if self.train_delta_m:
+        #     delta_m_log_prior = self.delta_m_prior.log_prob(delta_m)[:, 0]
+        # else:
+        #     delta_m_log_prior = zero_prior
+        # log_prior += tf.where(
+        #     tf.math.is_finite(delta_m_log_prior), delta_m_log_prior, inf_prior
+        # )
 
-        if self.train_delta_m:
-            delta_m_log_prior = self.delta_m_prior.log_prob(delta_m)[:, 0]
-        else:
-            delta_m_log_prior = zero_prior
-        delta_m_log_prior = tf.where(
-            (delta_m == tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max))[
-                :, 0
-            ],
-            # delta_m_log_prior,
-            zero_prior,
-            inf_prior,
-        )
-        log_prior += tf.where(
-            tf.math.is_finite(delta_m_log_prior), delta_m_log_prior, inf_prior
-        )
+        # if self.train_delta_p:
+        #     delta_p_log_prior = self.delta_p_prior.log_prob(delta_p)[:, 0]
+        # else:
+        #     delta_p_log_prior = zero_prior
+        # log_prior += tf.where(
+        #     tf.math.is_finite(delta_p_log_prior), delta_p_log_prior, inf_prior
+        # )
 
-        if self.train_delta_p:
-            delta_p_log_prior = self.delta_p_prior.log_prob(delta_p)[:, 0]
-        else:
-            delta_p_log_prior = zero_prior
-        delta_p_log_prior = tf.where(
-            (delta_p == tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max))[
-                :, 0
-            ],
-            # delta_p_log_prior,
-            zero_prior,
-            inf_prior,
-        )
-        log_prior += tf.where(
-            tf.math.is_finite(delta_p_log_prior), delta_p_log_prior, inf_prior
-        )
-
-        if self.train_bias:
-            bias_log_prior = self.bias_prior.log_prob(bias)[:, 0]
-        else:
-            bias_log_prior = zero_prior
-        bias_log_prior = tf.where(
-            (bias == tf.clip_by_value(bias, self.bias_min, self.bias_max))[:, 0],
-            # bias_log_prior,
-            zero_prior,
-            inf_prior,
-        )
-        log_prior += tf.where(
-            tf.math.is_finite(bias_log_prior), bias_log_prior, inf_prior
-        )
+        # if self.train_bias:
+        #     bias_log_prior = self.bias_prior.log_prob(bias)[:, 0]
+        # else:
+        #     bias_log_prior = zero_prior
+        # log_prior += tf.where(
+        #     tf.math.is_finite(bias_log_prior), bias_log_prior, inf_prior
+        # )
 
         if self.nflow.physical_latents:
             u_delta_av_log_prior = self.u_delta_av_prior.log_prob(u_delta_av)[:, 0]
         else:
             u_delta_av_log_prior = zero_prior
-        u_delta_av_log_prior = tf.where(
-            (
-                u_delta_av
-                == tf.clip_by_value(
-                    u_delta_av, self.u_delta_av_min, self.u_delta_av_max
-                )
-            )[:, 0],
-            u_delta_av_log_prior,
-            inf_prior,
-        )
-        log_prior += tf.where(
-            tf.math.is_finite(u_delta_av_log_prior), u_delta_av_log_prior, inf_prior
-        )
+        log_prior += u_delta_av_log_prior
 
-        return log_prior
+        u_latents_log_prior = self.u_latents_prior.log_prob(u_latents)
+        log_prior += u_latents_log_prior
+
+        return tf.where(tf.math.is_finite(log_prior), log_prior, inf_prior)
