@@ -85,6 +85,8 @@ class PosteriorStepMAPResult(StepResult):
     converged: npt.NDArray[bool]
     num_evaluations: int
     negative_log_prob: npt.NDArray[float]
+    negative_log_like: npt.NDArray[float]
+    negative_log_prior: npt.NDArray[float]
     init_u_delta_av: npt.NDArray[float]
     init_u_latents: npt.NDArray[float]
     init_delta_av: npt.NDArray[float]
