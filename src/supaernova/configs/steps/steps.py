@@ -30,12 +30,12 @@ class StepResult(BaseConfig):
 
 
 class StepAnalysis(BaseConfig):
-    pass
     # === Class Variables ===
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
     # --- Optional ---
+    force: bool = False
     # === Model Validators ===
     # --- Before ---
     # --- After ---

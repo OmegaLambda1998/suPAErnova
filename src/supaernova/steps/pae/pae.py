@@ -680,7 +680,7 @@ class PAE(ModelStep[PAEConfig]):
                         )
                         return False
 
-        return True
+        return not self.analysis.force
 
     @override
     def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:

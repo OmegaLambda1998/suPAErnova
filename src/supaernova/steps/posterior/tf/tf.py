@@ -199,9 +199,8 @@ class TFPosteriorModel(ks.Model):
         spec_mask: tf.Tensor | None = None,
         wl_mask: tf.Tensor | None = None,
         testing: bool | None = None,
-        norm_prob: float | None = None,
         additional_outputs: bool = False,
-    ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+    ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         training = False if training is None else training
         testing = False if testing is None else testing
 
@@ -234,13 +233,10 @@ class TFPosteriorModel(ks.Model):
         )
 
         # Unconstrained -> Constrained
-        # tf.print("\nunconstrained", input_position)
         input_position = self.map.constrain(input_position, full=True)
-        # tf.print("constrained", input_position)
 
         # Determine the prior probability early to avoid exploring non-physical parameter spaces.
         log_prior = self.map.prior(input_position)
-        # tf.print("log_prior", log_prior)
 
         delta_m = input_position[..., 0:1]
         delta_p = input_position[..., 1:2]
@@ -256,8 +252,8 @@ class TFPosteriorModel(ks.Model):
 
         zs = self.nflow.u_to_z(us, permute=True)
         if self.nflow.physical_latents:
-            delta_av = zs[:, 0:1]
-            zs = zs[:, 1:]
+            delta_av = zs[..., 0:1]
+            zs = zs[..., 1:]
         if self.pae.physical_latents:
             zs = tf.concat(
                 [
@@ -269,7 +265,7 @@ class TFPosteriorModel(ks.Model):
                 axis=-1,
             )
 
-        zs = ks.layers.RepeatVector(self.spec_dim)(zs)
+        zs = tf.repeat(tf.expand_dims(zs, axis=-2), repeats=[self.spec_dim], axis=-2)
 
         # Create synthetic spectra from z-latents
         decoder_inputs = tf.concat((input_phase, zs), axis=-1)
@@ -283,39 +279,27 @@ class TFPosteriorModel(ks.Model):
         )
 
         if self.map.train_delta_m and not self.pae.physical_latents:
-            delta_m = ks.layers.RepeatVector(1)(delta_m)
+            delta_m = tf.expand_dims(delta_m, axis=-2)
             synth_amp *= delta_m
 
         if self.map.train_bias:
-            bias = ks.layers.RepeatVector(1)(bias)
+            bias = tf.expand_dims(bias, axis=-2)
             synth_amp += bias
 
         phase = input_phase
         if self.map.train_delta_p:  # and not self.pae.physical_latents:
-            delta_p = ks.layers.RepeatVector(1)(delta_p)
+            delta_p = tf.expand_dims(delta_p, axis=-2)
             phase += delta_p
 
         # Measured average AE reconstruction error at current times
         sigma_recon = tf.transpose(
             tfp.math.interp_regular_1d_grid(
-                x=tf.transpose(phase[:, :, 0]),
+                x=tf.transpose(phase[..., 0]),
                 x_ref_min=self.recon_error_centers[0],
                 x_ref_max=self.recon_error_centers[-1],
                 y_ref=self.recon_error,
             )
         )
-        # tf.print(
-        #     "recon_errors",
-        #     self.recon_error_centers[0],
-        #     self.recon_error_centers[-1],
-        #     self.recon_error,
-        # )
-        # tf.print(
-        #     "sigma_recon",
-        #     tf.reduce_min(sigma_recon),
-        #     tf.reduce_mean(sigma_recon),
-        #     tf.reduce_max(sigma_recon),
-        # )
 
         synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (input_sigma**2))
 
@@ -331,36 +315,6 @@ class TFPosteriorModel(ks.Model):
             ),
             reinterpreted_batch_ndims=0,
         )
-        # tf.print(
-        #     "synth_amp",
-        #     tf.reduce_min(synth_amp),
-        #     tf.reduce_mean(synth_amp),
-        #     tf.reduce_max(synth_amp),
-        # )
-        # tf.print(
-        #     "synth_amp_masked",
-        #     tf.reduce_min(synth_amp * posterior_mask),
-        #     tf.reduce_mean(synth_amp * posterior_mask),
-        #     tf.reduce_max(synth_amp * posterior_mask),
-        # )
-        # tf.print(
-        #     "synth_sigma",
-        #     tf.reduce_min(synth_sigma),
-        #     tf.reduce_mean(synth_sigma),
-        #     tf.reduce_max(synth_sigma),
-        # )
-        # tf.print(
-        #     "input_amp",
-        #     tf.reduce_min(input_amp),
-        #     tf.reduce_mean(input_amp),
-        #     tf.reduce_max(input_amp),
-        # )
-        # tf.print(
-        #     "input_amp_masked",
-        #     tf.reduce_min(input_amp * posterior_mask),
-        #     tf.reduce_mean(input_amp * posterior_mask),
-        #     tf.reduce_max(input_amp * posterior_mask),
-        # )
 
         # Determine which spectra to keep
         # Will mask out any spectrum with *no* unmasked wavelengths in the valid wavelength range
@@ -371,10 +325,8 @@ class TFPosteriorModel(ks.Model):
         mask_sn = tf.reduce_max(mask_spec, axis=-1)
 
         log_prob = likelihood.log_prob(input_amp)
-        # tf.print("log_prob", log_prob)
 
         log_likelihood = log_prob * mask_spec
-        # tf.print("log_like", log_likelihood)
 
         log_likelihood_num = tf.reduce_sum(log_likelihood, axis=-1)
 
@@ -385,33 +337,23 @@ class TFPosteriorModel(ks.Model):
             log_likelihood_sum, tf.ones_like(log_likelihood_sum)
         )
 
-        # tf.print("valid_specra", valid_spectra)
-
         log_likelihood = log_likelihood_num / log_likelihood_sum
 
         inf_likelihood = -tf.ones_like(log_likelihood) * np.inf
 
         log_likelihood = tf.where(valid_spectra, log_likelihood, inf_likelihood)
 
-        # tf.print("log_num", log_likelihood_num)
-        # tf.print("log_sum", log_likelihood_sum)
-        # tf.print("log_num_sum", log_likelihood)
+        log_probability = log_likelihood + log_prior
 
-        log_likelihood += log_prior
-
-        if norm_prob is not None:
-            log_likelihood *= norm_prob
-
-        log_likelihood = tf.where(
-            tf.math.is_finite(log_likelihood),
-            log_likelihood,
+        log_probability = tf.where(
+            tf.math.is_finite(log_probability),
+            log_probability,
             inf_likelihood,
         )
-        # tf.print("log_likelihood", log_likelihood)
 
         if additional_outputs:
-            return log_likelihood, synth_amp, synth_sigma
-        return log_likelihood
+            return log_probability, log_likelihood, log_prior, synth_amp, synth_sigma
+        return log_probability
 
     @override
     def __call__(
@@ -424,9 +366,8 @@ class TFPosteriorModel(ks.Model):
         spec_mask: "TensorLike | None" = None,
         wl_mask: "TensorLike | None" = None,
         testing: bool | None = None,
-        norm_prob: float | None = None,
         additional_outputs: bool = False,
-    ) -> tf.Tensor:
+    ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         training = False if training is None else training
         testing = False if testing is None else testing
         if isinstance(inputs, Iterable):
@@ -447,7 +388,6 @@ class TFPosteriorModel(ks.Model):
             spec_mask=spec_mask,
             wl_mask=wl_mask,
             testing=testing,
-            norm_prob=norm_prob,
             additional_outputs=additional_outputs,
         )
 
@@ -535,10 +475,87 @@ class TFPosteriorModel(ks.Model):
 
                 self.train_map(stage, c, chain, savepath=savepath)
 
+                log_prior = -self.map.negative_log_prior
+                log_like = -self.map.negative_log_like
                 log_prob = -self.map.negative_log_prob
                 num_finite = tf.math.count_nonzero(tf.math.is_finite(log_prob)).numpy()
                 num_total = tf.reduce_sum(tf.ones_like(log_prob)).numpy()
                 finite_ratio = num_finite / num_total
+
+                min_log_prior = float(
+                    tf.reduce_min(
+                        tf.where(
+                            tf.math.is_finite(log_prior),
+                            log_prior,
+                            np.inf * tf.ones_like(log_prior),
+                        )
+                    ).numpy()
+                )
+                mean_log_prior = float(
+                    tf.reduce_sum(
+                        tf.where(
+                            tf.math.is_finite(log_prior),
+                            log_prior,
+                            tf.zeros_like(log_prior),
+                        )
+                    ).numpy()
+                    / max(
+                        tf.reduce_sum(
+                            tf.where(
+                                tf.math.is_finite(log_prior),
+                                tf.ones_like(log_prior),
+                                tf.zeros_like(log_prior),
+                            )
+                        ).numpy(),
+                        1,
+                    )
+                )
+                max_log_prior = float(
+                    tf.reduce_max(
+                        tf.where(
+                            tf.math.is_finite(log_prior),
+                            log_prior,
+                            -np.inf * tf.ones_like(log_prior),
+                        )
+                    ).numpy()
+                )
+                min_log_like = float(
+                    tf.reduce_min(
+                        tf.where(
+                            tf.math.is_finite(log_like),
+                            log_like,
+                            np.inf * tf.ones_like(log_like),
+                        )
+                    ).numpy()
+                )
+                mean_log_like = float(
+                    tf.reduce_sum(
+                        tf.where(
+                            tf.math.is_finite(log_like),
+                            log_like,
+                            tf.zeros_like(log_like),
+                        )
+                    ).numpy()
+                    / max(
+                        tf.reduce_sum(
+                            tf.where(
+                                tf.math.is_finite(log_like),
+                                tf.ones_like(log_like),
+                                tf.zeros_like(log_like),
+                            )
+                        ).numpy(),
+                        1,
+                    )
+                )
+                max_log_like = float(
+                    tf.reduce_max(
+                        tf.where(
+                            tf.math.is_finite(log_like),
+                            log_like,
+                            -np.inf * tf.ones_like(log_like),
+                        )
+                    ).numpy()
+                )
                 min_log_prob = float(
                     tf.reduce_min(
                         tf.where(
@@ -636,6 +653,66 @@ class TFPosteriorModel(ks.Model):
                             step=chain,
                         )
                         tf.summary.scalar(
+                            "map/min_log_prior",
+                            min_log_prior,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "map/min_log_prior_norm",
+                            (min_log_prior / max_log_prior) * finite_ratio,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "map/mean_log_prior",
+                            mean_log_prior,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "map/mean_log_prior_norm",
+                            (mean_log_prior / max_log_prior) * finite_ratio,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "map/max_log_prior",
+                            max_log_prior,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "map/max_log_prior_norm",
+                            finite_ratio,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "map/min_log_like",
+                            min_log_like,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "map/min_log_like_norm",
+                            (min_log_like / max_log_like) * finite_ratio,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "map/mean_log_like",
+                            mean_log_like,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "map/mean_log_like_norm",
+                            (mean_log_like / max_log_like) * finite_ratio,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "map/max_log_like",
+                            max_log_like,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
+                            "map/max_log_like_norm",
+                            finite_ratio,
+                            step=chain,
+                        )
+                        tf.summary.scalar(
                             "map/min_log_prob",
                             min_log_prob,
                             step=chain,
@@ -692,7 +769,7 @@ class TFPosteriorModel(ks.Model):
                         )
                         for i in range(self.map.n_u_latents):
                             tf.summary.histogram(
-                                f"u_{i}",
+                                f"u_{i + 1}",
                                 tf.boolean_mask(
                                     self.map.u_latents.best[..., i], converged
                                 ),
@@ -700,7 +777,7 @@ class TFPosteriorModel(ks.Model):
                             )
                         for i in range(self.map.n_z_latents):
                             tf.summary.histogram(
-                                f"z_{i}",
+                                f"z_{i + 1}",
                                 tf.boolean_mask(
                                     self.map.z_latents.best[..., i], converged
                                 ),
@@ -786,14 +863,11 @@ class TFPosteriorModel(ks.Model):
             sn_mask=self.sn_mask,
             spec_mask=self.spec_mask,
             wl_mask=self.wl_mask,
-            norm_prob=self.norm_prob,
         )
-
-        # tf.print("log_prob", log_prob)
 
         self.update_map_progress(log_prob)
 
-        return self._loss(tf.zeros_like(log_prob), log_prob)
+        return self._loss(self.norm_prob, log_prob)
 
     def lbfgs(
         self: "Self",
@@ -825,14 +899,11 @@ class TFPosteriorModel(ks.Model):
         *,
         savepath: "Path | None" = None,
     ) -> None:
-        # self.log.debug(f"Running MAP stage: {stage.name}_{chain}")
         if self.norm_prob is None:
             self.map.setup(stage, chain)
 
             initial_position = self.map.position.current
-            # tf.print("input constrained", initial_position)
             initial_position = self.map.unconstrain(initial_position)
-            # tf.print("input unconstrained", initial_position)
             log_prob = self(
                 (
                     self.map.get_position(initial_position),
@@ -891,16 +962,14 @@ class TFPosteriorModel(ks.Model):
         self.map.setup(stage, chain)
 
         initial_position = self.map.position.current
-        # tf.print("input constrained", initial_position)
         initial_position = self.map.unconstrain(initial_position)
-        # tf.print("input unconstrained", initial_position)
 
         self.map_progress = tqdm(
             leave=False, dynamic_ncols=True, smoothing=1, position=0
         )
 
         if stage.setup:
-            objective_value = self.vals_and_grads(initial_position)
+            objective_value = self.vals_and_grads(initial_position) / self.norm_prob
             converged = tf.math.is_finite(objective_value)
             position = self.map.constrain(initial_position)
             failed = tf.math.logical_not(converged)
@@ -908,7 +977,7 @@ class TFPosteriorModel(ks.Model):
             improved = converged
         else:
             results = self.lbfgs(initial_position)
-            objective_value = results.objective_value
+            objective_value = results.objective_value / self.norm_prob
             converged = results.converged
             position = self.map.constrain(results.position)
             failed = results.failed
@@ -917,6 +986,17 @@ class TFPosteriorModel(ks.Model):
                 (objective_value < self.map.negative_log_prob), converged
             )
         self.map_progress.close()
+
+        final_position = self.map.get_position(self.map.unconstrain(position))
+        log_prob, log_like, log_prior, _, _ = self(
+            (final_position, self.data_time, self.data_amplitude, self.data_sigma),
+            training=False,
+            mask=self.data_mask,
+            sn_mask=self.sn_mask,
+            spec_mask=self.spec_mask,
+            wl_mask=self.wl_mask,
+            additional_outputs=True,
+        )
 
         self.map.improved.assign(improved)
 
@@ -944,10 +1024,24 @@ class TFPosteriorModel(ks.Model):
         )
         self.map.num_evaluations.assign_add(num_objective_evaluations)
         self.map.num_chain_evaluations.assign(num_objective_evaluations)
+        self.map.negative_log_prior.assign(
+            tf.where(
+                improved,
+                -log_prior,
+                self.map.negative_log_prior,
+            )
+        )
+        self.map.negative_log_like.assign(
+            tf.where(
+                improved,
+                -log_like,
+                self.map.negative_log_like,
+            )
+        )
         self.map.negative_log_prob.assign(
             tf.where(
                 improved,
-                objective_value,
+                -log_prob,
                 self.map.negative_log_prob,
             )
         )
@@ -1139,6 +1233,8 @@ class TFPosteriorModel(ks.Model):
     # === HMC Functions ===
     def update_sample_progress(
         self: "Self",
+        log_prior: tf.Tensor,
+        log_like: tf.Tensor,
         log_prob: tf.Tensor,
     ) -> None:
         if self.sample_progress.n % self.summary_interval != 0:
@@ -1151,6 +1247,66 @@ class TFPosteriorModel(ks.Model):
         )
         finite_ratio = num_finite / num_total
 
+        min_log_prior = tf.reduce_min(
+            tf.where(
+                tf.math.is_finite(log_prior),
+                log_prior,
+                np.inf * tf.ones_like(log_prior),
+            )
+        )
+        mean_log_prior = tf.reduce_sum(
+            tf.where(
+                tf.math.is_finite(log_prior),
+                log_prior,
+                tf.zeros_like(log_prior),
+            )
+        ) / tf.math.maximum(
+            tf.reduce_sum(
+                tf.where(
+                    tf.math.is_finite(log_prior),
+                    tf.ones_like(log_prior),
+                    tf.zeros_like(log_prior),
+                )
+            ),
+            1,
+        )
+        max_log_prior = tf.reduce_max(
+            tf.where(
+                tf.math.is_finite(log_prior),
+                log_prior,
+                -np.inf * tf.ones_like(log_prior),
+            )
+        )
+        min_log_like = tf.reduce_min(
+            tf.where(
+                tf.math.is_finite(log_like),
+                log_like,
+                np.inf * tf.ones_like(log_like),
+            )
+        )
+        mean_log_like = tf.reduce_sum(
+            tf.where(
+                tf.math.is_finite(log_like),
+                log_like,
+                tf.zeros_like(log_like),
+            )
+        ) / tf.math.maximum(
+            tf.reduce_sum(
+                tf.where(
+                    tf.math.is_finite(log_like),
+                    tf.ones_like(log_like),
+                    tf.zeros_like(log_like),
+                )
+            ),
+            1,
+        )
+        max_log_like = tf.reduce_max(
+            tf.where(
+                tf.math.is_finite(log_like),
+                log_like,
+                -np.inf * tf.ones_like(log_like),
+            )
+        )
         min_log_prob = tf.reduce_min(
             tf.where(
                 tf.math.is_finite(log_prob),
@@ -1185,6 +1341,12 @@ class TFPosteriorModel(ks.Model):
         @tf.py_function(Tout=[])
         def _update(
             finite_ratio: tf.Tensor,
+            min_log_prior: tf.Tensor,
+            mean_log_prior: tf.Tensor,
+            max_log_prior: tf.Tensor,
+            min_log_like: tf.Tensor,
+            mean_log_like: tf.Tensor,
+            max_log_like: tf.Tensor,
             min_log_prob: tf.Tensor,
             mean_log_prob: tf.Tensor,
             max_log_prob: tf.Tensor,
@@ -1200,6 +1362,66 @@ class TFPosteriorModel(ks.Model):
 
             if self.summary_writer is not None:
                 with self.summary_writer.as_default():
+                    tf.summary.scalar(
+                        "sample/min_log_prior",
+                        min_log_prior,
+                        step=self.sample_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "sample/min_log_prior_norm",
+                        (min_log_prior / max_log_prior) * finite_ratio,
+                        step=self.sample_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "sample/mean_log_prior",
+                        mean_log_prior,
+                        step=self.sample_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "sample/mean_log_prior_norm",
+                        (mean_log_prior / max_log_prior) * finite_ratio,
+                        step=self.sample_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "sample/max_log_prior",
+                        max_log_prior,
+                        step=self.sample_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "sample/max_log_prior_norm",
+                        finite_ratio,
+                        step=self.sample_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "sample/min_log_like",
+                        min_log_like,
+                        step=self.sample_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "sample/min_log_like_norm",
+                        (min_log_like / max_log_like) * finite_ratio,
+                        step=self.sample_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "sample/mean_log_like",
+                        mean_log_like,
+                        step=self.sample_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "sample/mean_log_like_norm",
+                        (mean_log_like / max_log_like) * finite_ratio,
+                        step=self.sample_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "sample/max_log_like",
+                        max_log_like,
+                        step=self.sample_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "sample/max_log_like_norm",
+                        finite_ratio,
+                        step=self.sample_progress.n,
+                    )
                     tf.summary.scalar(
                         "sample/min_log_prob",
                         min_log_prob,
@@ -1231,11 +1453,25 @@ class TFPosteriorModel(ks.Model):
                         step=self.sample_progress.n,
                     )
 
-        _update(finite_ratio, min_log_prob, mean_log_prob, max_log_prob)
+        _update(
+            finite_ratio,
+            min_log_prior,
+            mean_log_prior,
+            max_log_prior,
+            min_log_like,
+            mean_log_like,
+            max_log_like,
+            min_log_prob,
+            mean_log_prob,
+            max_log_prob,
+        )
 
     def update_run_progress(
         self: "Self",
+        log_prior: tf.Tensor,
+        log_like: tf.Tensor,
         log_prob: tf.Tensor,
+        pkr: "DualAveragingStepSizeAdaptationResults",
     ) -> None:
         num_total = tf.reduce_sum(tf.ones_like(log_prob))
         num_finite = tf.math.count_nonzero(
@@ -1243,6 +1479,66 @@ class TFPosteriorModel(ks.Model):
         )
         finite_ratio = num_finite / num_total
 
+        min_log_prior = tf.reduce_min(
+            tf.where(
+                tf.math.is_finite(log_prior),
+                log_prior,
+                np.inf * tf.ones_like(log_prior),
+            )
+        )
+        mean_log_prior = tf.reduce_sum(
+            tf.where(
+                tf.math.is_finite(log_prior),
+                log_prior,
+                tf.zeros_like(log_prior),
+            )
+        ) / tf.math.maximum(
+            tf.reduce_sum(
+                tf.where(
+                    tf.math.is_finite(log_prior),
+                    tf.ones_like(log_prior),
+                    tf.zeros_like(log_prior),
+                )
+            ),
+            1,
+        )
+        max_log_prior = tf.reduce_max(
+            tf.where(
+                tf.math.is_finite(log_prior),
+                log_prior,
+                -np.inf * tf.ones_like(log_prior),
+            )
+        )
+        min_log_like = tf.reduce_min(
+            tf.where(
+                tf.math.is_finite(log_like),
+                log_like,
+                np.inf * tf.ones_like(log_like),
+            )
+        )
+        mean_log_like = tf.reduce_sum(
+            tf.where(
+                tf.math.is_finite(log_like),
+                log_like,
+                tf.zeros_like(log_like),
+            )
+        ) / tf.math.maximum(
+            tf.reduce_sum(
+                tf.where(
+                    tf.math.is_finite(log_like),
+                    tf.ones_like(log_like),
+                    tf.zeros_like(log_like),
+                )
+            ),
+            1,
+        )
+        max_log_like = tf.reduce_max(
+            tf.where(
+                tf.math.is_finite(log_like),
+                log_like,
+                -np.inf * tf.ones_like(log_like),
+            )
+        )
         min_log_prob = tf.reduce_min(
             tf.where(
                 tf.math.is_finite(log_prob),
@@ -1274,12 +1570,24 @@ class TFPosteriorModel(ks.Model):
             )
         )
 
+        log_accept_ratio = pkr.inner_results.log_accept_ratio
+        accept_ratio = tf.math.exp(
+            tfp.math.reduce_logmeanexp(tf.minimum(log_accept_ratio, 0.0))
+        )
+
         @tf.py_function(Tout=[])
         def _update(
             finite_ratio: tf.Tensor,
+            min_log_prior: tf.Tensor,
+            mean_log_prior: tf.Tensor,
+            max_log_prior: tf.Tensor,
+            min_log_like: tf.Tensor,
+            mean_log_like: tf.Tensor,
+            max_log_like: tf.Tensor,
             min_log_prob: tf.Tensor,
             mean_log_prob: tf.Tensor,
             max_log_prob: tf.Tensor,
+            accept_ratio: tf.Tensor,
         ) -> None:
             self.run_progress.set_postfix({
                 "log_prob": (
@@ -1287,10 +1595,71 @@ class TFPosteriorModel(ks.Model):
                     f"{mean_log_prob:.3E} ({(mean_log_prob / max_log_prob) * finite_ratio:.2%})",
                     f"{max_log_prob:.3E} ({finite_ratio:.2%})",
                 ),
+                "accept_ratio": f"{accept_ratio:.2%}",
             })
             self.run_progress.update()
             if self.summary_writer is not None:
                 with self.summary_writer.as_default():
+                    tf.summary.scalar(
+                        "run/min_log_prior",
+                        min_log_prior,
+                        step=self.run_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "run/min_log_prior_norm",
+                        (min_log_prior / max_log_prior) * finite_ratio,
+                        step=self.run_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "run/mean_log_prior",
+                        mean_log_prior,
+                        step=self.run_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "run/mean_log_prior_norm",
+                        (mean_log_prior / max_log_prior) * finite_ratio,
+                        step=self.run_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "run/max_log_prior",
+                        max_log_prior,
+                        step=self.run_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "run/max_log_prior_norm",
+                        finite_ratio,
+                        step=self.run_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "run/min_log_like",
+                        min_log_like,
+                        step=self.run_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "run/min_log_like_norm",
+                        (min_log_like / max_log_like) * finite_ratio,
+                        step=self.run_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "run/mean_log_like",
+                        mean_log_like,
+                        step=self.run_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "run/mean_log_like_norm",
+                        (mean_log_like / max_log_like) * finite_ratio,
+                        step=self.run_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "run/max_log_like",
+                        max_log_like,
+                        step=self.run_progress.n,
+                    )
+                    tf.summary.scalar(
+                        "run/max_log_like_norm",
+                        finite_ratio,
+                        step=self.run_progress.n,
+                    )
                     tf.summary.scalar(
                         "run/min_log_prob",
                         min_log_prob,
@@ -1322,54 +1691,105 @@ class TFPosteriorModel(ks.Model):
                         step=self.run_progress.n,
                     )
 
-        _update(finite_ratio, min_log_prob, mean_log_prob, max_log_prob)
+                    tf.summary.scalar(
+                        "accept_ratio", accept_ratio, step=self.run_progress.n
+                    )
+
+        _update(
+            finite_ratio,
+            min_log_prior,
+            mean_log_prior,
+            max_log_prior,
+            min_log_like,
+            mean_log_like,
+            max_log_like,
+            min_log_prob,
+            mean_log_prob,
+            max_log_prob,
+            accept_ratio,
+        )
 
     def unnormalized_posterior_log_prob(
-        self: "Self", *pos: tf.Tensor, run: bool = False
+        self: "Self",
+        *pos: tf.Tensor,
+        sample: bool | None = None,
+        pkr: "DualAveragingStepSizeAdaptationResults | None" = None,
     ) -> tf.Tensor:
-        input_position = self.map.get_position(*pos)
-        log_prob = self(
-            (input_position, self.data_time, self.data_amplitude, self.data_sigma),
-            training=False,
-            mask=self.data_mask,
-            sn_mask=self.sn_mask,
-            spec_mask=self.spec_mask,
-            wl_mask=self.wl_mask,
+        if sample is None:
+            sample = pkr is None
+
+        def _step(
+            position: tf.Tensor,
+        ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+            input_position = self.map.get_position(position)
+            return self(
+                (
+                    input_position,
+                    self.data_time,
+                    self.data_amplitude,
+                    self.data_sigma,
+                ),
+                training=False,
+                mask=self.data_mask,
+                sn_mask=self.sn_mask,
+                spec_mask=self.spec_mask,
+                wl_mask=self.wl_mask,
+                additional_outputs=True,
+            )[:3]
+
+        log_prob, log_like, log_prior = tf.map_fn(
+            _step,
+            tf.convert_to_tensor(pos),
+            parallel_iterations=NPROC,
+            fn_output_signature=(
+                tf.float32,
+                tf.float32,
+                tf.float32,
+            ),
         )
-        if run:
-            self.update_run_progress(log_prob)
-        else:
-            self.update_sample_progress(log_prob)
+
+        log_prob = tf.reduce_sum(log_prob, axis=0)
+        log_like = tf.reduce_sum(log_like, axis=0)
+        log_prior = tf.reduce_sum(log_prior, axis=0)
+
+        if sample:
+            self.update_sample_progress(log_prior, log_like, log_prob)
+        if pkr is not None:
+            self.update_run_progress(log_prior, log_like, log_prob, pkr)
+
         return log_prob
 
     def trace_fn(
         self: "Self", state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
-    ) -> tuple[tf.Tensor, tf.Tensor]:
-        self.unnormalized_posterior_log_prob(state, run=True)
+    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+        self.unnormalized_posterior_log_prob(state, pkr=pkr)
         step_size = pkr.inner_results.step_size
         is_accepted = pkr.inner_results.is_accepted
-        return step_size, is_accepted
+        log_accept_ratio = pkr.inner_results.log_accept_ratio
+        return step_size, is_accepted, log_accept_ratio
 
     @tf.function
     def sample_chain(
         self: "Self",
         position: tf.Tensor,
         kernel: tfp.mcmc.TransitionKernel,
-    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        samples, [step_sizes_final, is_accepted] = tfp.mcmc.sample_chain(
-            num_results=self.n_samples,
-            current_state=position,
-            kernel=kernel,
-            num_burnin_steps=self.n_burnin,
-            num_steps_between_results=self.n_thinning,
-            trace_fn=self.trace_fn,
-            name="run",
-            parallel_iterations=NPROC,
+    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        samples, [step_sizes_final, is_accepted, log_accept_ratio] = (
+            tfp.mcmc.sample_chain(
+                num_results=self.n_samples,
+                current_state=position,
+                kernel=kernel,
+                num_burnin_steps=self.n_burnin,
+                num_steps_between_results=self.n_thinning,
+                trace_fn=self.trace_fn,
+                name="run",
+                parallel_iterations=NPROC,
+            )
         )
 
         samples = self.map.constrain(samples)
 
-        return samples, step_sizes_final, is_accepted
+        return samples, step_sizes_final, is_accepted, log_accept_ratio
 
     def hmc_train(
         self: "Self",
@@ -1432,13 +1852,10 @@ class TFPosteriorModel(ks.Model):
                 )
                 return
         self.log.debug("Running HMC")
-        # tf.print("constrained", self.map.position.best)
         initial_position = self.map.unconstrain(self.map.position.best)
-        # tf.print("unconstrained", initial_position)
         step_size_init = self.map.unconstrain(self.step_size)
         step_size_std = tf.math.reduce_std(initial_position, axis=0)
         step_size_inner = tf.math.sqrt(step_size_init * step_size_std)
-        tf.print(self.step_size, step_size_init, step_size_std, step_size_inner)
         step_size = tf.repeat(
             tf.expand_dims(step_size_inner, axis=0),
             repeats=initial_position.shape[0],
@@ -1482,7 +1899,7 @@ class TFPosteriorModel(ks.Model):
             target_accept_prob=self.target_acceptance_rate,
         )
 
-        samples, step_sizes_final, is_accepted = self.sample_chain(
+        samples, step_sizes_final, is_accepted, log_accept_ratio = self.sample_chain(
             initial_position, kernel
         )
 
@@ -1494,12 +1911,12 @@ class TFPosteriorModel(ks.Model):
             self.summary_writer.close()
         self.summary_writer = None
 
-        samples, step_sizes_final, is_accepted = (
+        samples, step_sizes_final, is_accepted, log_accept_ratio = (
             samples.numpy(),
             step_sizes_final.numpy(),
             is_accepted.numpy(),
+            log_accept_ratio.numpy(),
         )
-        tf.print(step_sizes_final)
 
         ind = 0
         if self.map.train_delta_m:

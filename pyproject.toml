@@ -42,7 +42,9 @@ build-backend = "hatchling.build"
 
 # === Tools ===
 [tool.uv]
-environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
+environments = ["sys_platform == 'linux'"]
+prerelease = "allow"
+conflicts = [[{ extra = "tf" }, { extra = "tf-cpu" }, { extra = "tf-rocm" }]]
 
 [tool.uv.sources]
 tensorflow_rocm = [{ index = "rocm" }]

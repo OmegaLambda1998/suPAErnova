@@ -82,11 +82,18 @@ class PosteriorMap(tf.Module):
         )
         self.num_evaluations = tf.Variable(tf.constant(0), dtype=tf.int32)
         self.num_chain_evaluations = tf.Variable(tf.constant(0), dtype=tf.int32)
+        self.negative_log_prior = tf.Variable(
+            np.inf * tf.ones(self.sn_dim, dtype=tf.float32)
+        )
+        self.negative_log_like = tf.Variable(
+            np.inf * tf.ones(self.sn_dim, dtype=tf.float32)
+        )
         self.negative_log_prob = tf.Variable(
             np.inf * tf.ones(self.sn_dim, dtype=tf.float32)
         )
 
         # === Priors ===
+        self.use_u_delta_av_prior: bool = config.options.u_delta_av_prior
         self.u_delta_av_min: float = config.options.u_delta_av_min or -np.inf
         self.u_delta_av_max: float = config.options.u_delta_av_max or np.inf
         self.u_delta_av_start: float = config.options.u_delta_av_start
@@ -104,6 +111,7 @@ class PosteriorMap(tf.Module):
         if self.nflow.physical_latents:
             self.n_pos += 1
 
+        self.use_u_latents_prior: bool = config.options.u_latents_prior
         self.u_latents_min: float = config.options.u_latents_min or -np.inf
         self.u_latents_max: float = config.options.u_latents_max or np.inf
         self.u_latents_mean: float = config.options.u_latents_mean
@@ -126,6 +134,7 @@ class PosteriorMap(tf.Module):
             loc=self.delta_av_mean, scale=self.delta_av_std
         )
 
+        self.use_delta_m_prior: bool = config.options.delta_m_prior
         self.train_delta_m: bool = config.options.train_delta_m
         self.delta_m_min: float = config.options.delta_m_min or -np.inf
         self.delta_m_max: float = config.options.delta_m_max or np.inf
@@ -144,6 +153,7 @@ class PosteriorMap(tf.Module):
         if self.train_delta_m:
             self.n_pos += 1
 
+        self.use_delta_p_prior: bool = config.options.delta_p_prior
         self.train_delta_p: bool = config.options.train_delta_p
         self.delta_p_min: float = config.options.delta_p_min or -np.inf
         self.delta_p_max: float = config.options.delta_p_max or np.inf
@@ -162,6 +172,7 @@ class PosteriorMap(tf.Module):
         if self.train_delta_p:
             self.n_pos += 1
 
+        self.use_bias_prior: bool = config.options.bias_prior
         self.train_bias: bool = config.options.train_bias
         self.bias_min: float = config.options.bias_min or -np.inf
         self.bias_max: float = config.options.bias_max or np.inf
@@ -549,9 +560,7 @@ class PosteriorMap(tf.Module):
             self.position.initial = self.position.current
             self.position.best = self.position.current
 
-    def get_position(
-        self: Self, position: tf.Tensor, *, best: bool = False
-    ) -> tf.Tensor:
+    def get_position(self: Self, position: tf.Tensor, best: bool = False) -> tf.Tensor:
         u_delta_av = self.u_delta_av.best if best else self.u_delta_av.current
         delta_m = self.delta_m.best if best else self.delta_m.current
         delta_p = self.delta_p.best if best else self.delta_p.current
@@ -559,18 +568,18 @@ class PosteriorMap(tf.Module):
 
         i = 0
         if self.train_delta_m:
-            delta_m = position[:, i : i + 1]
+            delta_m = position[..., i : i + 1]
             i += 1
         if self.train_delta_p:
-            delta_p = position[:, i : i + 1]
+            delta_p = position[..., i : i + 1]
             i += 1
         if self.train_bias:
-            bias = position[:, i : i + 1]
+            bias = position[..., i : i + 1]
             i += 1
         if self.nflow.physical_latents:
-            u_delta_av = position[:, i : i + 1]
+            u_delta_av = position[..., i : i + 1]
             i += 1
-        u_latents = position[:, i:]
+        u_latents = position[..., :, i:]
 
         return tf.concat((delta_m, delta_p, bias, u_delta_av, u_latents), axis=-1)
 
@@ -645,37 +654,29 @@ class PosteriorMap(tf.Module):
         u_delta_av = position[..., 3:4]
         u_latents = position[..., 4:]
 
-        # if self.train_delta_m:
-        #     delta_m_log_prior = self.delta_m_prior.log_prob(delta_m)[:, 0]
-        # else:
-        #     delta_m_log_prior = zero_prior
-        # log_prior += tf.where(
-        #     tf.math.is_finite(delta_m_log_prior), delta_m_log_prior, inf_prior
-        # )
+        if self.use_delta_m_prior and self.train_delta_m:
+            delta_m_log_prior = self.delta_m_prior.log_prob(delta_m)[:, 0]
+        else:
+            delta_m_log_prior = zero_prior
 
-        # if self.train_delta_p:
-        #     delta_p_log_prior = self.delta_p_prior.log_prob(delta_p)[:, 0]
-        # else:
-        #     delta_p_log_prior = zero_prior
-        # log_prior += tf.where(
-        #     tf.math.is_finite(delta_p_log_prior), delta_p_log_prior, inf_prior
-        # )
+        if self.use_delta_p_prior and self.train_delta_p:
+            delta_p_log_prior = self.delta_p_prior.log_prob(delta_p)[:, 0]
+        else:
+            delta_p_log_prior = zero_prior
 
-        # if self.train_bias:
-        #     bias_log_prior = self.bias_prior.log_prob(bias)[:, 0]
-        # else:
-        #     bias_log_prior = zero_prior
-        # log_prior += tf.where(
-        #     tf.math.is_finite(bias_log_prior), bias_log_prior, inf_prior
-        # )
+        if self.use_bias_prior and self.train_bias:
+            bias_log_prior = self.bias_prior.log_prob(bias)[:, 0]
+        else:
+            bias_log_prior = zero_prior
 
-        if self.nflow.physical_latents:
+        if self.use_u_delta_av_prior and self.nflow.physical_latents:
             u_delta_av_log_prior = self.u_delta_av_prior.log_prob(u_delta_av)[:, 0]
         else:
             u_delta_av_log_prior = zero_prior
-        log_prior += u_delta_av_log_prior
 
         u_latents_log_prior = self.u_latents_prior.log_prob(u_latents)
+        if not self.use_u_latents_prior:
+            u_latents_log_prior *= 0
         log_prior += u_latents_log_prior
 
         return tf.where(tf.math.is_finite(log_prior), log_prior, inf_prior)

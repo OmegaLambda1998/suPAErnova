@@ -454,7 +454,7 @@ class NFlow(ModelStep[NFlowConfig]):
                                 f"{self.name} is missing analyses as {savepath} does not exist"
                             )
                             return False
-        return True
+        return not self.analysis.force
 
     @override
     def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:

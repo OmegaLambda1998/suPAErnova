@@ -8,4 +8,4 @@ if TYPE_CHECKING:
 def NegLogLikelihood(
     y_true: "tf.Tensor", y_pred: "tf.Tensor", *, model: "ks.Model"
 ) -> "tf.Tensor":
-    return -y_pred
+    return -y_pred * y_true
