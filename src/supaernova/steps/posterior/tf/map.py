@@ -68,15 +68,9 @@ class PosteriorMap(tf.Module):
 
         # === Training ===
         self.chain_min = tf.Variable(tf.zeros(self.sn_dim, dtype=tf.int32))
-        self.converged = tf.Variable(
-            tf.cast(tf.zeros(self.sn_dim, dtype=tf.int32), tf.bool)
-        )
-        self.failed = tf.Variable(
-            tf.cast(tf.ones(self.sn_dim, dtype=tf.int32), tf.bool)
-        )
-        self.improved = tf.Variable(
-            tf.cast(tf.zeros(self.sn_dim, dtype=tf.int32), tf.bool)
-        )
+        self.converged = tf.Variable(tf.zeros(self.sn_dim, dtype=tf.bool))
+        self.failed = tf.Variable(tf.ones(self.sn_dim, dtype=tf.bool))
+        self.improved = tf.Variable(tf.zeros(self.sn_dim, dtype=tf.bool))
         self.num_evaluations = tf.Variable(tf.constant(0), dtype=tf.int32)
         self.num_chain_evaluations = tf.Variable(tf.constant(0), dtype=tf.int32)
         self.negative_log_prior = tf.Variable(

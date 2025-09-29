@@ -215,20 +215,18 @@ class TFPosteriorModel(ks.Model):
         input_wl_mask = tf.ones_like(input_mask) if wl_mask is None else wl_mask
         # Phase Range Mask
         input_spec_mask = (
-            tf.reduce_max(input_wl_mask, axis=-1, keepdims=True)
+            tf.math.reduce_any(input_wl_mask, axis=-1, keepdims=True)
             if spec_mask is None
             else spec_mask
         )
         # Redshift Range Mask
         input_sn_mask = (
-            tf.reduce_max(input_spec_mask, axis=-2, keepdims=True)
+            tf.math.reduce_any(input_spec_mask, axis=-2, keepdims=True)
             if sn_mask is None
             else sn_mask
         )
 
-        posterior_mask = tf.cast(
-            input_mask * input_sn_mask * input_spec_mask * input_wl_mask, tf.float32
-        )
+        posterior_mask = input_mask & input_sn_mask & input_spec_mask & input_wl_mask
 
         # Unconstrained -> Constrained
         input_position = self.map.constrain(input_position, full=True)
@@ -302,8 +300,9 @@ class TFPosteriorModel(ks.Model):
         synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (input_sigma**2))
 
         # Set missing values to 1 for all times
-        synth_sigma *= posterior_mask
-        synth_sigma += 1 - posterior_mask
+        synth_sigma = tf.where(
+            posterior_mask, synth_sigma, -1 * tf.ones_like(synth_sigma)
+        )
 
         # Create likelihood distribution
         likelihood = tfd.Independent(
@@ -316,20 +315,20 @@ class TFPosteriorModel(ks.Model):
 
         # Determine which spectra to keep
         # Will mask out any spectrum with *no* unmasked wavelengths in the valid wavelength range
-        mask_spec = tf.reduce_max(posterior_mask, axis=-1)
+        mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
 
         # Determine which SNe to keep
         # Will mask out any SN with *no* unmasked spectra
-        mask_sn = tf.reduce_max(mask_spec, axis=-1)
+        mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
 
         log_prob = likelihood.log_prob(input_amp)
 
-        log_likelihood = log_prob * mask_spec
+        log_likelihood = tf.where(mask_spec, log_prob, tf.zeros_like(log_prob))
 
         log_likelihood_num = tf.reduce_sum(log_likelihood, axis=-1)
 
         # The number of unmasked spectra
-        log_likelihood_sum = tf.reduce_sum(mask_spec, axis=-1)
+        log_likelihood_sum = tf.math.count_nonzero(mask_spec, axis=-1, dtype=tf.float32)
         valid_spectra = log_likelihood_sum > 0
         log_likelihood_sum = tf.math.maximum(
             log_likelihood_sum, tf.ones_like(log_likelihood_sum)

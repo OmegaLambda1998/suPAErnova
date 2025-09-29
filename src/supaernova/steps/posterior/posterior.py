@@ -1583,7 +1583,7 @@ class Posterior(ModelStep[PosteriorConfig]):
             input_redshift = data.redshift
             input_phase = data.phase
             input_wavelength = data.wavelength
-            input_mask = data.mask
+            input_mask = data.mask.astype(bool)
             data.clear()
 
             min_redshift: float = getattr(self, f"min_{mask_type}redshift")
@@ -1592,7 +1592,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 (input_redshift >= min_redshift) & (input_redshift <= max_redshift)
             )[:, 0:1, 0:1]
             # Mask out SNe outside the redshift range
-            sn_mask = redshift_mask.astype(np.int32)
+            sn_mask = redshift_mask
 
             min_phase: float = getattr(self, f"min_{mask_type}phase")
             max_phase: float = getattr(self, f"max_{mask_type}phase")
@@ -1600,7 +1600,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 ..., 0:1
             ]
             # Mask out spectra outside the phase range
-            spec_mask = phase_mask.astype(np.int32)
+            spec_mask = phase_mask
 
             min_wavelength: float = getattr(self, f"min_{mask_type}wavelength")
             max_wavelength: float = getattr(self, f"max_{mask_type}wavelength")
@@ -1608,7 +1608,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 input_wavelength <= max_wavelength
             )
             # Mask out wavelengths outside the wavelength range
-            wl_mask = wavelength_mask.astype(np.int32)
+            wl_mask = wavelength_mask
 
             setattr(self, f"{mask_type}mask", input_mask)
             setattr(self, f"{mask_type}sn_mask", sn_mask)
