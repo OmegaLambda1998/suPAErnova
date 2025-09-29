@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from supaernova.configs.paths import PathConfig
     from supaernova.configs.steps import StepConfig, StepResult, StepAnalysis
     from supaernova.configs.globals import GlobalConfig
-    from supaernova.configs.steps.variants import VariantConfig
 
 
 class Step[C: StepConfig]:

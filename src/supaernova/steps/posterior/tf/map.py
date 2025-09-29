@@ -2,11 +2,8 @@
 from typing import TYPE_CHECKING, Any, Self, ClassVar
 
 import numpy as np
-import tensorflow as tf
-from tensorflow_probability import (
-    bijectors as tfb,
-    distributions as tfd,
-)
+
+from supaernova._tf import tf, tfb, tfd
 
 if TYPE_CHECKING:
     from numpy import typing as npt

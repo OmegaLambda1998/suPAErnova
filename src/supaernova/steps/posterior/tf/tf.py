@@ -5,10 +5,8 @@ from collections.abc import Iterable
 
 from tqdm import tqdm
 import numpy as np
-import tensorflow as tf
-from tensorflow import keras as ks
-import tensorflow_probability as tfp
-from tensorflow_probability import distributions as tfd
+
+from supaernova._tf import ks, tf, tfd, tfp
 
 from .hmc import PosteriorHMCValue
 from .map import PosteriorMap

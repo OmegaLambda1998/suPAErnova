@@ -456,6 +456,190 @@ class NFlow(ModelStep[NFlowConfig]):
                             return False
         return not self.analysis.force
 
+    def _plot_u_latents(
+        self: Self, gaussian, z_to_u, dt, u_labels, n_latents, n_bins
+    ) -> None:
+        if self.analysis.plot_u_latents is not None:
+            if not isinstance(self.analysis.plot_u_latents, list):
+                self.analysis.plot_u_latents = [self.analysis.plot_u_latents]
+            for opts in self.analysis.plot_u_latents:
+                o = opts.model_copy(deep=True)
+                if o.labels is None:
+                    o.labels = {
+                        "gaussian": u_labels,
+                        "u_latents": u_labels,
+                        "u_latents_smoothed": u_labels,
+                    }
+                if o.name is None:
+                    o.name = "u_latents"
+                self.log.debug(f"Plotting {o.name}")
+                if o.savepath is None:
+                    o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"title": f"{dt}{self.name}"}
+                DistributionPlotter.plot_corner(
+                    {
+                        "gaussian": gaussian,
+                        "u_latents": z_to_u,
+                        "u_latents_smoothed": z_to_u,
+                    },
+                    o,
+                    statistics="max_central",
+                    shade_alpha=0.0,
+                    plot_cloud={"u_latents": True},
+                    smooth={"u_latents": 0},
+                    bins={
+                        "u_latents": n_latents,
+                        "u_latents_smoothed": n_bins,
+                    },
+                    color={
+                        "gaussian": Plotter.colour_sequence.colors[0],
+                        "u_latents": Plotter.colour_sequence.colors[1],
+                        "u_latents_smoothed": Plotter.colour_sequence.colors[1],
+                    },
+                )
+
+    def _plot_z_latents(self: Self, z, u_to_z, dt, z_labels, n_latents, n_bins) -> None:
+        if self.analysis.plot_z_latents is not None:
+            if not isinstance(self.analysis.plot_z_latents, list):
+                self.analysis.plot_z_latents = [self.analysis.plot_z_latents]
+            for opts in self.analysis.plot_z_latents:
+                o = opts.model_copy(deep=True)
+                if o.labels is None:
+                    o.labels = {"z_latents": z_labels, "u_to_z_latents": z_labels}
+                if o.name is None:
+                    o.name = "z_latents"
+                self.log.debug(f"Plotting {o.name}")
+                if o.savepath is None:
+                    o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"title": f"{dt}{self.name}"}
+                DistributionPlotter.plot_corner(
+                    {"z_latents": z, "u_to_z_latents": u_to_z},
+                    o,
+                    statistics="max_central",
+                    shade_alpha=0.0,
+                    plot_cloud=True,
+                    smooth={"z_latents": 0, "u_to_z_latents": 0},
+                    bins={
+                        "z_latents": n_latents,
+                        "u_to_z_latents": n_latents,
+                    },
+                )
+
+    def _plot_latents(
+        self: Self, z_to_u, u_to_z, dt, labels, n_latents, n_bins
+    ) -> None:
+        if self.analysis.plot_latents is not None:
+            if not isinstance(self.analysis.plot_latents, list):
+                self.analysis.plot_latents = [self.analysis.plot_latents]
+            for opts in self.analysis.plot_latents:
+                o = opts.model_copy(deep=True)
+                if o.labels is None:
+                    o.labels = {
+                        "u_latents": labels,
+                        "u_latents_smoothed": labels,
+                        "z_latents": labels,
+                        "z_latents_smoothed": labels,
+                    }
+                if o.name is None:
+                    o.name = "latents"
+                self.log.debug(f"Plotting {o.name}")
+                if o.savepath is None:
+                    o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"title": f"{dt}{self.name}"}
+                DistributionPlotter.plot_corner(
+                    {
+                        "u_latents": z_to_u,
+                        "u_latents_smoothed": z_to_u,
+                        "z_latents": u_to_z,
+                        "z_latents_smoothed": u_to_z,
+                    },
+                    o,
+                    statistics="max_central",
+                    shade_alpha=0.0,
+                    plot_cloud={"u_latents": True, "z_latents": True},
+                    smooth={"u_latents": 0, "z_latents": 0},
+                    bins={
+                        "u_latents": n_latents,
+                        "u_latents_smoothed": n_bins,
+                        "z_latents": n_latents,
+                        "z_latents_smoothed": n_bins,
+                    },
+                    color={
+                        "u_latents": Plotter.colour_sequence.colors[0],
+                        "u_latents_smoothed": Plotter.colour_sequence.colors[0],
+                        "z_latents": Plotter.colour_sequence.colors[1],
+                        "z_latents_smoothed": Plotter.colour_sequence.colors[1],
+                    },
+                )
+
+    def _plot_latent_steps(
+        self: Self, gaussian, results, mask, labels, dt, n_latents, n_bins
+    ) -> None:
+        if self.analysis.plot_latent_steps is not None:
+            if not isinstance(self.analysis.plot_latent_steps, list):
+                self.analysis.plot_latent_steps = [self.analysis.plot_latent_steps]
+            for opts in self.analysis.plot_latent_steps:
+                num_steps = len(self.model.flow.bijector.bijectors) + 1
+
+                for step in range(num_steps):
+                    step_latents, is_shift = self.model.z_to_u_steps(
+                        results.z_latents, step, permute=True
+                    )
+
+                    step_u_latents = step_latents.numpy()[mask]
+
+                    if is_shift:
+                        continue
+                    o = opts.model_copy(deep=True)
+                    if o.labels is None:
+                        o.labels = {
+                            "gaussian": labels,
+                            f"step_{step}_latents": labels,
+                            f"step_{step}_latents_smoothed": labels,
+                        }
+                    if o.name is None:
+                        o.name = f"step_{step}_latent_steps"
+                    self.log.debug(f"Plotting {o.name}")
+                    if o.savepath is None:
+                        o.savepath = (
+                            self.paths.plots / dt[:-1] / str(self.seed) / "steps"
+                        )
+                    o.savepath.mkdir(parents=True, exist_ok=True)
+                    if o.plot_kwargs is None:
+                        o.plot_kwargs = {"title": f"{dt}{self.name}"}
+
+                    DistributionPlotter.plot_corner(
+                        {
+                            "gaussian": gaussian,
+                            f"step_{step}_latents": step_u_latents,
+                            f"step_{step}_latents_smoothed": step_u_latents,
+                        },
+                        o,
+                        statistics="max_central",
+                        shade_alpha=0.0,
+                        plot_cloud={f"step_{step}_latents": True},
+                        smooth={
+                            f"step_{step}_latents": 0,
+                        },
+                        bins={
+                            f"step_{step}_latents": n_latents,
+                            f"step_{step}_latents_smoothed": n_bins,
+                        },
+                        color={
+                            "gaussian": Plotter.colour_sequence.colors[0],
+                            f"step_{step}_latents": Plotter.colour_sequence.colors[1],
+                            f"step_{step}_latents_smoothed": Plotter.colour_sequence.colors[
+                                1
+                            ],
+                        },
+                    )
+
     @override
     def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:
         z_labels = {}
@@ -493,181 +677,15 @@ class NFlow(ModelStep[NFlowConfig]):
             latents_scale = latents_scale_min if n_latents > 100 else latents_scale_max
             n_bins = int(np.sqrt(10**latents_scale))
 
-            if self.analysis.plot_u_latents is not None:
-                if not isinstance(self.analysis.plot_u_latents, list):
-                    self.analysis.plot_u_latents = [self.analysis.plot_u_latents]
-                for opts in self.analysis.plot_u_latents:
-                    o = opts.model_copy(deep=True)
-                    if o.labels is None:
-                        o.labels = {
-                            "gaussian": u_labels,
-                            "u_latents": u_labels,
-                            "u_latents_smoothed": u_labels,
-                        }
-                    if o.name is None:
-                        o.name = "u_latents"
-                    self.log.debug(f"Plotting {o.name}")
-                    if o.savepath is None:
-                        o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    if o.plot_kwargs is None:
-                        o.plot_kwargs = {"title": f"{dt}{self.name}"}
-                    DistributionPlotter.plot_corner(
-                        {
-                            "gaussian": gaussian,
-                            "u_latents": z_to_u,
-                            "u_latents_smoothed": z_to_u,
-                        },
-                        o,
-                        statistics="max_central",
-                        shade_alpha=0.0,
-                        plot_cloud={"u_latents": True},
-                        smooth={"u_latents": 0},
-                        bins={
-                            "u_latents": n_latents,
-                            "u_latents_smoothed": n_bins,
-                        },
-                        color={
-                            "gaussian": Plotter.colour_sequence.colors[0],
-                            "u_latents": Plotter.colour_sequence.colors[1],
-                            "u_latents_smoothed": Plotter.colour_sequence.colors[1],
-                        },
-                    )
+            self._plot_u_latents(gaussian, z_to_u, dt, u_labels, n_latents, n_bins)
 
-            if self.analysis.plot_z_latents is not None:
-                if not isinstance(self.analysis.plot_z_latents, list):
-                    self.analysis.plot_z_latents = [self.analysis.plot_z_latents]
-                for opts in self.analysis.plot_z_latents:
-                    o = opts.model_copy(deep=True)
-                    if o.labels is None:
-                        o.labels = {"z_latents": z_labels, "u_to_z_latents": z_labels}
-                    if o.name is None:
-                        o.name = "z_latents"
-                    self.log.debug(f"Plotting {o.name}")
-                    if o.savepath is None:
-                        o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    if o.plot_kwargs is None:
-                        o.plot_kwargs = {"title": f"{dt}{self.name}"}
-                    DistributionPlotter.plot_corner(
-                        {"z_latents": z, "u_to_z_latents": u_to_z},
-                        o,
-                        statistics="max_central",
-                        shade_alpha=0.0,
-                        plot_cloud=True,
-                        smooth={"z_latents": 0, "u_to_z_latents": 0},
-                        bins={
-                            "z_latents": n_latents,
-                            "u_to_z_latents": n_latents,
-                        },
-                    )
+            self._plot_z_latents(z, u_to_z, dt, z_labels, n_latents, n_bins)
 
-            if self.analysis.plot_latents is not None:
-                if not isinstance(self.analysis.plot_latents, list):
-                    self.analysis.plot_latents = [self.analysis.plot_latents]
-                for opts in self.analysis.plot_latents:
-                    o = opts.model_copy(deep=True)
-                    if o.labels is None:
-                        o.labels = {
-                            "u_latents": labels,
-                            "u_latents_smoothed": labels,
-                            "z_latents": labels,
-                            "z_latents_smoothed": labels,
-                        }
-                    if o.name is None:
-                        o.name = "latents"
-                    self.log.debug(f"Plotting {o.name}")
-                    if o.savepath is None:
-                        o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    if o.plot_kwargs is None:
-                        o.plot_kwargs = {"title": f"{dt}{self.name}"}
-                    DistributionPlotter.plot_corner(
-                        {
-                            "u_latents": z_to_u,
-                            "u_latents_smoothed": z_to_u,
-                            "z_latents": u_to_z,
-                            "z_latents_smoothed": u_to_z,
-                        },
-                        o,
-                        statistics="max_central",
-                        shade_alpha=0.0,
-                        plot_cloud={"u_latents": True, "z_latents": True},
-                        smooth={"u_latents": 0, "z_latents": 0},
-                        bins={
-                            "u_latents": n_latents,
-                            "u_latents_smoothed": n_bins,
-                            "z_latents": n_latents,
-                            "z_latents_smoothed": n_bins,
-                        },
-                        color={
-                            "u_latents": Plotter.colour_sequence.colors[0],
-                            "u_latents_smoothed": Plotter.colour_sequence.colors[0],
-                            "z_latents": Plotter.colour_sequence.colors[1],
-                            "z_latents_smoothed": Plotter.colour_sequence.colors[1],
-                        },
-                    )
+            self._plot_latents(z_to_u, u_to_z, dt, labels, n_latents, n_bins)
 
-            if self.analysis.plot_latent_steps is not None:
-                if not isinstance(self.analysis.plot_latent_steps, list):
-                    self.analysis.plot_latent_steps = [self.analysis.plot_latent_steps]
-                for opts in self.analysis.plot_latent_steps:
-                    num_steps = len(self.model.flow.bijector.bijectors) + 1
-
-                    for step in range(num_steps):
-                        step_latents, is_shift = self.model.z_to_u_steps(
-                            results.z_latents, step, permute=True
-                        )
-
-                        step_u_latents = step_latents.numpy()[mask]
-
-                        if is_shift:
-                            continue
-                        o = opts.model_copy(deep=True)
-                        if o.labels is None:
-                            o.labels = {
-                                "gaussian": labels,
-                                f"step_{step}_latents": labels,
-                                f"step_{step}_latents_smoothed": labels,
-                            }
-                        if o.name is None:
-                            o.name = f"step_{step}_latent_steps"
-                        self.log.debug(f"Plotting {o.name}")
-                        if o.savepath is None:
-                            o.savepath = (
-                                self.paths.plots / dt[:-1] / str(self.seed) / "steps"
-                            )
-                        o.savepath.mkdir(parents=True, exist_ok=True)
-                        if o.plot_kwargs is None:
-                            o.plot_kwargs = {"title": f"{dt}{self.name}"}
-
-                        DistributionPlotter.plot_corner(
-                            {
-                                "gaussian": gaussian,
-                                f"step_{step}_latents": step_u_latents,
-                                f"step_{step}_latents_smoothed": step_u_latents,
-                            },
-                            o,
-                            statistics="max_central",
-                            shade_alpha=0.0,
-                            plot_cloud={f"step_{step}_latents": True},
-                            smooth={
-                                f"step_{step}_latents": 0,
-                            },
-                            bins={
-                                f"step_{step}_latents": n_latents,
-                                f"step_{step}_latents_smoothed": n_bins,
-                            },
-                            color={
-                                "gaussian": Plotter.colour_sequence.colors[0],
-                                f"step_{step}_latents": Plotter.colour_sequence.colors[
-                                    1
-                                ],
-                                f"step_{step}_latents_smoothed": Plotter.colour_sequence.colors[
-                                    1
-                                ],
-                            },
-                        )
+            self._plot_latent_steps(
+                gaussian, results, mask, labels, dt, n_latents, n_bins
+            )
 
     @override
     def _clear(
@@ -718,7 +736,7 @@ class NFlow(ModelStep[NFlowConfig]):
             input_redshift = data.redshift
             input_phase = data.phase
             input_wavelength = data.wavelength
-            input_mask = data.mask
+            input_mask = data.mask.astype(bool)
             data.clear()
 
             min_redshift: float = getattr(self, f"min_{mask_type}redshift")
@@ -727,7 +745,7 @@ class NFlow(ModelStep[NFlowConfig]):
                 (input_redshift >= min_redshift) & (input_redshift <= max_redshift)
             )[:, 0:1, 0:1]
             # Mask out SNe outside the redshift range
-            sn_mask = redshift_mask.astype(np.int32)
+            sn_mask = redshift_mask
 
             min_phase: float = getattr(self, f"min_{mask_type}phase")
             max_phase: float = getattr(self, f"max_{mask_type}phase")
@@ -735,7 +753,7 @@ class NFlow(ModelStep[NFlowConfig]):
                 ..., 0:1
             ]
             # Mask out spectra outside the phase range
-            spec_mask = phase_mask.astype(np.int32)
+            spec_mask = phase_mask
 
             min_wavelength: float = getattr(self, f"min_{mask_type}wavelength")
             max_wavelength: float = getattr(self, f"max_{mask_type}wavelength")
@@ -743,7 +761,7 @@ class NFlow(ModelStep[NFlowConfig]):
                 input_wavelength <= max_wavelength
             )
             # Mask out wavelengths outside the wavelength range
-            wl_mask = wavelength_mask.astype(np.int32)
+            wl_mask = wavelength_mask
 
             setattr(self, f"{mask_type}mask", input_mask)
             setattr(self, f"{mask_type}sn_mask", sn_mask)

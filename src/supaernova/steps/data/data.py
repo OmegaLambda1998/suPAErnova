@@ -329,8 +329,7 @@ class Data(Step[DataConfig]):
 
         return not self.analysis.force
 
-    @override
-    def _analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _plot_spectra(self: Self) -> None:
         if self.analysis.plot_spectra is not None:
             if not isinstance(self.analysis.plot_spectra, list):
                 self.analysis.plot_spectra = [self.analysis.plot_spectra]
@@ -343,8 +342,11 @@ class Data(Step[DataConfig]):
                 opts.savepath.mkdir(parents=True, exist_ok=True)
                 if opts.plot_kwargs is None:
                     opts.plot_kwargs = {"title": self.name}
-                SpectraPlotter.plot_spectra(self.results.data, opts)
+                SpectraPlotter.plot_spectra(
+                    self.results.data, opts, mask=self.results.data.mask
+                )
 
+    def _plot_summary(self: Self) -> None:
         if self.analysis.plot_summary is not None:
             if not isinstance(self.analysis.plot_summary, list):
                 self.analysis.plot_summary = [self.analysis.plot_summary]
@@ -357,8 +359,11 @@ class Data(Step[DataConfig]):
                 opts.savepath.mkdir(parents=True, exist_ok=True)
                 if opts.plot_kwargs is None:
                     opts.plot_kwargs = {"label": self.name}
-                SpectraPlotter.plot_summary(self.results.data, opts)
+                SpectraPlotter.plot_summary(
+                    self.results.data, opts, mask=self.results.data.mask
+                )
 
+    def _plot_comparison(self: Self) -> None:
         if self.analysis.plot_comparison is not None:
             if not isinstance(self.analysis.plot_comparison, list):
                 self.analysis.plot_comparison = [self.analysis.plot_comparison]
@@ -371,7 +376,15 @@ class Data(Step[DataConfig]):
                 opts.savepath.mkdir(parents=True, exist_ok=True)
                 if opts.plot_kwargs is None:
                     opts.plot_kwargs = {"label": self.name}
-                SpectraPlotter.plot_comparison(self.results.data, opts)
+                SpectraPlotter.plot_comparison(
+                    self.results.data, opts, mask=self.results.data.mask
+                )
+
+    @override
+    def _analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        self._plot_spectra()
+        self._plot_summary()
+        self._plot_comparison()
 
     @override
     def _clear(
@@ -678,9 +691,9 @@ class Data(Step[DataConfig]):
             )
         # Get spectral data parameters
         spectral_data_params = {
-            "amplitude": ("flux", np.zeros(self.wl_dim) - 1),
-            "sigma": ("sigma", np.zeros(self.wl_dim)),
-            "salt_flux": ("salt_flux", np.zeros(self.wl_dim) - 1),
+            "amplitude": ("flux", -np.inf * np.ones(self.wl_dim)),
+            "sigma": ("sigma", -np.inf * np.ones(self.wl_dim)),
+            "salt_flux": ("salt_flux", -np.inf * np.ones(self.wl_dim)),
         }
 
         for data_key, (spectral_data_key, padding) in spectral_data_params.items():
@@ -802,6 +815,14 @@ class Data(Step[DataConfig]):
         laser_amp_smooth = (
             0.5 * (laser_amp_min + laser_amp_max) * laser_wl_mask.astype(np.float32)
         )
+        laser_amp = np.where(
+            np.isfinite(laser_amp), laser_amp, np.zeros_like(laser_amp)
+        )
+        laser_amp_smooth = np.where(
+            np.isfinite(laser_amp_smooth),
+            laser_amp_smooth,
+            np.zeros_like(laser_amp_smooth),
+        )
         laser_mask = (laser_amp - laser_amp_smooth) > laser_height
 
         while laser_width > 0:
@@ -829,14 +850,7 @@ class Data(Step[DataConfig]):
             max_phase = min(self.max_phase, max_phase)
         self.log.debug(f"{self.max_phase = }, {time.max() = }, {max_phase = }")
         data["time"] = (data["phase"] - min_phase) / (max_phase - min_phase)
-        data["time"][~spec_mask] = -1
-
-        # Remove negative amplitude from unmasked amplitudes
-        # data["amplitude"][data["mask"]] = np.clip(
-        #     data["amplitude"][data["mask"]],
-        #     0,
-        #     np.inf,
-        # )
+        data["time"][~spec_mask] = -np.inf
 
         # Scale observed uncertainty to account for fitting degrees of freedom, and an error floor
         data["sigma"] = 1.4 * data["sigma"] + 4e-10
@@ -916,6 +930,101 @@ class DataStep(Variant[DataStepConfig, Data]):
         self.bases: dict[str, dict[str, Any]] = {}
         self.plots: dict[str, dict[str, Any]] = {}
 
+    def _plot_comparison_pre(
+        self: Self, variant: Data, *args: "Any", **kwargs: "Any"
+    ) -> None:
+        if variant.analysis.plot_comparison is not None:
+            if not isinstance(variant.analysis.plot_comparison, list):
+                variant.analysis.plot_comparison = [variant.analysis.plot_comparison]
+            for opts in variant.analysis.plot_comparison:
+                self._setup(*args, **{**kwargs, "variants": [opts.base]})
+                name = f"{opts.name}.{opts.ext}"
+                self.bases[name] = self.bases.get(
+                    name, {"wl": None, "amp": None, "sigma": None, "mask": None}
+                )
+                base_wl = self.bases[name]["wl"]
+                base_amp = self.bases[name]["amp"]
+                base_sigma = self.bases[name]["sigma"]
+                base_mask = self.bases[name]["mask"]
+                if base_amp is None:
+                    (
+                        wl,
+                        amplitude,
+                        sigma,
+                        _sn_name,
+                        _time,
+                        mask,
+                        _sn_mask,
+                        _spec_mask,
+                        _wl_mask,
+                    ) = SpectraPlotter.prep(
+                        self.results[opts.base].data,
+                        opts,
+                        mask=self.results[opts.base].data.mask,
+                    )
+                    base_wl = wl
+                    base_amp = amplitude
+                    base_sigma = sigma
+                    base_mask = np.logical_not(mask)
+                self.bases[name]["wl"] = base_wl
+                self.bases[name]["amp"] = base_amp
+                self.bases[name]["sigma"] = base_sigma
+                self.bases[name]["mask"] = base_mask
+                opts.base_wl = base_wl
+                opts.base_amp = base_amp
+                opts.base_sigma = base_sigma
+                opts.base_mask = base_mask
+                opts.plot_base = True
+
+    def _plot_summary(self: Self, variant: Data) -> None:
+        if variant.analysis.plot_summary is not None:
+            for opts in variant.analysis.plot_summary:
+                o = opts.model_copy(deep=True)
+                name = f"{o.name}.{o.ext}"
+                self.plots[name] = self.plots.get(name, {"fig": None, "ax": None})
+                fig = self.plots[name]["fig"]
+                ax = self.plots[name]["ax"]
+                fig, ax = SpectraPlotter.plot_summary(
+                    variant.results.data,
+                    o,
+                    mask=variant.results.data.mask,
+                    fig=fig,
+                    ax=ax,
+                    save=False,
+                    force=True,
+                )
+                self.plots[name]["fig"] = fig
+                self.plots[name]["ax"] = ax
+
+    def _plot_comparison_post(self: Self, variant: Data) -> None:
+        if variant.analysis.plot_comparison is not None:
+            for opts in variant.analysis.plot_comparison:
+                o = opts.model_copy(deep=True)
+                name = f"{o.name}.{o.ext}"
+                self.plots[name] = self.plots.get(
+                    name, {"fig": None, "ax": None, "base": True}
+                )
+                fig = self.plots[name]["fig"]
+                ax = self.plots[name]["ax"]
+                o.plot_base = self.plots[name]["base"]
+                fig, ax = SpectraPlotter.plot_comparison(
+                    variant.results.data,
+                    o,
+                    mask=variant.results.data.mask,
+                    fig=fig,
+                    ax=ax,
+                    save=False,
+                    force=True,
+                )
+                self.plots[name]["fig"] = fig
+                self.plots[name]["ax"] = ax
+                self.plots[name]["base"] = False
+
+                opts.base_wl = None
+                opts.base_amp = None
+                opts.base_sigma = None
+                opts.base_mask = None
+
     @override
     def _analyse(
         self: Self,
@@ -934,83 +1043,13 @@ class DataStep(Variant[DataStepConfig, Data]):
             variant.log.info(f"Analysing {variant.name}")
             variant.result(*args, **{**kwargs, "variants": [variant_name]})
 
-            if variant.analysis.plot_comparison is not None:
-                if not isinstance(variant.analysis.plot_comparison, list):
-                    variant.analysis.plot_comparison = [
-                        variant.analysis.plot_comparison
-                    ]
-                for opts in variant.analysis.plot_comparison:
-                    self._setup(*args, **{**kwargs, "variants": [opts.base]})
-                    name = f"{opts.name}.{opts.ext}"
-                    self.bases[name] = self.bases.get(
-                        name, {"wl": None, "amp": None, "sigma": None, "mask": None}
-                    )
-                    base_wl = self.bases[name]["wl"]
-                    base_amp = self.bases[name]["amp"]
-                    base_sigma = self.bases[name]["sigma"]
-                    base_mask = self.bases[name]["mask"]
-                    if base_amp is None:
-                        (
-                            wl,
-                            amplitude,
-                            sigma,
-                            _sn_name,
-                            _time,
-                            mask,
-                            _sn_mask,
-                            _spec_mask,
-                            _wl_mask,
-                        ) = SpectraPlotter.prep(self.results[opts.base].data, opts)
-                        base_wl = wl
-                        base_amp = amplitude
-                        base_sigma = sigma
-                        base_mask = np.logical_not(mask)
-                    self.bases[name]["wl"] = base_wl
-                    self.bases[name]["amp"] = base_amp
-                    self.bases[name]["sigma"] = base_sigma
-                    self.bases[name]["mask"] = base_mask
-                    opts.base_wl = base_wl
-                    opts.base_amp = base_amp
-                    opts.base_sigma = base_sigma
-                    opts.base_mask = base_mask
-                    opts.plot_base = True
+            self._plot_comparison_pre(variant, *args, **kwargs)
 
             variant._analyse(*args, **{**kwargs, "variants": [variant_name]})
 
-            if variant.analysis.plot_summary is not None:
-                for opts in variant.analysis.plot_summary:
-                    o = opts.model_copy(deep=True)
-                    name = f"{o.name}.{o.ext}"
-                    self.plots[name] = self.plots.get(name, {"fig": None, "ax": None})
-                    fig = self.plots[name]["fig"]
-                    ax = self.plots[name]["ax"]
-                    fig, ax = SpectraPlotter.plot_summary(
-                        variant.results.data, o, fig=fig, ax=ax, save=False, force=True
-                    )
-                    self.plots[name]["fig"] = fig
-                    self.plots[name]["ax"] = ax
+            self._plot_summary(variant)
 
-            if variant.analysis.plot_comparison is not None:
-                for opts in variant.analysis.plot_comparison:
-                    o = opts.model_copy(deep=True)
-                    name = f"{o.name}.{o.ext}"
-                    self.plots[name] = self.plots.get(
-                        name, {"fig": None, "ax": None, "base": True}
-                    )
-                    fig = self.plots[name]["fig"]
-                    ax = self.plots[name]["ax"]
-                    o.plot_base = self.plots[name]["base"]
-                    fig, ax = SpectraPlotter.plot_comparison(
-                        variant.results.data, o, fig=fig, ax=ax, save=False, force=True
-                    )
-                    self.plots[name]["fig"] = fig
-                    self.plots[name]["ax"] = ax
-                    self.plots[name]["base"] = False
-
-                    opts.base_wl = None
-                    opts.base_amp = None
-                    opts.base_sigma = None
-                    opts.base_mask = None
+            self._plot_comparison_post(variant)
 
             variant.log.info(f"Finished analysing {variant.name}")
 

@@ -2,8 +2,8 @@ from typing import TYPE_CHECKING, Self, Protocol
 from collections.abc import Iterable
 
 from numpy import typing as npt
-import tensorflow as tf
-from tensorflow import keras as ks
+
+from supaernova._tf import ks, tf
 
 type TensorLike = tf.Tensor | npt.NDArray | Iterable
 

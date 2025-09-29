@@ -1,8 +1,7 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import tensorflow as tf
-    from tensorflow import keras as ks
+    from supaernova._tf import ks, tf
 
 
 def NegLogLikelihood(

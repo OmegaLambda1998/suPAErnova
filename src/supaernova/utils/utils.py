@@ -9,6 +9,10 @@ def pp(expression: object) -> None:
     __import__("pprint").pprint(expression)
 
 
+def pf(expression: object) -> str:
+    return __import__("pprint").pformat(expression)
+
+
 def deepmerge(d1: "Config[T]", d2: "Config[T]") -> "Config[T]":
     out = d1.copy()
     for k, v in d2.items():

@@ -3,9 +3,8 @@ from functools import cached_property
 from collections.abc import Callable
 
 from pydantic import PositiveFloat, computed_field
-import tensorflow as tf
-from tensorflow import keras as ks
 
+from supaernova._tf import ks, tf
 from supaernova.steps.pae.tf import (
     loss as snpae_losses,
 )

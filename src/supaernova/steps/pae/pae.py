@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
+    from supaernova.analysis import Axis, Figure
     from supaernova.configs.steps.data import LazySNPAEData, DataStepResult
 
     from .tf import TFPAEModel
@@ -508,14 +509,14 @@ class PAE(ModelStep[PAEConfig]):
             input_ind = data.ind
             input_sn_name = data.sn_name
             input_spectra_id = data.spectra_id
-            input_phase = data.time
-            input_amplitude = data.amplitude
-            input_d_amplitude = data.sigma
+            input_phase = data.time.astype(np.float32)
+            input_amplitude = data.amplitude.astype(np.float32)
+            input_d_amplitude = data.sigma.astype(np.float32)
             data.clear()
-            input_mask = getattr(self, f"{dt}mask")
-            input_sn_mask = getattr(self, f"{dt}sn_mask")
-            input_spec_mask = getattr(self, f"{dt}spec_mask")
-            input_wl_mask = getattr(self, f"{dt}wl_mask")
+            input_mask = getattr(self, f"{dt}mask").astype(np.bool)
+            input_sn_mask = getattr(self, f"{dt}sn_mask").astype(np.bool)
+            input_spec_mask = getattr(self, f"{dt}spec_mask").astype(np.bool)
+            input_wl_mask = getattr(self, f"{dt}wl_mask").astype(np.bool)
 
             def _wrapped():
                 self.model = self.model.__class__(self)
@@ -682,6 +683,177 @@ class PAE(ModelStep[PAEConfig]):
 
         return not self.analysis.force
 
+    def _plot_comparison(
+        self: Self,
+        dt: str,
+        stage: PAEStage,
+        input_mask: "npt.NDArray[bool]",
+        input_sn_mask: "npt.NDArray[bool]",
+        input_spec_mask: "npt.NDArray[bool]",
+        input_wl_mask: "npt.NDArray[bool]",
+        loss: "npt.NDArray[float]",
+        pred_loss: "npt.NDArray[float]",
+        output_amp: "npt.NDArray[float]",
+        *,
+        fig: "list[Figure] | None" = None,
+        ax: "list[Axis] | None" = None,
+        savepath: str | Path | None = None,
+        save: bool = True,
+        force: bool = False,
+        plot_base: bool = True,
+    ) -> list[tuple["Figure | None", "Axis | None"]]:
+        rtn = []
+        if self.analysis.plot_comparison is not None:
+            if not isinstance(self.analysis.plot_comparison, list):
+                self.analysis.plot_comparison = [self.analysis.plot_comparison]
+            for i, opts in enumerate(self.analysis.plot_comparison):
+                o = opts.model_copy(deep=True)
+                o.plot_base = o.plot_base and plot_base
+                if o.name is None:
+                    o.name = "comparison"
+                self.log.debug(f"Plotting {o.name}")
+                if o.savepath is None:
+                    o.savepath = (
+                        (
+                            self.paths.plots
+                            / dt[:-1]
+                            / str(self.model.seed)
+                            / str(stage.stage)
+                        )
+                        if savepath is None
+                        else Path(savepath)
+                    )
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {
+                        "label": f"{dt}{self.name}_{stage.name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})",
+                        "title": f"{dt}{self.name}_{stage.name} {o.name}",
+                    }
+
+                data = getattr(self, f"{dt}data")
+                (
+                    wl,
+                    amplitude,
+                    sigma,
+                    _sn_name,
+                    _time,
+                    mask,
+                    _sn_mask,
+                    _spec_mask,
+                    _wl_mask,
+                ) = SpectraPlotter.prep(
+                    data,
+                    o,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                )
+                o.base_wl = wl
+                o.base_amp = amplitude
+                o.base_sigma = sigma
+                o.base_mask = np.logical_not(mask)
+
+                data.amplitude = output_amp
+                data.sigma = np.zeros_like(data.sigma)
+
+                rtn.append(
+                    SpectraPlotter.plot_comparison(
+                        data,
+                        o,
+                        mask=input_mask,
+                        sn_mask=input_sn_mask,
+                        spec_mask=input_spec_mask,
+                        wl_mask=input_wl_mask,
+                        save=save,
+                        force=force,
+                        fig=fig[i] if fig is not None else None,
+                        ax=ax[i] if ax is not None else None,
+                    )
+                )
+        return rtn
+
+    def _plot_latents(
+        self: Self,
+        dt: str,
+        stage: PAEStage,
+        input_mask: "npt.NDArray[bool]",
+        input_sn_mask: "npt.NDArray[bool]",
+        input_spec_mask: "npt.NDArray[bool]",
+        input_wl_mask: "npt.NDArray[bool]",
+        labels: dict[int | str, str | dict[int, str]],
+        chains: "Callable[[npt.NDArray[bool]], dict[str, npt.NDArray[float]] | npt.NDArray[float]]",
+        savepath: str | Path | None = None,
+    ) -> None:
+        if self.analysis.plot_latents is not None:
+            if not isinstance(self.analysis.plot_latents, list):
+                self.analysis.plot_latents = [self.analysis.plot_latents]
+            for opts in self.analysis.plot_latents:
+                o = opts.model_copy(deep=True)
+                if o.labels is None:
+                    o.labels = labels
+                if o.name is None:
+                    o.name = "latents"
+                self.log.debug(f"Plotting {o.name}")
+                if o.savepath is None:
+                    o.savepath = (
+                        (
+                            self.paths.plots
+                            / dt[:-1]
+                            / str(self.model.seed)
+                            / str(stage.stage)
+                        )
+                        if savepath is None
+                        else Path(savepath)
+                    )
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"title": f"{dt}{self.name}_{stage.name}"}
+
+                data = getattr(self, f"{dt}data")
+                (
+                    _wl,
+                    _amplitude,
+                    _sigma,
+                    _sn_name,
+                    _time,
+                    _mask,
+                    _sn_mask,
+                    _spec_mask,
+                    _wl_mask,
+                ) = SpectraPlotter.prep(
+                    data,
+                    o,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                )
+
+                # ~(~input_mask & input_wl_mask)
+                # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
+                valid_wl_mask = np.logical_not(
+                    np.logical_and(np.logical_not(input_mask), input_wl_mask)
+                )
+
+                # Determine which spectra to keep
+                # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+                mask_spec = np.min(valid_wl_mask, axis=-1, keepdims=True)
+
+                # Determine which SNe to keep
+                # Will mask out any SN with *no* unmasked spectra
+                mask_sn = np.max(mask_spec, axis=-2)[:, 0]
+
+                DistributionPlotter.plot_corner(
+                    chains(mask_sn),
+                    o,
+                    statistics="max_central",
+                    shade_alpha=0.0,
+                    plot_cloud=True,
+                    smooth=0,
+                    bins=self.sn_dim,
+                )
+
     @override
     def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:
         labels = {}
@@ -708,336 +880,141 @@ class PAE(ModelStep[PAEConfig]):
                 latents = results.latents
                 results.clear()
 
-                if self.analysis.plot_comparison is not None:
-                    if not isinstance(self.analysis.plot_comparison, list):
-                        self.analysis.plot_comparison = [self.analysis.plot_comparison]
-                    for opts in self.analysis.plot_comparison:
-                        o = opts.model_copy(deep=True)
-                        if o.name is None:
-                            o.name = "comparison"
-                        self.log.debug(f"Plotting {o.name}")
-                        if o.savepath is None:
-                            o.savepath = (
-                                self.paths.plots
-                                / dt[:-1]
-                                / str(self.model.seed)
-                                / str(stage.stage)
-                            )
-                        o.savepath.mkdir(parents=True, exist_ok=True)
-                        if o.plot_kwargs is None:
-                            o.plot_kwargs = {
-                                "label": f"{dt}{self.name}_{stage.name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})",
-                                "title": f"{dt}{self.name}_{stage.name} {o.name}",
-                            }
+                self._plot_comparison(
+                    dt,
+                    stage,
+                    input_mask,
+                    input_sn_mask,
+                    input_spec_mask,
+                    input_wl_mask,
+                    loss,
+                    pred_loss,
+                    output_amp,
+                )
 
-                        data = getattr(self, f"{dt}data")
-                        (
-                            wl,
-                            amplitude,
-                            sigma,
-                            _sn_name,
-                            _time,
-                            mask,
-                            _sn_mask,
-                            _spec_mask,
-                            _wl_mask,
-                        ) = SpectraPlotter.prep(
-                            data,
-                            o,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                        )
-                        o.base_wl = wl
-                        o.base_amp = amplitude
-                        o.base_sigma = sigma
-                        o.base_mask = np.logical_not(mask)
+                stage_labels = {i: labels[i] for i in range(stage.stage)}
 
-                        data.amplitude = output_amp
-                        data.sigma *= 0
+                def stage_chains(mask_sn):
+                    return latents[:, : stage.stage][mask_sn]
 
-                        SpectraPlotter.plot_comparison(
-                            data,
-                            o,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                        )
+                self._plot_latents(
+                    dt,
+                    stage,
+                    input_mask,
+                    input_sn_mask,
+                    input_spec_mask,
+                    input_wl_mask,
+                    stage_labels,
+                    stage_chains,
+                )
 
-                if self.analysis.plot_latents is not None:
-                    if not isinstance(self.analysis.plot_latents, list):
-                        self.analysis.plot_latents = [self.analysis.plot_latents]
-                    for opts in self.analysis.plot_latents:
-                        o = opts.model_copy(deep=True)
-                        if o.labels is None:
-                            o.labels = {i: labels[i] for i in range(stage.stage)}
-                        if o.name is None:
-                            o.name = "latents"
-                        self.log.debug(f"Plotting {o.name}")
-                        if o.savepath is None:
-                            o.savepath = (
-                                self.paths.plots
-                                / dt[:-1]
-                                / str(self.model.seed)
-                                / str(stage.stage)
-                            )
-                        o.savepath.mkdir(parents=True, exist_ok=True)
-                        if o.plot_kwargs is None:
-                            o.plot_kwargs = {"title": f"{dt}{self.name}_{stage.name}"}
-
-                        data = getattr(self, f"{dt}data")
-                        (
-                            wl,
-                            amplitude,
-                            sigma,
-                            _sn_name,
-                            _time,
-                            mask,
-                            _sn_mask,
-                            _spec_mask,
-                            _wl_mask,
-                        ) = SpectraPlotter.prep(
-                            data,
-                            o,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                        )
-
-                        # ~(~input_mask & input_wl_mask)
-                        # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
-                        valid_wl_mask = np.logical_not(
-                            np.logical_and(np.logical_not(input_mask), input_wl_mask)
-                        )
-
-                        # Determine which spectra to keep
-                        # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-                        mask_spec = np.min(valid_wl_mask, axis=-1, keepdims=True)
-
-                        # Determine which SNe to keep
-                        # Will mask out any SN with *no* unmasked spectra
-                        mask_sn = np.max(mask_spec, axis=-2)[:, 0]
-
-                        chains = latents[:, : stage.stage][mask_sn]
-
-                        DistributionPlotter.plot_corner(
-                            chains,
-                            o,
-                            statistics="max_central",
-                            shade_alpha=0.0,
-                            plot_cloud=True,
-                            smooth=0,
-                            bins=self.sn_dim,
-                        )
-
-            if self.analysis.plot_comparison is not None:
-                results = self.results.stages[dt[:-1]][str(self.run_stages[0].stage)]
-                input_mask = results.input_mask
-                input_sn_mask = results.input_sn_mask
-                input_spec_mask = results.input_spec_mask
-                input_wl_mask = results.input_wl_mask
-                loss = results.loss
-                pred_loss = results.pred_loss
-                output_amp = results.output_amp
-                latents = results.latents
-                results.clear()
-
-                if not isinstance(self.analysis.plot_comparison, list):
-                    self.analysis.plot_comparison = [self.analysis.plot_comparison]
-                for opts in self.analysis.plot_comparison:
-                    o = opts.model_copy(deep=True)
-                    if o.name is None:
-                        o.name = "comparison"
-                    self.log.debug(f"Plotting {o.name}")
-                    if o.savepath is None:
-                        o.savepath = self.paths.plots / dt[:-1] / str(self.model.seed)
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    if o.plot_kwargs is None:
-                        o.plot_kwargs = {}
-                    o.plot_kwargs["label"] = (
-                        f"{dt}{self.name}_{self.run_stages[0].name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})",
-                    )
-                    o.plot_kwargs["title"] = f"{dt}{self.name} {o.name}"
-                    savepath = (o.savepath or Path()) / f"{o.name}.{o.ext}"
-                    if not savepath.exists():
-                        data = getattr(self, f"{dt}data")
-                        (
-                            wl,
-                            amplitude,
-                            sigma,
-                            _sn_name,
-                            _time,
-                            mask,
-                            _sn_mask,
-                            _spec_mask,
-                            _wl_mask,
-                        ) = SpectraPlotter.prep(
-                            data,
-                            o,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                        )
-                        o.base_wl = wl
-                        o.base_amp = amplitude
-                        o.base_sigma = sigma
-                        o.base_mask = np.logical_not(mask)
-
-                        data.amplitude = output_amp
-                        data.sigma *= 0
-
-                        fig, ax = SpectraPlotter.plot_comparison(
-                            data,
-                            o,
-                            save=False,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                        )
-                        for stage in self.run_stages[1:]:
-                            results = self.results.stages[dt[:-1]][str(stage.stage)]
-                            input_mask = results.input_mask
-                            input_sn_mask = results.input_sn_mask
-                            input_spec_mask = results.input_spec_mask
-                            input_wl_mask = results.input_wl_mask
-                            loss = results.loss
-                            pred_loss = results.pred_loss
-                            output_amp = results.output_amp
-                            latents = results.latents
-                            results.clear()
-
-                            data = getattr(self, f"{dt}data")
-                            (
-                                wl,
-                                amplitude,
-                                sigma,
-                                _sn_name,
-                                _time,
-                                mask,
-                                _sn_mask,
-                                _spec_mask,
-                                _wl_mask,
-                            ) = SpectraPlotter.prep(
-                                data,
-                                o,
-                                mask=input_mask,
-                                sn_mask=input_sn_mask,
-                                spec_mask=input_spec_mask,
-                                wl_mask=input_wl_mask,
-                            )
-                            o.base_wl = wl
-                            o.base_amp = amplitude
-                            o.base_sigma = sigma
-                            o.base_mask = np.logical_not(mask)
-
-                            data.amplitude = output_amp
-                            data.sigma *= 0
-
-                            o.plot_kwargs["label"] = (
-                                f"{dt}{self.name}_{stage.name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})"
-                            )
-                            o.plot_base = False
-
-                            fig, ax = SpectraPlotter.plot_comparison(
-                                data,
-                                o,
-                                fig=fig,
-                                ax=ax,
-                                save=False,
-                                mask=input_mask,
-                                sn_mask=input_sn_mask,
-                                spec_mask=input_spec_mask,
-                                wl_mask=input_wl_mask,
-                            )
-
-                        fig = Plotter.save(fig, savepath)
-                        Plotter.close(fig, ax)
+            stage = self.run_stages[0]
+            results = self.results.stages[dt[:-1]][str(stage.stage)]
+            input_mask = results.input_mask
+            input_sn_mask = results.input_sn_mask
+            input_spec_mask = results.input_spec_mask
+            input_wl_mask = results.input_wl_mask
+            loss = results.loss
+            pred_loss = results.pred_loss
+            output_amp = results.output_amp
+            latents = results.latents
+            results.clear()
+            savepath = self.paths.plots / dt[:-1] / str(self.model.seed)
 
             if self.analysis.plot_latents is not None:
-                results = self.results.stages[dt[:-1]][str(self.run_stages[0].stage)]
-                input_mask = results.input_mask
-                input_sn_mask = results.input_sn_mask
-                input_spec_mask = results.input_spec_mask
-                input_wl_mask = results.input_wl_mask
-                loss = results.loss
-                pred_loss = results.pred_loss
-                output_amp = results.output_amp
-                latents = results.latents
-                results.clear()
+                dt_labels = {
+                    stage.name: {i: labels[i] for i in range(stage.stage)}
+                    for stage in self.run_stages
+                }
 
-                if not isinstance(self.analysis.plot_latents, list):
-                    self.analysis.plot_latents = [self.analysis.plot_latents]
-                for opts in self.analysis.plot_latents:
-                    o = opts.model_copy(deep=True)
-                    if o.labels is None:
-                        o.labels = {
-                            stage.name: {i: labels[i] for i in range(stage.stage)}
-                            for stage in self.run_stages
-                        }
-                    if o.name is None:
-                        o.name = "latents"
-                    self.log.debug(f"Plotting {o.name}")
-                    if o.savepath is None:
-                        o.savepath = self.paths.plots / dt[:-1] / str(self.model.seed)
-                    o.savepath.mkdir(parents=True, exist_ok=True)
-                    if o.plot_kwargs is None:
-                        o.plot_kwargs = {"title": f"{dt}{self.name}"}
-
-                    data = getattr(self, f"{dt}data")
-                    (
-                        wl,
-                        amplitude,
-                        sigma,
-                        _sn_name,
-                        _time,
-                        mask,
-                        _sn_mask,
-                        _spec_mask,
-                        _wl_mask,
-                    ) = SpectraPlotter.prep(
-                        data,
-                        o,
-                        mask=input_mask,
-                        sn_mask=input_sn_mask,
-                        spec_mask=input_spec_mask,
-                        wl_mask=input_wl_mask,
-                    )
-
-                    # ~(~input_mask & input_wl_mask)
-                    # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
-                    valid_wl_mask = np.logical_not(
-                        np.logical_and(np.logical_not(input_mask), input_wl_mask)
-                    )
-
-                    # Determine which spectra to keep
-                    # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-                    mask_spec = np.min(valid_wl_mask, axis=-1, keepdims=True)
-
-                    # Determine which SNe to keep
-                    # Will mask out any SN with *no* unmasked spectra
-                    mask_sn = np.max(mask_spec, axis=-2)[:, 0]
-
-                    chains = {
+                def dt_chains(mask_sn):
+                    return {
                         stage.name: self.results.stages[dt[:-1]][
                             str(stage.stage)
                         ].latents[mask_sn]
                         for stage in self.run_stages
                     }
 
-                    DistributionPlotter.plot_corner(
-                        chains,
-                        o,
-                        statistics="max_central",
-                        shade_alpha=0.0,
-                        plot_cloud=True,
-                        smooth=0,
-                        bins=self.sn_dim,
+                self._plot_latents(
+                    dt,
+                    stage,
+                    input_mask,
+                    input_sn_mask,
+                    input_spec_mask,
+                    input_wl_mask,
+                    dt_labels,
+                    dt_chains,
+                    savepath=savepath,
+                )
+
+            if self.analysis.plot_comparison is not None:
+                figs, axes = zip(
+                    *self._plot_comparison(
+                        dt,
+                        stage,
+                        input_mask,
+                        input_sn_mask,
+                        input_spec_mask,
+                        input_wl_mask,
+                        loss,
+                        pred_loss,
+                        output_amp,
+                        savepath=savepath,
+                        save=False,
+                        force=True,
+                    ),
+                    strict=True,
+                )
+
+                for stage in self.run_stages[1:]:
+                    results = self.results.stages[dt[:-1]][str(stage.stage)]
+                    input_mask = results.input_mask
+                    input_sn_mask = results.input_sn_mask
+                    input_spec_mask = results.input_spec_mask
+                    input_wl_mask = results.input_wl_mask
+                    loss = results.loss
+                    pred_loss = results.pred_loss
+                    output_amp = results.output_amp
+                    latents = results.latents
+                    results.clear()
+
+                    figs, axes = zip(
+                        *self._plot_comparison(
+                            dt,
+                            stage,
+                            input_mask,
+                            input_sn_mask,
+                            input_spec_mask,
+                            input_wl_mask,
+                            loss,
+                            pred_loss,
+                            output_amp,
+                            savepath=savepath,
+                            fig=figs,
+                            ax=axes,
+                            save=False,
+                            force=True,
+                            plot_base=False,
+                        ),
+                        strict=True,
                     )
+
+                for i, fig in enumerate(figs):
+                    ax = axes[i]
+                    if fig is not None:
+                        fig = Plotter.save(
+                            fig,
+                            savepath
+                            / (
+                                "comparison."
+                                + (
+                                    self.analysis.plot_comparison[i]
+                                    if isinstance(self.analysis.plot_comparison, list)
+                                    else self.analysis.plot_comparison
+                                ).ext
+                            ),
+                        )
+                    Plotter.close(fig, ax)
 
     @override
     def _clear(
@@ -1088,7 +1065,7 @@ class PAE(ModelStep[PAEConfig]):
             input_redshift = data.redshift
             input_phase = data.phase
             input_wavelength = data.wavelength
-            input_mask = data.mask
+            input_mask = data.mask.astype(bool)
             data.clear()
 
             min_redshift: float = getattr(self, f"min_{mask_type}redshift")
@@ -1097,7 +1074,7 @@ class PAE(ModelStep[PAEConfig]):
                 (input_redshift >= min_redshift) & (input_redshift <= max_redshift)
             )[:, 0:1, 0:1]
             # Mask out SNe outside the redshift range
-            sn_mask = redshift_mask.astype(np.int32)
+            sn_mask = redshift_mask
 
             min_phase: float = getattr(self, f"min_{mask_type}phase")
             max_phase: float = getattr(self, f"max_{mask_type}phase")
@@ -1105,7 +1082,7 @@ class PAE(ModelStep[PAEConfig]):
                 ..., 0:1
             ]
             # Mask out spectra outside the phase range
-            spec_mask = phase_mask.astype(np.int32)
+            spec_mask = phase_mask
 
             min_wavelength: float = getattr(self, f"min_{mask_type}wavelength")
             max_wavelength: float = getattr(self, f"max_{mask_type}wavelength")
@@ -1113,7 +1090,7 @@ class PAE(ModelStep[PAEConfig]):
                 input_wavelength <= max_wavelength
             )
             # Mask out wavelengths outside the wavelength range
-            wl_mask = wavelength_mask.astype(np.int32)
+            wl_mask = wavelength_mask
 
             setattr(self, f"{mask_type}mask", input_mask)
             setattr(self, f"{mask_type}sn_mask", sn_mask)
@@ -1133,6 +1110,81 @@ class PAEStep(Model[PAEStepConfig, PAE]):
         self.bases: dict[str, dict[str, Any]] = {}
         self.plots: dict[str, dict[str, Any]] = {}
 
+    def _plot_comparison(
+        self: Self,
+        variant: PAE,
+        dt: str,
+        stage: PAEStage,
+        input_mask: "npt.NDArray[bool]",
+        input_sn_mask: "npt.NDArray[bool]",
+        input_spec_mask: "npt.NDArray[bool]",
+        input_wl_mask: "npt.NDArray[bool]",
+        loss: "npt.NDArray[float]",
+        pred_loss: "npt.NDArray[float]",
+        output_amp: "npt.NDArray[float]",
+    ) -> None:
+        if variant.analysis.plot_comparison is not None:
+            for opts in variant.analysis.plot_comparison:
+                o = opts.model_copy(deep=True)
+                o.name = "comparison"
+                self.log.debug(f"Plotting {o.name}")
+                o.plot_kwargs = {
+                    "label": f"{variant.name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})",
+                    "title": f"{self.name} {stage.name} {o.name}",
+                }
+
+                name = f"{dt[:-1]}/{stage.stage}/{o.name}.{o.ext}"
+                self.plots[name] = self.plots.get(
+                    name, {"fig": None, "ax": None, "base": True}
+                )
+                fig = self.plots[name]["fig"]
+                ax = self.plots[name]["ax"]
+                o.plot_base = self.plots[name]["base"]
+
+                data = getattr(variant, f"{dt}data")
+                (
+                    wl,
+                    amplitude,
+                    sigma,
+                    _sn_name,
+                    _time,
+                    mask,
+                    _sn_mask,
+                    _spec_mask,
+                    _wl_mask,
+                ) = SpectraPlotter.prep(
+                    data,
+                    o,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                )
+                o.base_wl = wl
+                o.base_amp = amplitude
+                o.base_sigma = sigma
+                o.base_mask = np.logical_not(mask)
+
+                data.amplitude = output_amp
+                data.sigma = np.zeros_like(data.sigma)
+
+                fig, ax = SpectraPlotter.plot_comparison(
+                    data,
+                    o,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                    fig=fig,
+                    ax=ax,
+                    save=False,
+                    force=True,
+                )
+
+                self.plots[name]["fig"] = fig
+                self.plots[name]["ax"] = ax
+                self.plots[name]["base"] = False
+
     @override
     def _analyse(
         self: Self,
@@ -1145,10 +1197,10 @@ class PAEStep(Model[PAEStepConfig, PAE]):
         if not isinstance(variants, list):
             variants = [variants]
 
-        for name in variants:
-            variant = self.variants[name]
+        for variant_name in variants:
+            variant = self.variants[variant_name]
 
-            super()._analyse(*args, **{**kwargs, "variants": [name]})
+            super()._analyse(*args, **{**kwargs, "variants": [variant_name]})
 
             labels = {}
             ind = 0
@@ -1171,70 +1223,19 @@ class PAEStep(Model[PAEStepConfig, PAE]):
                     loss = results.loss
                     pred_loss = results.pred_loss
                     output_amp = results.output_amp
-                    latents = results.latents
                     results.clear()
-
-                    if variant.analysis.plot_comparison is not None:
-                        for opts in variant.analysis.plot_comparison:
-                            o = opts.model_copy(deep=True)
-                            o.name = "comparison"
-                            self.log.debug(f"Plotting {o.name}")
-                            o.plot_kwargs = {
-                                "label": f"{variant.name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})",
-                                "title": f"{self.name} {stage.name} {o.name}",
-                            }
-
-                            name = f"{dt[:-1]}/{stage.stage}/{o.name}.{o.ext}"
-                            self.plots[name] = self.plots.get(
-                                name, {"fig": None, "ax": None, "base": True}
-                            )
-                            fig = self.plots[name]["fig"]
-                            ax = self.plots[name]["ax"]
-                            o.plot_base = self.plots[name]["base"]
-
-                            data = getattr(variant, f"{dt}data")
-                            (
-                                wl,
-                                amplitude,
-                                sigma,
-                                _sn_name,
-                                _time,
-                                mask,
-                                _sn_mask,
-                                _spec_mask,
-                                _wl_mask,
-                            ) = SpectraPlotter.prep(
-                                data,
-                                o,
-                                mask=input_mask,
-                                sn_mask=input_sn_mask,
-                                spec_mask=input_spec_mask,
-                                wl_mask=input_wl_mask,
-                            )
-                            o.base_wl = wl
-                            o.base_amp = amplitude
-                            o.base_sigma = sigma
-                            o.base_mask = np.logical_not(mask)
-
-                            data.amplitude = output_amp
-                            data.sigma *= 0
-
-                            fig, ax = SpectraPlotter.plot_comparison(
-                                data,
-                                o,
-                                mask=input_mask,
-                                sn_mask=input_sn_mask,
-                                spec_mask=input_spec_mask,
-                                wl_mask=input_wl_mask,
-                                fig=fig,
-                                ax=ax,
-                                save=False,
-                                force=True,
-                            )
-
-                            self.plots[name]["fig"] = fig
-                            self.plots[name]["ax"] = ax
-                            self.plots[name]["base"] = False
+                    self._plot_comparison(
+                        variant,
+                        dt,
+                        stage,
+                        input_mask,
+                        input_sn_mask,
+                        input_spec_mask,
+                        input_wl_mask,
+                        loss,
+                        pred_loss,
+                        output_amp,
+                    )
 
     @override
     @callback

@@ -18,7 +18,7 @@ from pydantic import (
 
 from supaernova.configs.base import BaseConfig
 from supaernova.configs.steps import StepResult, StepAnalysis
-from supaernova.analysis.spectra import ComparisonPlot
+from supaernova.analysis.spectra import ComparisonPlot, ComparisonArrayPlot
 from supaernova.configs.steps.pae import PAEStepConfig
 from supaernova.configs.steps.data import DataStepConfig
 from supaernova.analysis.dispersion import DispersionPlot
@@ -168,6 +168,7 @@ class PosteriorStepAnalysis(StepAnalysis):
     plot_hmc: DistributionPlot | list[DistributionPlot] | None = None
     plot_dispersion: DispersionPlot | list[DispersionPlot] | None = None
     plot_comparison: ComparisonPlot | list[ComparisonPlot] | None = None
+    plot_comparison_array: ComparisonArrayPlot | list[ComparisonArrayPlot] | None = None
     # === Model Validators ===
     # --- Before ---
     # --- After ---

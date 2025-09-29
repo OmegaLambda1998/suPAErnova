@@ -2,13 +2,9 @@
 from typing import TYPE_CHECKING, Self, cast, override
 
 import numpy as np
-import tensorflow as tf
-from tensorflow import keras as ks
 from tqdm.keras import TqdmCallback
-from tensorflow_probability import (
-    bijectors as tfb,
-    distributions as tfd,
-)
+
+from supaernova._tf import ks, tf, tfb, tfd
 
 if TYPE_CHECKING:
     from typing import Any, Self
@@ -59,22 +55,13 @@ class TFNFlowModel(ks.Model):
         self.sn_mask: npt.NDArray[bool] = config.sn_mask
         self.spec_mask: npt.NDArray[bool] = config.spec_mask
         self.wl_mask: npt.NDArray[bool] = config.wl_mask
-        input_mask = self.data_mask * self.sn_mask * self.spec_mask * self.wl_mask
-        valid_wl_mask = tf.cast(
-            tf.logical_not(
-                tf.logical_and(
-                    tf.logical_not(tf.cast(input_mask, tf.bool)),
-                    tf.cast(self.wl_mask, tf.bool),
-                )
-            ),
-            tf.int32,
+        input_mask = self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask
+        valid_wl_mask = tf.logical_not(
+            tf.logical_and(tf.logical_not(input_mask), self.wl_mask)
         )
-        mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_mask, axis=-1),
-            tf.int32,
-        )
-        mask_sn = tf.reduce_max(mask_spec, axis=-1, keepdims=True)
-        self.mask = tf.cast(mask_sn, tf.float32)
+        mask_spec = tf.math.reduce_any(valid_wl_mask, axis=-1)
+        mask_sn = tf.math.reduce_any(mask_spec, axis=-1, keepdims=True)
+        self.mask = mask_sn
 
         self.train_latents: tf.Tensor
         self.train_data: LazySNPAEData = config.train_data
@@ -88,21 +75,12 @@ class TFNFlowModel(ks.Model):
             * self.train_spec_mask
             * self.train_wl_mask
         )
-        valid_wl_train_mask = tf.cast(
-            tf.logical_not(
-                tf.logical_and(
-                    tf.logical_not(tf.cast(input_train_mask, tf.bool)),
-                    tf.cast(self.train_wl_mask, tf.bool),
-                )
-            ),
-            tf.int32,
+        valid_wl_train_mask = tf.logical_not(
+            tf.logical_and(tf.logical_not(input_train_mask), self.train_wl_mask)
         )
-        train_mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_train_mask, axis=-1),
-            tf.int32,
-        )
-        train_mask_sn = tf.reduce_max(train_mask_spec, axis=-1, keepdims=True)
-        self.train_mask = tf.cast(train_mask_sn, tf.float32)
+        train_mask_spec = tf.math.reduce_any(valid_wl_train_mask, axis=-1)
+        train_mask_sn = tf.math.reduce_any(train_mask_spec, axis=-1, keepdims=True)
+        self.train_mask = train_mask_sn
 
         self.test_latents: tf.Tensor
         self.test_data: LazySNPAEData = config.test_data
@@ -116,21 +94,12 @@ class TFNFlowModel(ks.Model):
             * self.test_spec_mask
             * self.test_wl_mask
         )
-        valid_wl_test_mask = tf.cast(
-            tf.logical_not(
-                tf.logical_and(
-                    tf.logical_not(tf.cast(input_test_mask, tf.bool)),
-                    tf.cast(self.test_wl_mask, tf.bool),
-                )
-            ),
-            tf.int32,
+        valid_wl_test_mask = tf.logical_not(
+            tf.logical_and(tf.logical_not(input_test_mask), self.test_wl_mask)
         )
-        test_mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_test_mask, axis=-1),
-            tf.int32,
-        )
-        test_mask_sn = tf.reduce_max(test_mask_spec, axis=-1, keepdims=True)
-        self.test_mask = tf.cast(test_mask_sn, tf.float32)
+        test_mask_spec = tf.math.reduce_any(valid_wl_test_mask, axis=-1)
+        test_mask_sn = tf.reduce_any(test_mask_spec, axis=-1, keepdims=True)
+        self.test_mask = test_mask_sn
 
         self.val_latents: tf.Tensor
         self.val_data: LazySNPAEData = config.val_data
@@ -144,21 +113,12 @@ class TFNFlowModel(ks.Model):
             * self.val_spec_mask
             * self.val_wl_mask
         )
-        valid_wl_val_mask = tf.cast(
-            tf.logical_not(
-                tf.logical_and(
-                    tf.logical_not(tf.cast(input_val_mask, tf.bool)),
-                    tf.cast(self.val_wl_mask, tf.bool),
-                )
-            ),
-            tf.int32,
+        valid_wl_val_mask = tf.logical_not(
+            tf.logical_and(tf.logical_not(input_val_mask), self.val_wl_mask)
         )
-        val_mask_spec = tf.cast(
-            tf.reduce_max(valid_wl_val_mask, axis=-1),
-            tf.int32,
-        )
-        val_mask_sn = tf.reduce_max(val_mask_spec, axis=-1, keepdims=True)
-        self.val_mask = tf.cast(val_mask_sn, tf.float32)
+        val_mask_spec = tf.math.reduce_any(valid_wl_val_mask, axis=-1)
+        val_mask_sn = tf.math.reduce_any(val_mask_spec, axis=-1, keepdims=True)
+        self.val_mask = val_mask_sn
 
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
         self.pae: TFPAEModel
@@ -216,21 +176,6 @@ class TFNFlowModel(ks.Model):
         self.n_u_latents: int = self.pae.n_z_latents
         self.n_physical_latents = 1 if self.physical_latents else 0
         self.n_flow_latents = self.n_u_latents + self.n_physical_latents
-
-        self.u_to_z_permute: tf.Tensor = tf.constant(
-            tf.roll(
-                tf.range(self.n_flow_latents),
-                shift=self.n_layers,
-                axis=0,
-            )
-        )
-        self.z_to_u_permute: tf.Tensor = tf.constant(
-            tf.roll(
-                tf.range(self.n_flow_latents),
-                shift=-self.n_layers,
-                axis=0,
-            )
-        )
 
         # --- Layers ---
         self.permute: tfb.Chain
@@ -321,7 +266,7 @@ class TFNFlowModel(ks.Model):
 
         # === Unpack Inputs ===
         latents = inputs[..., :-1]
-        mask = inputs[..., -1:][..., 0]
+        mask = tf.cast(inputs[..., -1:][..., 0], tf.bool)
 
         # === Calculate Log Probability ===
         log_prob = self.flow.log_prob(latents)
@@ -330,7 +275,7 @@ class TFNFlowModel(ks.Model):
         inf_log_prob = -np.inf * tf.ones_like(log_prob)
         zero_log_prob = tf.zeros_like(log_prob)
 
-        masked_log_prob = tf.where(tf.cast(mask, tf.bool), log_prob, zero_log_prob)
+        masked_log_prob = tf.where(mask, log_prob, zero_log_prob)
 
         return tf.where(
             tf.math.is_finite(masked_log_prob),
@@ -341,22 +286,14 @@ class TFNFlowModel(ks.Model):
     def u_to_z(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         # If permute is True, then the incoming u_latents need to be permuted correctly
         if permute:
-            # inputs = tf.gather(inputs, self.u_to_z_permute, axis=-1)
             inputs = self.permute.inverse(inputs)
         return self.flow.bijector.forward(inputs)
 
     def z_to_u(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         u_latents = self.flow.bijector.inverse(inputs)
         # If permute is True, then the outgoing u_latents need to be un-permuted correctly
-        # Reverse, permute, reverse undoes the initial permutation
         if permute:
             u_latents = self.permute.forward(u_latents)
-            # u_latents = tf.reverse(
-            #     tf.gather(
-            #         tf.reverse(u_latents, axis=(-1,)), self.z_to_u_permute, axis=-1
-            #     ),
-            #     axis=(-1,),
-            # )
         return u_latents
 
     def z_to_u_steps(
@@ -456,22 +393,22 @@ class TFNFlowModel(ks.Model):
 
         # === Prep Data ===
         _data = tf.concat(
-            (self.latents, self.mask),
+            (self.latents, tf.cast(self.mask, tf.float32)),
             axis=-1,
         )
 
         train_data = tf.concat(
-            (self.train_latents, self.train_mask),
+            (self.train_latents, tf.cast(self.train_mask, tf.float32)),
             axis=-1,
         )
 
         _test_data = tf.concat(
-            (self.test_latents, self.test_mask),
+            (self.test_latents, tf.cast(self.test_mask, tf.float32)),
             axis=-1,
         )
 
         val_data = tf.concat(
-            (self.val_latents, self.val_mask),
+            (self.val_latents, tf.cast(self.val_mask, tf.float32)),
             axis=-1,
         )
 
@@ -496,18 +433,10 @@ class TFNFlowModel(ks.Model):
             phase = tf.convert_to_tensor(data.time, dtype=tf.float32)
             amplitude = tf.convert_to_tensor(data.amplitude, dtype=tf.float32)
             data.clear()
-            data_mask = tf.convert_to_tensor(
-                getattr(self, f"{dt}data_mask"), dtype=tf.int32
-            )
-            sn_mask = tf.convert_to_tensor(
-                getattr(self, f"{dt}sn_mask"), dtype=tf.int32
-            )
-            spec_mask = tf.convert_to_tensor(
-                getattr(self, f"{dt}spec_mask"), dtype=tf.int32
-            )
-            wl_mask = tf.convert_to_tensor(
-                getattr(self, f"{dt}wl_mask"), dtype=tf.int32
-            )
+            data_mask = getattr(self, f"{dt}data_mask")
+            sn_mask = getattr(self, f"{dt}sn_mask")
+            spec_mask = getattr(self, f"{dt}spec_mask")
+            wl_mask = getattr(self, f"{dt}wl_mask")
             pae_inputs = tf.concat((phase, amplitude), axis=-1)
             latents = self.pae.encoder(
                 pae_inputs,
@@ -547,21 +476,20 @@ class TFNFlowModel(ks.Model):
             loss = self._loss
             self.compile(optimizer=optimiser, loss=loss, run_eagerly=self.debug)
 
-            train_data = tf.concat(
-                (self.train_latents, self.train_mask),
-                axis=-1,
-            )
-            self(train_data, training=False)
-
-            if self.debug:
-                self.log.debug("Trainable variables:")
-                for var in self.trainable_variables:
-                    self.log.debug(f"{var.name}: {var.shape}")
-                self.summary(
-                    print_fn=self.log.debug, show_trainable=True
-                )  # Will show number of parameters
-
             self.built = True
+
+        train_data = tf.concat(
+            (self.train_latents, tf.cast(self.train_mask, tf.float32)),
+            axis=-1,
+        )
+        self(train_data, training=False)
+        if self.debug:
+            self.log.debug("Trainable variables:")
+            for var in self.trainable_variables:
+                self.log.debug(f"{var.name}: {var.shape}")
+            self.summary(
+                print_fn=self.log.debug, show_trainable=True
+            )  # Will show number of parameters
 
     def save_checkpoint(self: "Self", savepath: "Path") -> None:
         (savepath / self.ckpt_path).mkdir(parents=True, exist_ok=True)

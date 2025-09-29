@@ -33,6 +33,14 @@ class ComparisonPlot(SpectraPlot):
     plot_base: bool = True
 
 
+class ComparisonArrayPlot(ComparisonPlot):
+    plot_best: bool = True
+    plot_worst: bool = True
+    plot_mean: bool = True
+    plot_median: bool = True
+    plot_random: bool = True
+
+
 CONSTRAINTS = {
     "min": np.greater_equal,
     "max": np.less_equal,
@@ -147,6 +155,8 @@ class SpectraPlotter(Plotter):
 
         n_sn, n_spec, _n_wl = input_mask.shape
 
+        y_max = -np.inf
+
         i = 0
         for sn in range(n_sn):
             if input_sn_mask[sn, 0, 0]:
@@ -170,11 +180,12 @@ class SpectraPlotter(Plotter):
                         x = wl[sn, spec, :][ma]
                         y = amplitude[sn, spec, :][ma]
                         yerr = sigma[sn, spec, :][ma]
-
                         order = np.argsort(x)
                         x = x[order]
                         y = y[order]
                         yerr = yerr[order]
+                        if y.size > 0:
+                            y_max = max(y_max, np.abs(y).max())
 
                         (
                             fig,
@@ -201,6 +212,8 @@ class SpectraPlotter(Plotter):
         ax.set_ylabel("Amplitude")
         ax.legend(bbox_to_anchor=(1.0, 1.0))
         ax.set_title((config.plot_kwargs or {}).get("title", config.name.capitalize()))
+        if y_max > 2:
+            ax.set_yscale("symlog", linthresh=2, linscale=2)
         if save:
             fig = Plotter.save(fig, savepath)
             Plotter.close(fig, ax)
@@ -302,6 +315,8 @@ class SpectraPlotter(Plotter):
         ax.set_ylabel("Amplitude")
         ax.legend(bbox_to_anchor=(1.0, 1.0))
         ax.set_title((config.plot_kwargs or {}).get("title", config.name.capitalize()))
+        if np.abs(y_mean + y_std).max() > 1 or np.abs(y_mean - y_std).max() > 1:
+            ax.set_yscale("symlog", linthresh=1, linscale=2)
         if save:
             fig = Plotter.save(fig, savepath)
             Plotter.close(fig, ax)
@@ -516,6 +531,8 @@ class SpectraPlotter(Plotter):
         )
 
         residual_ax.set_ylabel("Residual")
+        if np.abs(y_residual_mean).max() > 0.01:
+            residual_ax.set_yscale("symlog", linthresh=0.01, linscale=2)
 
         fig, pull_ax, _hline = Plotter.axhline(1, color="black", fig=fig, ax=pull_ax)
 
@@ -533,13 +550,15 @@ class SpectraPlotter(Plotter):
 
         pull_ax.set_xlabel("Wavelength [Å]")
         pull_ax.set_ylabel("Abs Pull")
-        if y_pull_mean.min() != y_pull_mean.max():
-            pull_ax.set_yscale("symlog", linthresh=1e-3)
+        if y_pull_mean.max() > 25:
+            pull_ax.set_yscale("symlog", linthresh=25, linscale=2)
 
         spectra_ax.set_title(
             (config.plot_kwargs or {}).get("title", config.name.capitalize())
         )
         spectra_ax.legend(bbox_to_anchor=(1.0, 1.0))
+        if np.abs(y_mean + y_std).max() > 1 or np.abs(y_mean - y_std).max() > 1:
+            spectra_ax.set_yscale("symlog", linthresh=1, linscale=2)
 
         fig.align_ylabels(ax)
 

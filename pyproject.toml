@@ -20,15 +20,25 @@ dependencies = [
     "sncosmo",
     "toml",
     "tqdm",
-    "tf_keras>=2.18,<2.19",
     "tensorflow_probability",
-    "tensorboard>=2.18,<2.19",
 ]
 
 [project.optional-dependencies]
-tf = ["tensorflow>=2.18,<2.19"]
-tf-cpu = ["tensorflow_cpu>=2.18,<2.19"]
-tf-rocm = ["tensorflow_rocm>=2.18,<2.19"]
+tf = [
+    "tensorflow>=2.18,<2.19",
+    "tf_keras>=2.18,<2.19",
+    "tensorboard>=2.18,<2.19",
+]
+tf-cpu = [
+    "tensorflow_cpu>=2.18,<2.19",
+    "tf_keras>=2.18,<2.19",
+    "tensorboard>=2.18,<2.19",
+]
+tf-rocm = [
+    "tensorflow_rocm>=2.19,<2.20",
+    "tf_keras>=2.19,<2.20",
+    "tensorboard>=2.19,<2.20",
+]
 
 [dependency-groups]
 dev = ["pandas_stubs", "types_tensorflow"]

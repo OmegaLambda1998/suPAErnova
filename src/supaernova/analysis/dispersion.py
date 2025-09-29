@@ -29,8 +29,8 @@ class DispersionPlotter(Plotter):
         hmcs: "list[PosteriorStepResult]",
         config: "DispersionPlot",
         *,
-        fig: "Figure | None" = None,
-        ax: "Axis | None" = None,
+        fig: "tuple[Figure, Figure | None] | None" = None,
+        ax: "tuple[Axis, Axis, Axis, Axis, Axis | None, Axis | None, Axis | None, Axis | None] | None" = None,
         twins: "pd.DataFrame | None" = None,
         legacy: "dict[str, npt.NDArray[Any]] | None" = None,
         force: bool = False,
@@ -42,7 +42,7 @@ class DispersionPlotter(Plotter):
         if fig is None:
             fig_1 = Plotter.figure()
             fig_2 = None if legacy is None else Plotter.figure()
-            fig = [fig_1, fig_2]
+            fig = (fig_1, fig_2)
         else:
             fig_1, fig_2 = fig
         if ax is None:
@@ -86,7 +86,7 @@ class DispersionPlotter(Plotter):
                 residual_hist_ax = None
                 legacy_pull_ax = None
                 legacy_pull_hist_ax = None
-            ax = [
+            ax = (
                 spectra_ax,
                 spectra_hist_ax,
                 pull_ax,
@@ -95,7 +95,7 @@ class DispersionPlotter(Plotter):
                 residual_hist_ax,
                 legacy_pull_ax,
                 legacy_pull_hist_ax,
-            ]
+            )
         else:
             (
                 spectra_ax,

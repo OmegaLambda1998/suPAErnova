@@ -1,7 +1,7 @@
 # Copyright 2025 Patrick Armstrong
 from typing import Self
 
-import tensorflow as tf
+from supaernova._tf import tf
 
 
 class PosteriorHMCValue(tf.Module):
