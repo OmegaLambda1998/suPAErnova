@@ -268,7 +268,7 @@ class TFPosteriorModel(ks.Model):
         # Determine the prior probability early to avoid exploring non-physical parameter spaces.
         log_prior = self.map.prior(input_position)
 
-        log_prior = tf.where(mask_sn, log_prior, inf_prob)
+        # log_prior = tf.where(mask_sn, log_prior, inf_prob)
 
         delta_m = input_position[..., 0:1]
         delta_p = input_position[..., 1:2]
@@ -365,7 +365,7 @@ class TFPosteriorModel(ks.Model):
 
         log_likelihood = log_likelihood_num / log_likelihood_sum
 
-        log_likelihood = tf.where(valid_spectra, log_likelihood, inf_prob)
+        # log_likelihood = tf.where(valid_spectra, log_likelihood, inf_prob)
 
         log_probability = log_likelihood + log_prior
 
