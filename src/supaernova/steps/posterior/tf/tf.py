@@ -7,6 +7,7 @@ from tqdm import tqdm
 import numpy as np
 
 from supaernova._tf import ks, tf, tfd, tfp
+from supaernova.utils.tf import db, pp
 
 from .hmc import PosteriorHMCValue
 from .map import PosteriorMap
@@ -72,6 +73,10 @@ class TFPosteriorModel(ks.Model):
         self.spec_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_spec_mask")
         self.wl_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_wl_mask")
 
+        self.data_time[~self.spec_mask] = -1
+        self.data_amplitude[~self.data_mask] = -1
+        self.data_sigma[~self.data_mask] = -1
+
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
         self.pae: TFPAEModel
         vars(self)["pae"] = config.pae
@@ -135,51 +140,64 @@ class TFPosteriorModel(ks.Model):
         self.hmc: PosteriorHMCValue
         vars(self)["hmc"] = PosteriorHMCValue(
             tf.Variable(  # Samples
-                [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.n_samples,
-                dtype=tf.float32,
+                tf.convert_to_tensor(
+                    [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.n_samples,
+                    dtype=tf.float32,
+                ),
                 shape=(self.n_samples, self.sn_dim, self.map.n_pae_latents),
             ),
             tf.Variable(  # Step Sizes Final
-                [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.n_samples,
-                dtype=tf.float32,
+                tf.convert_to_tensor(
+                    [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.n_samples,
+                    dtype=tf.float32,
+                ),
                 shape=(self.n_samples, self.sn_dim, self.map.n_pae_latents),
             ),
             tf.Variable(  # Is Accepted
-                [[False] * self.sn_dim] * self.n_samples,
-                dtype=tf.bool,
+                tf.convert_to_tensor(
+                    [[False] * self.sn_dim] * self.n_samples, dtype=tf.bool
+                ),
                 shape=(
                     self.n_samples,
                     self.sn_dim,
                 ),
             ),
             tf.Variable(  # UDeltaAv
-                [[[0] * 1] * self.sn_dim] * self.n_samples,
-                dtype=tf.float32,
+                tf.convert_to_tensor(
+                    [[[0] * 1] * self.sn_dim] * self.n_samples, dtype=tf.float32
+                ),
                 shape=(self.n_samples, self.sn_dim, 1),
             ),
             tf.Variable(  # ULatents
-                [[[0] * self.map.n_u_latents] * self.sn_dim] * self.n_samples,
-                dtype=tf.float32,
+                tf.convert_to_tensor(
+                    [[[0] * self.map.n_u_latents] * self.sn_dim] * self.n_samples,
+                    dtype=tf.float32,
+                ),
                 shape=(self.n_samples, self.sn_dim, self.map.n_u_latents),
             ),
             tf.Variable(  # DeltaAv
-                [[[0] * 1] * self.sn_dim] * self.n_samples,
-                dtype=tf.float32,
+                tf.convert_to_tensor(
+                    [[[0] * 1] * self.sn_dim] * self.n_samples, dtype=tf.float32
+                ),
                 shape=(self.n_samples, self.sn_dim, 1),
             ),
             tf.Variable(  # ZLatents
-                [[[0] * self.map.n_z_latents] * self.sn_dim] * self.n_samples,
-                dtype=tf.float32,
+                tf.convert_to_tensor(
+                    [[[0] * self.map.n_z_latents] * self.sn_dim] * self.n_samples,
+                    dtype=tf.float32,
+                ),
                 shape=(self.n_samples, self.sn_dim, self.map.n_z_latents),
             ),
             tf.Variable(  # DeltaM
-                [[[0] * 1] * self.sn_dim] * self.n_samples,
-                dtype=tf.float32,
+                tf.convert_to_tensor(
+                    [[[0] * 1] * self.sn_dim] * self.n_samples, dtype=tf.float32
+                ),
                 shape=(self.n_samples, self.sn_dim, 1),
             ),
             tf.Variable(  # DeltaP
-                [[[0] * 1] * self.sn_dim] * self.n_samples,
-                dtype=tf.float32,
+                tf.convert_to_tensor(
+                    [[[0] * 1] * self.sn_dim] * self.n_samples, dtype=tf.float32
+                ),
                 shape=(self.n_samples, self.sn_dim, 1),
             ),
         )
@@ -189,9 +207,12 @@ class TFPosteriorModel(ks.Model):
     @override
     def call(
         self: "Self",
-        inputs: tuple[tf.Tensor, ...],
+        input_position: tf.Tensor,
         *,
         training: bool | None = None,
+        input_phase: tf.Tensor | None = None,
+        input_amp: tf.Tensor | None = None,
+        input_sigma: tf.Tensor | None = None,
         mask: tf.Tensor | None = None,
         sn_mask: tf.Tensor | None = None,
         spec_mask: tf.Tensor | None = None,
@@ -202,15 +223,17 @@ class TFPosteriorModel(ks.Model):
         training = False if training is None else training
         testing = False if testing is None else testing
 
-        # === Unpack Inputs ===
-        input_position = inputs[0]
-        input_phase = inputs[1]
-        input_amp = inputs[2]
-        input_sigma = inputs[3]
+        # === Inputs ===
+        if input_phase is None:
+            input_phase = self.data_time
+        if input_amp is None:
+            input_amp = self.data_amplitude
+        if input_sigma is None:
+            input_sigma = self.data_sigma
 
         # --- Masks ---
         # Data Mask
-        input_mask = tf.ones_like(input_amp, dtype=tf.int32) if mask is None else mask
+        input_mask = tf.ones_like(input_amp, dtype=tf.bool) if mask is None else mask
         # Wavelength Range Mask
         input_wl_mask = tf.ones_like(input_mask) if wl_mask is None else wl_mask
         # Phase Range Mask
@@ -228,11 +251,24 @@ class TFPosteriorModel(ks.Model):
 
         posterior_mask = input_mask & input_sn_mask & input_spec_mask & input_wl_mask
 
+        # Determine which spectra to keep
+        # Will mask out any spectrum with *no* unmasked wavelengths in the valid wavelength range
+        mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
+
+        # Determine which SNe to keep
+        # Will mask out any SN with *no* unmasked spectra
+        mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
+
+        zero_prob = tf.zeros_like(mask_sn, dtype=tf.float32)
+        inf_prob = -tf.ones_like(mask_sn, dtype=tf.float32) * np.inf
+
         # Unconstrained -> Constrained
         input_position = self.map.constrain(input_position, full=True)
 
         # Determine the prior probability early to avoid exploring non-physical parameter spaces.
         log_prior = self.map.prior(input_position)
+
+        log_prior = tf.where(mask_sn, log_prior, inf_prob)
 
         delta_m = input_position[..., 0:1]
         delta_p = input_position[..., 1:2]
@@ -300,9 +336,7 @@ class TFPosteriorModel(ks.Model):
         synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (input_sigma**2))
 
         # Set missing values to 1 for all times
-        synth_sigma = tf.where(
-            posterior_mask, synth_sigma, -1 * tf.ones_like(synth_sigma)
-        )
+        synth_sigma = tf.where(posterior_mask, synth_sigma, tf.ones_like(synth_sigma))
 
         # Create likelihood distribution
         likelihood = tfd.Independent(
@@ -313,19 +347,14 @@ class TFPosteriorModel(ks.Model):
             reinterpreted_batch_ndims=0,
         )
 
-        # Determine which spectra to keep
-        # Will mask out any spectrum with *no* unmasked wavelengths in the valid wavelength range
-        mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
+        log_likelihood = likelihood.log_prob(input_amp)
+        log_likelihood = tf.where(
+            mask_spec, log_likelihood, tf.zeros_like(log_likelihood)
+        )
 
-        # Determine which SNe to keep
-        # Will mask out any SN with *no* unmasked spectra
-        mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
-
-        log_prob = likelihood.log_prob(input_amp)
-
-        log_likelihood = tf.where(mask_spec, log_prob, tf.zeros_like(log_prob))
-
-        log_likelihood_num = tf.reduce_sum(log_likelihood, axis=-1)
+        log_likelihood_num = tf.reduce_sum(
+            tf.where(mask_spec, log_likelihood, tf.zeros_like(log_likelihood)), axis=-1
+        )
 
         # The number of unmasked spectra
         log_likelihood_sum = tf.math.count_nonzero(mask_spec, axis=-1, dtype=tf.float32)
@@ -336,16 +365,14 @@ class TFPosteriorModel(ks.Model):
 
         log_likelihood = log_likelihood_num / log_likelihood_sum
 
-        inf_likelihood = -tf.ones_like(log_likelihood) * np.inf
-
-        log_likelihood = tf.where(valid_spectra, log_likelihood, inf_likelihood)
+        log_likelihood = tf.where(valid_spectra, log_likelihood, inf_prob)
 
         log_probability = log_likelihood + log_prior
 
         log_probability = tf.where(
             tf.math.is_finite(log_probability),
             log_probability,
-            inf_likelihood,
+            inf_prob,
         )
 
         if additional_outputs:
@@ -358,6 +385,9 @@ class TFPosteriorModel(ks.Model):
         inputs: "TensorLike",
         *,
         training: bool | None = None,
+        input_phase: "TensorLike | None" = None,
+        input_amp: "TensorLike | None" = None,
+        input_sigma: "TensorLike | None" = None,
         mask: "TensorLike | None" = None,
         sn_mask: "TensorLike | None" = None,
         spec_mask: "TensorLike | None" = None,
@@ -367,19 +397,27 @@ class TFPosteriorModel(ks.Model):
     ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         training = False if training is None else training
         testing = False if testing is None else testing
-        if isinstance(inputs, Iterable):
-            inputs = tuple(tf.convert_to_tensor(i) for i in inputs)
+        inputs = tf.convert_to_tensor(inputs, dtype=tf.float32)
+        if input_phase is not None:
+            input_phase = tf.convert_to_tensor(input_phase, dtype=tf.float32)
+        if input_amp is not None:
+            input_amp = tf.convert_to_tensor(input_amp, dtype=tf.float32)
+        if input_sigma is not None:
+            input_sigma = tf.convert_to_tensor(input_sigma, dtype=tf.float32)
         if mask is not None:
-            mask = tf.convert_to_tensor(mask)
+            mask = tf.convert_to_tensor(mask, dtype=tf.bool)
         if sn_mask is not None:
-            sn_mask = tf.convert_to_tensor(sn_mask)
+            sn_mask = tf.convert_to_tensor(sn_mask, dtype=tf.bool)
         if spec_mask is not None:
-            spec_mask = tf.convert_to_tensor(spec_mask)
+            spec_mask = tf.convert_to_tensor(spec_mask, dtype=tf.bool)
         if wl_mask is not None:
-            wl_mask = tf.convert_to_tensor(wl_mask)
+            wl_mask = tf.convert_to_tensor(wl_mask, dtype=tf.bool)
         return super().__call__(
             inputs,
             training=training,
+            input_phase=input_phase,
+            input_amp=input_amp,
+            input_sigma=input_sigma,
             mask=mask,
             sn_mask=sn_mask,
             spec_mask=spec_mask,
@@ -854,8 +892,11 @@ class TFPosteriorModel(ks.Model):
     def vals_and_grads(self: "Self", position: tf.Tensor) -> tf.Tensor:
         input_position = self.map.get_position(position)
         log_prob = self(
-            (input_position, self.data_time, self.data_amplitude, self.data_sigma),
+            input_position,
             training=False,
+            input_phase=self.data_time,
+            input_amp=self.data_amplitude,
+            input_sigma=self.data_sigma,
             mask=self.data_mask,
             sn_mask=self.sn_mask,
             spec_mask=self.spec_mask,
@@ -902,13 +943,11 @@ class TFPosteriorModel(ks.Model):
             initial_position = self.map.position.current
             initial_position = self.map.unconstrain(initial_position)
             log_prob = self(
-                (
-                    self.map.get_position(initial_position),
-                    self.data_time,
-                    self.data_amplitude,
-                    self.data_sigma,
-                ),
+                self.map.get_position(initial_position),
                 training=False,
+                input_phase=self.data_time,
+                input_amp=self.data_amplitude,
+                input_sigma=self.data_sigma,
                 mask=self.data_mask,
                 sn_mask=self.sn_mask,
                 spec_mask=self.spec_mask,
@@ -984,10 +1023,19 @@ class TFPosteriorModel(ks.Model):
             )
         self.map_progress.close()
 
+        _val, _grad = tfp.math.value_and_gradient(
+            self.vals_and_grads,
+            initial_position,
+            auto_unpack_single_arg=False,
+        )
+
         final_position = self.map.get_position(self.map.unconstrain(position))
         log_prob, log_like, log_prior, _, _ = self(
-            (final_position, self.data_time, self.data_amplitude, self.data_sigma),
+            final_position,
             training=False,
+            input_phase=self.data_time,
+            input_amp=self.data_amplitude,
+            input_sigma=self.data_sigma,
             mask=self.data_mask,
             sn_mask=self.sn_mask,
             spec_mask=self.spec_mask,
@@ -1719,20 +1767,19 @@ class TFPosteriorModel(ks.Model):
             position: tf.Tensor,
         ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
             input_position = self.map.get_position(position)
-            return self(
-                (
-                    input_position,
-                    self.data_time,
-                    self.data_amplitude,
-                    self.data_sigma,
-                ),
+            log_prob, log_like, log_prior, _, _ = self(
+                input_position,
                 training=False,
+                input_phase=self.data_time,
+                input_amp=self.data_amplitude,
+                input_sigma=self.data_sigma,
                 mask=self.data_mask,
                 sn_mask=self.sn_mask,
                 spec_mask=self.spec_mask,
                 wl_mask=self.wl_mask,
                 additional_outputs=True,
-            )[:3]
+            )
+            return log_prob, log_like, log_prior
 
         log_prob, log_like, log_prior = tf.map_fn(
             _step,

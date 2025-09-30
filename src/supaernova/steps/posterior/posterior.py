@@ -583,13 +583,11 @@ class Posterior(ModelStep[PosteriorConfig]):
                 model.data.clear()
 
                 log_prob = model(
-                    (
-                        input_position,
-                        input_time,
-                        input_amplitude,
-                        input_sigma,
-                    ),
+                    input_position,
                     training=False,
+                    input_phase=input_time,
+                    input_amp=input_amplitude,
+                    input_sigma=input_sigma,
                     mask=model.data_mask,
                     sn_mask=model.sn_mask,
                     spec_mask=model.spec_mask,
@@ -784,15 +782,652 @@ class Posterior(ModelStep[PosteriorConfig]):
                             return False
         return not self.analysis.force
 
+    def _plot_comparison(
+        self: Self,
+        subset: str,
+        seed: int,
+        model: "TFPosteriorModel",
+        data: "LazySNPAEData",
+        input_mask: "npt.NDArray[bool]",
+        input_sn_mask: "npt.NDArray[bool]",
+        input_spec_mask: "npt.NDArray[bool]",
+        input_wl_mask: "npt.NDArray[bool]",
+    ) -> None:
+        if self.analysis.plot_comparison is not None:
+            if not isinstance(self.analysis.plot_comparison, list):
+                self.analysis.plot_comparison = [self.analysis.plot_comparison]
+            for opts in self.analysis.plot_comparison:
+                o = opts.model_copy(deep=True)
+                if o.name is None:
+                    o.name = "comparison"
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {
+                        "title": f"{subset}_{self.name}_{o.name}",
+                    }
+                self.log.debug(f"Plotting {o.name}")
+                if o.savepath is None:
+                    o.savepath = (
+                        self.paths.plots / str(self.seeds[0]) / subset / str(seed)
+                    )
+                o.savepath.mkdir(parents=True, exist_ok=True)
+
+                (
+                    wl,
+                    amplitude,
+                    sigma,
+                    _sn_name,
+                    _time,
+                    mask,
+                    _sn_mask,
+                    _spec_mask,
+                    _wl_mask,
+                ) = SpectraPlotter.prep(
+                    data,
+                    o,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                )
+                o.base_wl = wl
+                o.base_amp = amplitude
+                o.base_sigma = sigma
+                o.base_mask = np.logical_not(mask)
+
+                # === PAE ===
+                # --- PAE ---
+                pae_pae_input = np.concatenate((data.time, data.amplitude), axis=-1)
+                pae_pae_latents, _ = model.pae(
+                    pae_pae_input,
+                    training=False,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                )
+                pae_pae_latents = pae_pae_latents[:, 0, :]
+
+                # --- NFlow ---
+                pae_delta_m = pae_pae_latents[..., -2:-1]
+                pae_delta_p = pae_pae_latents[..., -1:]
+                pae_pae_latents = pae_pae_latents[..., :-2]
+                pae_u_latents = model.nflow.z_to_u(pae_pae_latents, permute=True)
+
+                # --- Posterior ---
+                pae_position = model.map.unconstrain(
+                    model.map.get_position(
+                        np.concatenate(
+                            (pae_delta_m, pae_delta_p, pae_u_latents),
+                            axis=-1,
+                        )
+                    ),
+                    full=True,
+                )
+                (
+                    pae_log_prob,
+                    pae_log_like,
+                    pae_log_prior,
+                    pae_amplitude,
+                    pae_sigma,
+                ) = model(
+                    pae_position,
+                    training=False,
+                    input_phase=data.time,
+                    input_amp=data.amplitude,
+                    input_sigma=data.sigma,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                    additional_outputs=True,
+                )
+                pae_log_prob = pae_log_prob.numpy()
+                pae_log_like = pae_log_like.numpy()
+                pae_log_prior = pae_log_prior.numpy()
+
+                mean_pae_log_prob = float(
+                    np.sum(
+                        np.where(
+                            np.isfinite(pae_log_prob),
+                            pae_log_prob,
+                            np.zeros_like(pae_log_prob),
+                        )
+                    )
+                    / max(
+                        np.sum(
+                            np.where(
+                                np.isfinite(pae_log_prob),
+                                np.ones_like(pae_log_prob),
+                                np.zeros_like(pae_log_prob),
+                            )
+                        ),
+                        1,
+                    )
+                )
+                mean_pae_log_like = float(
+                    np.sum(
+                        np.where(
+                            np.isfinite(pae_log_like),
+                            pae_log_like,
+                            np.zeros_like(pae_log_like),
+                        )
+                    )
+                    / max(
+                        np.sum(
+                            np.where(
+                                np.isfinite(pae_log_like),
+                                np.ones_like(pae_log_like),
+                                np.zeros_like(pae_log_like),
+                            )
+                        ),
+                        1,
+                    )
+                )
+                mean_pae_log_prior = float(
+                    np.sum(
+                        np.where(
+                            np.isfinite(pae_log_prior),
+                            pae_log_prior,
+                            np.zeros_like(pae_log_prior),
+                        )
+                    )
+                    / max(
+                        np.sum(
+                            np.where(
+                                np.isfinite(pae_log_prior),
+                                np.ones_like(pae_log_prior),
+                                np.zeros_like(pae_log_prior),
+                            )
+                        ),
+                        1,
+                    )
+                )
+
+                o.plot_kwargs["label"] = (
+                    f"PAE\n(log prob: {mean_pae_log_prior:.2E} + {mean_pae_log_like:.2E} = {mean_pae_log_prob:.2E})"
+                )
+
+                data.amplitude = pae_amplitude.numpy()
+                data.sigma = pae_sigma.numpy()
+
+                fig, ax = SpectraPlotter.plot_comparison(
+                    data,
+                    o,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                    save=False,
+                )
+                o.plot_base = False
+
+                # === MAP ===
+                # --- PAE ---
+                # --- NFlow ---
+                # --- Posterior ---
+                map_position = model.map.get_position(model.map.position.best)
+                (
+                    map_log_prob,
+                    map_log_like,
+                    map_log_prior,
+                    map_amplitude,
+                    map_sigma,
+                ) = model(
+                    model.map.unconstrain(map_position),
+                    training=False,
+                    input_phase=data.time,
+                    input_amp=data.amplitude,
+                    input_sigma=data.sigma,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                    additional_outputs=True,
+                )
+                map_log_prob = map_log_prob.numpy()
+                map_log_like = map_log_like.numpy()
+                map_log_prior = map_log_prior.numpy()
+
+                mean_map_log_prob = float(
+                    np.sum(
+                        np.where(
+                            np.isfinite(map_log_prob),
+                            map_log_prob,
+                            np.zeros_like(map_log_prob),
+                        )
+                    )
+                    / np.sum(
+                        np.where(
+                            np.isfinite(map_log_prob),
+                            np.ones_like(map_log_prob),
+                            np.zeros_like(map_log_prob),
+                        )
+                    )
+                )
+                mean_map_log_like = float(
+                    np.sum(
+                        np.where(
+                            np.isfinite(map_log_like),
+                            map_log_like,
+                            np.zeros_like(map_log_like),
+                        )
+                    )
+                    / np.sum(
+                        np.where(
+                            np.isfinite(map_log_like),
+                            np.ones_like(map_log_like),
+                            np.zeros_like(map_log_like),
+                        )
+                    )
+                )
+                mean_map_log_prior = float(
+                    np.sum(
+                        np.where(
+                            np.isfinite(map_log_prior),
+                            map_log_prior,
+                            np.zeros_like(map_log_prior),
+                        )
+                    )
+                    / np.sum(
+                        np.where(
+                            np.isfinite(map_log_prior),
+                            np.ones_like(map_log_prior),
+                            np.zeros_like(map_log_prior),
+                        )
+                    )
+                )
+
+                o.plot_kwargs["label"] = (
+                    f"MAP\n(log prob: {mean_map_log_prior:.2E} + {mean_map_log_like:.2E} = {mean_map_log_prob:.2E})"
+                )
+
+                data.amplitude = map_amplitude.numpy()
+                data.sigma = map_sigma.numpy()
+
+                fig, ax = SpectraPlotter.plot_comparison(
+                    data,
+                    o,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                    fig=fig,
+                    ax=ax,
+                    save=False,
+                )
+
+                # === Posterior ===
+                # --- PAE ---
+                # --- NFlow ---
+                # --- Posterior ---
+                samples = model.hmc.samples.numpy()
+                mean_samples = samples.mean(axis=0)
+                pos_position = model.map.get_position(mean_samples)
+                (
+                    pos_log_prob,
+                    pos_log_like,
+                    pos_log_prior,
+                    pos_amplitude,
+                    pos_sigma,
+                ) = model(
+                    model.map.unconstrain(pos_position),
+                    training=False,
+                    input_phase=data.time,
+                    input_amp=data.amplitude,
+                    input_sigma=data.sigma,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                    additional_outputs=True,
+                )
+                pos_log_prob = pos_log_prob.numpy()
+
+                mean_pos_log_prob = float(
+                    np.sum(
+                        np.where(
+                            np.isfinite(pos_log_prob),
+                            pos_log_prob,
+                            np.zeros_like(pos_log_prob),
+                        )
+                    )
+                    / np.sum(
+                        np.where(
+                            np.isfinite(pos_log_prob),
+                            np.ones_like(pos_log_prob),
+                            np.zeros_like(pos_log_prob),
+                        )
+                    )
+                )
+                mean_pos_log_like = float(
+                    np.sum(
+                        np.where(
+                            np.isfinite(pos_log_like),
+                            pos_log_like,
+                            np.zeros_like(pos_log_like),
+                        )
+                    )
+                    / np.sum(
+                        np.where(
+                            np.isfinite(pos_log_like),
+                            np.ones_like(pos_log_like),
+                            np.zeros_like(pos_log_like),
+                        )
+                    )
+                )
+                mean_pos_log_prior = float(
+                    np.sum(
+                        np.where(
+                            np.isfinite(pos_log_prior),
+                            pos_log_prior,
+                            np.zeros_like(pos_log_prior),
+                        )
+                    )
+                    / np.sum(
+                        np.where(
+                            np.isfinite(pos_log_prior),
+                            np.ones_like(pos_log_prior),
+                            np.zeros_like(pos_log_prior),
+                        )
+                    )
+                )
+
+                o.plot_kwargs["label"] = (
+                    f"Posterior\n(log prob: {mean_pos_log_prior:.2E} + {mean_pos_log_like:.2E} = {mean_pos_log_prob:.2E})"
+                )
+
+                data.amplitude = pos_amplitude.numpy()
+                data.sigma = pos_sigma.numpy()
+
+                fig, ax = SpectraPlotter.plot_comparison(
+                    data,
+                    o,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                    fig=fig,
+                    ax=ax,
+                )
+
+    def _plot_map(
+        self: Self,
+        subset: str,
+        seed: int,
+        data: "LazySNPAEData",
+        input_mask: "npt.NDArray[bool]",
+        input_sn_mask: "npt.NDArray[bool]",
+        input_spec_mask: "npt.NDArray[bool]",
+        input_wl_mask: "npt.NDArray[bool]",
+        map_results,
+        map_labels,
+        *,
+        is_init: bool,
+    ) -> None:
+        analysis = None
+        if is_init:
+            if self.analysis.plot_map_init is not None:
+                if not isinstance(self.analysis.plot_map_init, list):
+                    self.analysis.plot_map_init = [self.analysis.plot_map_init]
+                analysis = self.analysis.plot_map_init
+        elif self.analysis.plot_map_best is not None:
+            if not isinstance(self.analysis.plot_map_best, list):
+                self.analysis.plot_map_best = [self.analysis.plot_map_best]
+            analysis = self.analysis.plot_map_best
+
+        if analysis is not None:
+            for opts in analysis:
+                o = opts.model_copy(deep=True)
+                if o.name is None:
+                    o.name = "map_" + "init" if is_init else "best"
+
+                plot_cloud = {}
+                smooth = {}
+                bins = {}
+                chain_data = {}
+
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
+                if o.labels is None:
+                    o.labels = {}
+                title = o.plot_kwargs["title"]
+
+                samples = map_results
+                chain_data[title] = samples
+                o.labels[title] = map_labels
+                plot_cloud[title] = True
+                smooth[title] = 0
+                bins[title] = samples.shape[0]
+
+                if o.masked:
+                    (
+                        _wl,
+                        _amplitude,
+                        _sigma,
+                        _sn_name,
+                        _time,
+                        mask,
+                        _sn_mask,
+                        _spec_mask,
+                        _wl_mask,
+                    ) = SpectraPlotter.prep(
+                        data,
+                        o,
+                        mask=input_mask,
+                        sn_mask=input_sn_mask,
+                        spec_mask=input_spec_mask,
+                        wl_mask=input_wl_mask,
+                    )
+
+                    # Determine which spectra to keep
+                    # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+                    mask_spec = mask.max(axis=-1)
+
+                    # Determine which SNe to keep
+                    # Will mask out any SN with *no* unmasked spectra
+                    mask_sn = mask_spec.max(axis=-1).astype(bool)
+
+                    samples = samples[mask_sn, ...]
+                    title += "_masked"
+
+                    chain_data[title] = samples
+                    o.labels[title] = map_labels
+                    plot_cloud[title] = True
+                    smooth[title] = 0
+                    bins[title] = samples.shape[0]
+
+                self.log.debug(f"Plotting {o.name}")
+                if o.savepath is None:
+                    o.savepath = (
+                        self.paths.plots / str(self.seeds[0]) / subset / str(seed)
+                    )
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                DistributionPlotter.plot_corner(
+                    chain_data,
+                    o,
+                    statistics="max_central",
+                    shade_alpha=0,
+                    plot_cloud=plot_cloud,
+                    smooth=smooth,
+                    bins=bins,
+                )
+
+    def _plot_hmc(
+        self: Self,
+        subset: str,
+        seed: int,
+        data: "LazySNPAEData",
+        results: PosteriorStepResult,
+        input_mask: "npt.NDArray[bool]",
+        input_sn_mask: "npt.NDArray[bool]",
+        input_spec_mask: "npt.NDArray[bool]",
+        input_wl_mask: "npt.NDArray[bool]",
+        hmc_labels,
+    ) -> None:
+        if self.analysis.plot_hmc is not None:
+            if not isinstance(self.analysis.plot_hmc, list):
+                self.analysis.plot_hmc = [self.analysis.plot_hmc]
+            for opts in self.analysis.plot_hmc:
+                o = opts.model_copy(deep=True)
+                if o.name is None:
+                    o.name = "hmc"
+
+                plot_cloud = {}
+                smooth = {}
+                bins = {}
+                chain_data = {}
+
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
+                if o.labels is None:
+                    o.labels = {}
+                title = o.plot_kwargs["title"]
+
+                samples = results.hmc.samples
+                chains = np.reshape(samples, (-1, samples.shape[-1]))
+                chain_data[title] = chains
+                o.labels[title] = hmc_labels
+
+                if o.mean:
+                    chains = np.mean(samples, axis=0)
+                    chain_data[title + "_mean"] = chains
+                    o.labels[title + "_mean"] = hmc_labels
+                    plot_cloud[title + "_mean"] = True
+                    smooth[title + "_mean"] = 0
+                    bins[title + "_mean"] = chains.shape[0]
+
+                if o.masked:
+                    (
+                        _wl,
+                        _amplitude,
+                        _sigma,
+                        _sn_name,
+                        _time,
+                        mask,
+                        _sn_mask,
+                        _spec_mask,
+                        _wl_mask,
+                    ) = SpectraPlotter.prep(
+                        data,
+                        o,
+                        mask=input_mask,
+                        sn_mask=input_sn_mask,
+                        spec_mask=input_spec_mask,
+                        wl_mask=input_wl_mask,
+                    )
+
+                    # Determine which spectra to keep
+                    # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+                    mask_spec = mask.max(axis=-1)
+
+                    # Determine which SNe to keep
+                    # Will mask out any SN with *no* unmasked spectra
+                    mask_sn = mask_spec.max(axis=-1).astype(bool)
+
+                    samples = samples[:, mask_sn, :]
+                    title += "_masked"
+
+                    chains = np.reshape(samples, (-1, samples.shape[-1]))
+                    chain_data[title] = chains
+                    o.labels[title] = hmc_labels
+
+                if o.mean and o.masked:
+                    chains = np.mean(samples, axis=0)
+                    chain_data[title + "_mean"] = chains
+                    o.labels[title + "_mean"] = hmc_labels
+                    plot_cloud[title + "_mean"] = True
+                    smooth[title + "_mean"] = 0
+                    bins[title + "_mean"] = chains.shape[0]
+
+                o.mean = False
+
+                if o.savepath is None:
+                    o.savepath = (
+                        self.paths.plots / str(self.seeds[0]) / subset / str(seed)
+                    )
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                self.log.debug(f"Plotting {o.name}")
+                DistributionPlotter.plot_corner(
+                    chain_data,
+                    o,
+                    statistics="max_central",
+                    shade_alpha=0.0,
+                    plot_cloud=plot_cloud,
+                    smooth=smooth,
+                    bins=bins,
+                )
+
+    def _plot_dispersion(
+        self: Self,
+        subset: str,
+        seed: int,
+        data: "LazySNPAEData",
+        input_mask: "npt.NDArray[bool]",
+        input_sn_mask: "npt.NDArray[bool]",
+        input_spec_mask: "npt.NDArray[bool]",
+        input_wl_mask: "npt.NDArray[bool]",
+    ) -> None:
+        if self.analysis.plot_dispersion is not None:
+            if not isinstance(self.analysis.plot_dispersion, list):
+                self.analysis.plot_dispersion = [self.analysis.plot_dispersion]
+            for opts in self.analysis.plot_dispersion:
+                o = opts.model_copy(deep=True)
+                if o.subset != subset:
+                    continue
+                if o.name is None:
+                    o.name = "dispersion"
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"title": f"{subset}_{self.name}"}
+                self.log.debug(f"Plotting {o.name}")
+                if o.savepath is None:
+                    o.savepath = (
+                        self.paths.plots / str(self.seeds[0]) / subset / str(seed)
+                    )
+                o.savepath.mkdir(parents=True, exist_ok=True)
+
+                twins = None
+                if o.twins is not None:
+                    twins_path = self.data_dir / o.twins
+                    twins = pd.read_csv(twins_path, header=0)
+
+                legacy_keys = {
+                    ("names", 0),
+                    ("redshift", 0),
+                    ("amplitude_mcmc", 0),
+                    ("amplitude_mcmc_err", 0),
+                    ("mask", 0),
+                }
+                legacy = {}
+                for path in o.legacy or []:
+                    legacy_path = self.data_dir / path
+                    legacy_data = np.load(legacy_path, allow_pickle=True).item()
+                    legacy = {
+                        k: (
+                            legacy_data[k]
+                            if k not in legacy
+                            else np.concatenate((legacy[k], legacy_data[k]), axis=axis)
+                        )
+                        for (k, axis) in legacy_keys
+                    }
+
+                if len(legacy) == 0:
+                    legacy = None
+
+                DispersionPlotter.plot_dispersion(
+                    data,
+                    list(self.results[subset].values()),
+                    o,
+                    twins=twins,
+                    legacy=legacy,
+                    mask=input_mask,
+                    sn_mask=input_sn_mask,
+                    spec_mask=input_spec_mask,
+                    wl_mask=input_wl_mask,
+                )
+
     @override
     def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:
         for subset in self.subsets:
-            subset_map_init_results = {}
-            subset_map_best_results = {}
-            subset_map_labels = {}
-            subset_hmc_samples = {}
-            subset_hmc_labels = {}
-
             for seed in self.seeds:
                 model = self.models[subset][str(seed)]
                 results = self.results[subset][str(seed)]
@@ -841,9 +1476,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                     map_labels[ind] = "Δp"
                 map_init_results = np.concatenate(map_init_results, axis=-1)
                 map_best_results = np.concatenate(map_best_results, axis=-1)
-                subset_map_init_results[str(seed)] = map_init_results
-                subset_map_best_results[str(seed)] = map_best_results
-                subset_map_labels[str(seed)] = map_labels
 
                 hmc_labels = {}
                 hmc_ind = 0
@@ -858,681 +1490,65 @@ class Posterior(ModelStep[PosteriorConfig]):
                     hmc_ind += 1
                 for i in range(model.map.n_u_latents):
                     hmc_labels[hmc_ind + i] = f"μ{i + 1}"
-                subset_hmc_labels[str(seed)] = hmc_labels
 
-                if self.analysis.plot_comparison is not None:
-                    if not isinstance(self.analysis.plot_comparison, list):
-                        self.analysis.plot_comparison = [self.analysis.plot_comparison]
-                    for opts in self.analysis.plot_comparison:
-                        o = opts.model_copy(deep=True)
-                        if o.name is None:
-                            o.name = "comparison"
-                        if o.plot_kwargs is None:
-                            o.plot_kwargs = {
-                                "title": f"{subset}_{self.name}_{o.name}",
-                            }
-                        self.log.debug(f"Plotting {o.name}")
-                        if o.savepath is None:
-                            o.savepath = (
-                                self.paths.plots
-                                / str(self.seeds[0])
-                                / subset
-                                / str(seed)
-                            )
-                        o.savepath.mkdir(parents=True, exist_ok=True)
+                self._plot_comparison(
+                    subset,
+                    seed,
+                    model,
+                    data,
+                    input_mask,
+                    input_sn_mask,
+                    input_spec_mask,
+                    input_wl_mask,
+                )
 
-                        (
-                            wl,
-                            amplitude,
-                            sigma,
-                            _sn_name,
-                            _time,
-                            mask,
-                            _sn_mask,
-                            _spec_mask,
-                            _wl_mask,
-                        ) = SpectraPlotter.prep(
-                            data,
-                            o,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                        )
-                        o.base_wl = wl
-                        o.base_amp = amplitude
-                        o.base_sigma = sigma
-                        o.base_mask = np.logical_not(mask)
+                self._plot_map(
+                    subset,
+                    seed,
+                    data,
+                    input_mask,
+                    input_sn_mask,
+                    input_spec_mask,
+                    input_wl_mask,
+                    map_init_results,
+                    map_labels,
+                    is_init=True,
+                )
 
-                        # === PAE ===
-                        # --- PAE ---
-                        pae_pae_input = np.concatenate(
-                            (data.time, data.amplitude), axis=-1
-                        )
-                        pae_pae_latents, _ = model.pae(
-                            pae_pae_input,
-                            training=False,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                        )
-                        pae_pae_latents = pae_pae_latents[:, 0, :]
+                self._plot_map(
+                    subset,
+                    seed,
+                    data,
+                    input_mask,
+                    input_sn_mask,
+                    input_spec_mask,
+                    input_wl_mask,
+                    map_best_results,
+                    map_labels,
+                    is_init=False,
+                )
 
-                        # --- NFlow ---
-                        pae_delta_m = pae_pae_latents[..., -2:-1]
-                        pae_delta_p = pae_pae_latents[..., -1:]
-                        pae_pae_latents = pae_pae_latents[..., :-2]
-                        pae_u_latents = model.nflow.z_to_u(
-                            pae_pae_latents, permute=True
-                        )
+                self._plot_hmc(
+                    subset,
+                    seed,
+                    data,
+                    results,
+                    input_mask,
+                    input_sn_mask,
+                    input_spec_mask,
+                    input_wl_mask,
+                    hmc_labels,
+                )
 
-                        # --- Posterior ---
-                        pae_position = model.map.unconstrain(
-                            model.map.get_position(
-                                np.concatenate(
-                                    (pae_delta_m, pae_delta_p, pae_u_latents),
-                                    axis=-1,
-                                )
-                            ),
-                            full=True,
-                        )
-                        pae_posterior_input = (
-                            pae_position,
-                            data.time,
-                            data.amplitude,
-                            data.sigma,
-                        )
-                        (
-                            pae_log_prob,
-                            pae_log_like,
-                            pae_log_prior,
-                            pae_amplitude,
-                            pae_sigma,
-                        ) = model(
-                            pae_posterior_input,
-                            training=False,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                            additional_outputs=True,
-                        )
-                        pae_log_prob = pae_log_prob.numpy()
-                        pae_log_like = pae_log_like.numpy()
-                        pae_log_prior = pae_log_prior.numpy()
-
-                        mean_pae_log_prob = float(
-                            np.sum(
-                                np.where(
-                                    np.isfinite(pae_log_prob),
-                                    pae_log_prob,
-                                    np.zeros_like(pae_log_prob),
-                                )
-                            )
-                            / max(
-                                np.sum(
-                                    np.where(
-                                        np.isfinite(pae_log_prob),
-                                        np.ones_like(pae_log_prob),
-                                        np.zeros_like(pae_log_prob),
-                                    )
-                                ),
-                                1,
-                            )
-                        )
-                        mean_pae_log_like = float(
-                            np.sum(
-                                np.where(
-                                    np.isfinite(pae_log_like),
-                                    pae_log_like,
-                                    np.zeros_like(pae_log_like),
-                                )
-                            )
-                            / max(
-                                np.sum(
-                                    np.where(
-                                        np.isfinite(pae_log_like),
-                                        np.ones_like(pae_log_like),
-                                        np.zeros_like(pae_log_like),
-                                    )
-                                ),
-                                1,
-                            )
-                        )
-                        mean_pae_log_prior = float(
-                            np.sum(
-                                np.where(
-                                    np.isfinite(pae_log_prior),
-                                    pae_log_prior,
-                                    np.zeros_like(pae_log_prior),
-                                )
-                            )
-                            / max(
-                                np.sum(
-                                    np.where(
-                                        np.isfinite(pae_log_prior),
-                                        np.ones_like(pae_log_prior),
-                                        np.zeros_like(pae_log_prior),
-                                    )
-                                ),
-                                1,
-                            )
-                        )
-
-                        o.plot_kwargs["label"] = (
-                            f"PAE\n(log prob: {mean_pae_log_prior:.2E} + {mean_pae_log_like:.2E} = {mean_pae_log_prob:.2E})"
-                        )
-
-                        data.amplitude = pae_amplitude.numpy()
-                        data.sigma = pae_sigma.numpy()
-
-                        fig, ax = SpectraPlotter.plot_comparison(
-                            data,
-                            o,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                            save=False,
-                        )
-                        o.plot_base = False
-
-                        # === MAP ===
-                        # --- PAE ---
-                        # --- NFlow ---
-                        # --- Posterior ---
-                        map_position = model.map.get_position(model.map.position.best)
-                        map_posterior_input = (
-                            model.map.unconstrain(map_position),
-                            data.time,
-                            data.amplitude,
-                            data.sigma,
-                        )
-                        (
-                            map_log_prob,
-                            map_log_like,
-                            map_log_prior,
-                            map_amplitude,
-                            map_sigma,
-                        ) = model(
-                            map_posterior_input,
-                            training=False,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                            additional_outputs=True,
-                        )
-                        map_log_prob = map_log_prob.numpy()
-                        map_log_like = map_log_like.numpy()
-                        map_log_prior = map_log_prior.numpy()
-
-                        mean_map_log_prob = float(
-                            np.sum(
-                                np.where(
-                                    np.isfinite(map_log_prob),
-                                    map_log_prob,
-                                    np.zeros_like(map_log_prob),
-                                )
-                            )
-                            / np.sum(
-                                np.where(
-                                    np.isfinite(map_log_prob),
-                                    np.ones_like(map_log_prob),
-                                    np.zeros_like(map_log_prob),
-                                )
-                            )
-                        )
-                        mean_map_log_like = float(
-                            np.sum(
-                                np.where(
-                                    np.isfinite(map_log_like),
-                                    map_log_like,
-                                    np.zeros_like(map_log_like),
-                                )
-                            )
-                            / np.sum(
-                                np.where(
-                                    np.isfinite(map_log_like),
-                                    np.ones_like(map_log_like),
-                                    np.zeros_like(map_log_like),
-                                )
-                            )
-                        )
-                        mean_map_log_prior = float(
-                            np.sum(
-                                np.where(
-                                    np.isfinite(map_log_prior),
-                                    map_log_prior,
-                                    np.zeros_like(map_log_prior),
-                                )
-                            )
-                            / np.sum(
-                                np.where(
-                                    np.isfinite(map_log_prior),
-                                    np.ones_like(map_log_prior),
-                                    np.zeros_like(map_log_prior),
-                                )
-                            )
-                        )
-
-                        o.plot_kwargs["label"] = (
-                            f"MAP\n(log prob: {mean_map_log_prior:.2E} + {mean_map_log_like:.2E} = {mean_map_log_prob:.2E})"
-                        )
-
-                        data.amplitude = map_amplitude.numpy()
-                        data.sigma = map_sigma.numpy()
-
-                        fig, ax = SpectraPlotter.plot_comparison(
-                            data,
-                            o,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                            fig=fig,
-                            ax=ax,
-                            save=False,
-                        )
-
-                        # === Posterior ===
-                        # --- PAE ---
-                        # --- NFlow ---
-                        # --- Posterior ---
-                        samples = model.hmc.samples.numpy()
-                        mean_samples = samples.mean(axis=0)
-                        pos_position = model.map.get_position(mean_samples)
-                        pos_posterior_input = (
-                            model.map.unconstrain(pos_position),
-                            data.time,
-                            data.amplitude,
-                            data.sigma,
-                        )
-                        (
-                            pos_log_prob,
-                            _pos_log_like,
-                            _pos_log_prior,
-                            pos_amplitude,
-                            pos_sigma,
-                        ) = model(
-                            pos_posterior_input,
-                            training=False,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                            additional_outputs=True,
-                        )
-                        pos_log_prob = pos_log_prob.numpy()
-
-                        mean_pos_log_prob = float(
-                            np.sum(
-                                np.where(
-                                    np.isfinite(pos_log_prob),
-                                    pos_log_prob,
-                                    np.zeros_like(pos_log_prob),
-                                )
-                            )
-                            / np.sum(
-                                np.where(
-                                    np.isfinite(pos_log_prob),
-                                    np.ones_like(pos_log_prob),
-                                    np.zeros_like(pos_log_prob),
-                                )
-                            )
-                        )
-
-                        o.plot_kwargs["label"] = (
-                            f"Posterior\n(log prob: {mean_pos_log_prob:.3E})"
-                        )
-
-                        data.amplitude = pos_amplitude.numpy()
-                        data.sigma = pos_sigma.numpy()
-
-                        fig, ax = SpectraPlotter.plot_comparison(
-                            data,
-                            o,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                            fig=fig,
-                            ax=ax,
-                        )
-
-                if self.analysis.plot_map_init is not None:
-                    if not isinstance(self.analysis.plot_map_init, list):
-                        self.analysis.plot_map_init = [self.analysis.plot_map_init]
-                    for opts in self.analysis.plot_map_init:
-                        o = opts.model_copy(deep=True)
-                        if o.name is None:
-                            o.name = "map_init"
-
-                        plot_cloud = {}
-                        smooth = {}
-                        bins = {}
-                        chain_data = {}
-
-                        if o.plot_kwargs is None:
-                            o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
-                        if o.labels is None:
-                            o.labels = {}
-                        title = o.plot_kwargs["title"]
-
-                        samples = map_init_results
-                        chain_data[title] = samples
-                        o.labels[title] = map_labels
-                        plot_cloud[title] = True
-                        smooth[title] = 0
-                        bins[title] = samples.shape[0]
-
-                        if o.masked:
-                            (
-                                wl,
-                                amplitude,
-                                sigma,
-                                _sn_name,
-                                _time,
-                                mask,
-                                _sn_mask,
-                                _spec_mask,
-                                _wl_mask,
-                            ) = SpectraPlotter.prep(
-                                data,
-                                o,
-                                mask=input_mask,
-                                sn_mask=input_sn_mask,
-                                spec_mask=input_spec_mask,
-                                wl_mask=input_wl_mask,
-                            )
-
-                            # Determine which spectra to keep
-                            # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-                            mask_spec = mask.max(axis=-1)
-
-                            # Determine which SNe to keep
-                            # Will mask out any SN with *no* unmasked spectra
-                            mask_sn = mask_spec.max(axis=-1).astype(bool)
-
-                            samples = samples[mask_sn, ...]
-                            title += "_masked"
-
-                            chain_data[title] = samples
-                            o.labels[title] = map_labels
-                            plot_cloud[title] = True
-                            smooth[title] = 0
-                            bins[title] = samples.shape[0]
-
-                        self.log.debug(f"Plotting {o.name}")
-                        if o.savepath is None:
-                            o.savepath = (
-                                self.paths.plots
-                                / str(self.seeds[0])
-                                / subset
-                                / str(seed)
-                            )
-                        o.savepath.mkdir(parents=True, exist_ok=True)
-                        DistributionPlotter.plot_corner(
-                            chain_data,
-                            o,
-                            statistics="max_central",
-                            shade_alpha=0,
-                            plot_cloud=plot_cloud,
-                            smooth=smooth,
-                            bins=bins,
-                        )
-
-                if self.analysis.plot_map_best is not None:
-                    if not isinstance(self.analysis.plot_map_best, list):
-                        self.analysis.plot_map_best = [self.analysis.plot_map_best]
-                    for opts in self.analysis.plot_map_best:
-                        o = opts.model_copy(deep=True)
-                        if o.name is None:
-                            o.name = "map_best"
-                        if o.plot_kwargs is None:
-                            o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
-                        title = o.plot_kwargs["title"]
-                        if o.labels is None:
-                            o.labels = {
-                                title: map_labels,
-                            }
-                        self.log.debug(f"Plotting {o.name}")
-                        if o.savepath is None:
-                            o.savepath = (
-                                self.paths.plots
-                                / str(self.seeds[0])
-                                / subset
-                                / str(seed)
-                            )
-                        o.savepath.mkdir(parents=True, exist_ok=True)
-                        chains = map_best_results
-                        DistributionPlotter.plot_corner(
-                            {title: chains},
-                            o,
-                            statistics="max_central",
-                        )
-
-                if self.analysis.plot_hmc is not None:
-                    if not isinstance(self.analysis.plot_hmc, list):
-                        self.analysis.plot_hmc = [self.analysis.plot_hmc]
-                    for opts in self.analysis.plot_hmc:
-                        o = opts.model_copy(deep=True)
-                        if o.name is None:
-                            o.name = "hmc"
-
-                        plot_cloud = {}
-                        smooth = {}
-                        bins = {}
-                        chain_data = {}
-
-                        if o.plot_kwargs is None:
-                            o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
-                        if o.labels is None:
-                            o.labels = {}
-                        title = o.plot_kwargs["title"]
-
-                        samples = results.hmc.samples
-                        chains = np.reshape(samples, (-1, samples.shape[-1]))
-                        chain_data[title] = chains
-                        o.labels[title] = hmc_labels
-
-                        if o.mean:
-                            chains = np.mean(samples, axis=0)
-                            chain_data[title + "_mean"] = chains
-                            o.labels[title + "_mean"] = hmc_labels
-                            plot_cloud[title + "_mean"] = True
-                            smooth[title + "_mean"] = 0
-                            bins[title + "_mean"] = chains.shape[0]
-
-                        if o.masked:
-                            (
-                                wl,
-                                amplitude,
-                                sigma,
-                                _sn_name,
-                                _time,
-                                mask,
-                                _sn_mask,
-                                _spec_mask,
-                                _wl_mask,
-                            ) = SpectraPlotter.prep(
-                                data,
-                                o,
-                                mask=input_mask,
-                                sn_mask=input_sn_mask,
-                                spec_mask=input_spec_mask,
-                                wl_mask=input_wl_mask,
-                            )
-
-                            # Determine which spectra to keep
-                            # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-                            mask_spec = mask.max(axis=-1)
-
-                            # Determine which SNe to keep
-                            # Will mask out any SN with *no* unmasked spectra
-                            mask_sn = mask_spec.max(axis=-1).astype(bool)
-
-                            samples = samples[:, mask_sn, :]
-                            title += "_masked"
-
-                            chains = np.reshape(samples, (-1, samples.shape[-1]))
-                            chain_data[title] = chains
-                            o.labels[title] = hmc_labels
-
-                        if o.mean and o.masked:
-                            chains = np.mean(samples, axis=0)
-                            chain_data[title + "_mean"] = chains
-                            o.labels[title + "_mean"] = hmc_labels
-                            plot_cloud[title + "_mean"] = True
-                            smooth[title + "_mean"] = 0
-                            bins[title + "_mean"] = chains.shape[0]
-
-                        o.mean = False
-
-                        if o.savepath is None:
-                            o.savepath = (
-                                self.paths.plots
-                                / str(self.seeds[0])
-                                / subset
-                                / str(seed)
-                            )
-                        o.savepath.mkdir(parents=True, exist_ok=True)
-                        self.log.debug(f"Plotting {o.name}")
-                        DistributionPlotter.plot_corner(
-                            chain_data,
-                            o,
-                            statistics="max_central",
-                            shade_alpha=0.0,
-                            plot_cloud=plot_cloud,
-                            smooth=smooth,
-                            bins=bins,
-                        )
-                        subset_hmc_samples[str(seed)] = chains
-
-                if self.analysis.plot_dispersion is not None:
-                    if not isinstance(self.analysis.plot_dispersion, list):
-                        self.analysis.plot_dispersion = [self.analysis.plot_dispersion]
-                    for opts in self.analysis.plot_dispersion:
-                        o = opts.model_copy(deep=True)
-                        if o.subset != subset:
-                            continue
-                        if o.name is None:
-                            o.name = "dispersion"
-                        if o.plot_kwargs is None:
-                            o.plot_kwargs = {"title": f"{subset}_{self.name}"}
-                        self.log.debug(f"Plotting {o.name}")
-                        if o.savepath is None:
-                            o.savepath = (
-                                self.paths.plots
-                                / str(self.seeds[0])
-                                / subset
-                                / str(seed)
-                            )
-                        o.savepath.mkdir(parents=True, exist_ok=True)
-
-                        twins = None
-                        if o.twins is not None:
-                            twins_path = self.data_dir / o.twins
-                            twins = pd.read_csv(twins_path, header=0)
-
-                        legacy_keys = {
-                            ("names", 0),
-                            ("redshift", 0),
-                            ("amplitude_mcmc", 0),
-                            ("amplitude_mcmc_err", 0),
-                            ("mask", 0),
-                        }
-                        legacy = {}
-                        for path in o.legacy or []:
-                            legacy_path = self.data_dir / path
-                            legacy_data = np.load(legacy_path, allow_pickle=True).item()
-                            legacy = {
-                                k: (
-                                    legacy_data[k]
-                                    if k not in legacy
-                                    else np.concatenate(
-                                        (legacy[k], legacy_data[k]), axis=axis
-                                    )
-                                )
-                                for (k, axis) in legacy_keys
-                            }
-
-                        if len(legacy) == 0:
-                            legacy = None
-
-                        DispersionPlotter.plot_dispersion(
-                            data,
-                            list(self.results[subset].values()),
-                            o,
-                            twins=twins,
-                            legacy=legacy,
-                            mask=input_mask,
-                            sn_mask=input_sn_mask,
-                            spec_mask=input_spec_mask,
-                            wl_mask=input_wl_mask,
-                        )
-
-            # === Subset Plots ===
-
-            if len(self.seeds) > 1:
-                if self.analysis.plot_map_init is not None:
-                    if not isinstance(self.analysis.plot_map_init, list):
-                        self.analysis.plot_map_init = [self.analysis.plot_map_init]
-                    for opts in self.analysis.plot_map_init:
-                        o = opts.model_copy(deep=True)
-                        if o.labels is None:
-                            o.labels = subset_map_labels
-                        if o.name is None:
-                            o.name = "map_init"
-                        self.log.debug(f"Plotting {o.name}")
-                        if o.savepath is None:
-                            o.savepath = self.paths.plots / str(self.seeds[0]) / subset
-                        o.savepath.mkdir(parents=True, exist_ok=True)
-                        DistributionPlotter.plot_corner(
-                            subset_map_init_results,
-                            o,
-                            statistics="max_central",
-                        )
-
-                if self.analysis.plot_map_best is not None:
-                    if not isinstance(self.analysis.plot_map_best, list):
-                        self.analysis.plot_map_best = [self.analysis.plot_map_best]
-                    for opts in self.analysis.plot_map_best:
-                        o = opts.model_copy(deep=True)
-                        if o.labels is None:
-                            o.labels = subset_map_labels
-                        if o.name is None:
-                            o.name = "map_best"
-                        self.log.debug(f"Plotting {o.name}")
-                        if o.savepath is None:
-                            o.savepath = self.paths.plots / str(self.seeds[0]) / subset
-                        o.savepath.mkdir(parents=True, exist_ok=True)
-                        DistributionPlotter.plot_corner(
-                            subset_map_best_results,
-                            o,
-                            statistics="max_central",
-                        )
-
-                if self.analysis.plot_hmc is not None:
-                    if not isinstance(self.analysis.plot_hmc, list):
-                        self.analysis.plot_hmc = [self.analysis.plot_hmc]
-                    for opts in self.analysis.plot_hmc:
-                        o = opts.model_copy(deep=True)
-                        if o.labels is None:
-                            o.labels = subset_hmc_labels
-                        if o.name is None:
-                            o.name = "hmc"
-                        self.log.debug(f"Plotting {o.name}")
-                        if o.savepath is None:
-                            o.savepath = self.paths.plots / str(self.seeds[0]) / subset
-                        o.savepath.mkdir(parents=True, exist_ok=True)
-                        o.mean = False
-                        DistributionPlotter.plot_corner(
-                            subset_hmc_samples,
-                            o,
-                            statistics="max_central",
-                        )
+                self._plot_dispersion(
+                    subset,
+                    seed,
+                    data,
+                    input_mask,
+                    input_sn_mask,
+                    input_spec_mask,
+                    input_wl_mask,
+                )
 
     @override
     def _clear(

@@ -10,7 +10,7 @@ from typing import (
 from tqdm.keras import TqdmCallback
 
 from supaernova._tf import JIT_COMPILE, ks, tf, tfp
-from supaernova.utils.tf import pp
+from supaernova.utils.tf import db, pp
 
 if TYPE_CHECKING:
     from typing import (
@@ -918,7 +918,7 @@ class TFPAEModel(ks.Model):
             loss_terms[self.delta_loss_tracker.name] = physical_latents_penalty
 
         if self.loss_covariance_penalty > 0:
-            eps = tf.constant(1e-10)
+            eps = tf.constant(ks.backend.epsilon())
             mask_latents = mask_sn
             n_unmasked_latents = tf.math.count_nonzero(
                 mask_latents[:, 0], dtype=tf.float32
@@ -1779,10 +1779,11 @@ class TFPAEModel(ks.Model):
         d_amp = tf.reshape(d_amp, [-1, wl_dim])
         recon_mask = tf.reshape(recon_mask, [-1, wl_dim])
 
-        amp_true = tf.clip_by_value(amp_true, 1e-3, tf.float32.max)
-        amp_pred = tf.clip_by_value(amp_pred, 1e-3, tf.float32.max)
-
-        error = tf.abs((amp_true - amp_pred) / amp_pred)
+        diff = amp_pred - amp_true
+        scale = tf.where(
+            amp_true == 0, ks.backend.epsilon() * tf.ones_like(amp_true), amp_true
+        )
+        error = tf.abs(diff / scale)
 
         bin_indices = tf.reshape(
             (
@@ -1813,11 +1814,10 @@ class TFPAEModel(ks.Model):
                 tf.where(bin_mask, bin_error * bin_error, tf.zeros_like(bin_error)),
                 axis=0,
             )
-            denominator = (
-                tf.math.count_nonzero(bin_mask, axis=0, dtype=tf.float32) + 1e-8
-            )
+            denominator = tf.math.count_nonzero(bin_mask, axis=0, dtype=tf.float32)
             rms_error = tf.sqrt(numerator / denominator)
             binned_error = binned_error.write(bin_id, rms_error)
 
         binned_error = tf.transpose(binned_error.stack())
+
         return binned_error, time_bin_edges, time_bin_centers

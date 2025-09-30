@@ -3,8 +3,6 @@ from typing import TYPE_CHECKING
 from supaernova._tf import tf
 from supaernova.utils.tf import db
 
-from .layers import REDUCE_SUM, REDUCE_MEAN
-
 if TYPE_CHECKING:
     from supaernova._tf import ks
 
@@ -23,4 +21,4 @@ def WHuber(
     linear_loss = model.loss_clip_delta * (error - 0.5 * model.loss_clip_delta)
     huber_loss = tf.where(cond, squared_loss, linear_loss)
 
-    return REDUCE_MEAN(REDUCE_SUM(huber_loss, axis=(-2, -1)))
+    return tf.reduce_mean(tf.reduce_sum(huber_loss, axis=(-2, -1)))

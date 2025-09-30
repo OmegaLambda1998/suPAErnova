@@ -65,17 +65,17 @@ class SpectraPlotter(Plotter):
         "npt.NDArray[float]",
         "npt.NDArray[str]",
         "npt.NDArray[float]",
-        "npt.NDArray[int]",
-        "npt.NDArray[int]",
-        "npt.NDArray[int]",
-        "npt.NDArray[int]",
+        "npt.NDArray[bool]",
+        "npt.NDArray[bool]",
+        "npt.NDArray[bool]",
+        "npt.NDArray[bool]",
     ]:
         wl = data.wavelength.copy()
         amplitude = data.amplitude.copy()
         sigma = data.sigma.copy()
         sn_name = data.sn_name.copy()
         time = data.time.copy()
-        input_mask = np.ones_like(data.mask) if mask is None else mask
+        input_mask = np.ones_like(data.mask, dtype=np.bool) if mask is None else mask
 
         # Wavelength Range Mask
         input_wl_mask = np.ones_like(input_mask) if wl_mask is None else wl_mask
@@ -85,24 +85,24 @@ class SpectraPlotter(Plotter):
                 value = getattr(data, key)
                 for comparison, constraint in constraints.items():
                     compare = CONSTRAINTS[comparison]
-                    input_wl_mask *= compare(value, constraint).astype(np.int32)
+                    input_wl_mask &= compare(value, constraint)
 
         data.clear()
 
         # Phase Range Mask
         input_spec_mask = (
-            input_wl_mask.max(axis=-1, keepdims=True)
+            input_wl_mask.any(axis=-1, keepdims=True)
             if spec_mask is None
             else spec_mask
         )
         # Redshift Range Mask
         input_sn_mask = (
-            input_spec_mask.max(axis=-2, keepdims=True) if sn_mask is None else sn_mask
+            input_spec_mask.any(axis=-2, keepdims=True) if sn_mask is None else sn_mask
         )
 
-        input_spec_mask *= input_wl_mask.max(axis=-1, keepdims=True)
-        input_sn_mask *= input_spec_mask.max(axis=-2, keepdims=True)
-        input_mask *= input_sn_mask * input_spec_mask * input_wl_mask
+        input_spec_mask &= input_wl_mask.any(axis=-1, keepdims=True)
+        input_sn_mask &= input_spec_mask.any(axis=-2, keepdims=True)
+        input_mask &= input_sn_mask & input_spec_mask * input_wl_mask
 
         return (
             wl,
