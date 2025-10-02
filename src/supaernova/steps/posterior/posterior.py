@@ -4,6 +4,7 @@ import importlib
 import numpy as np
 import pandas as pd
 
+from supaernova.analysis import Plotter
 from supaernova.steps.models import Model, ModelStep
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.configs.steps.data import DataStepResult
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 
     from numpy import typing as npt
 
+    from supaernova.analysis import Axis, Figure
     from supaernova.steps.pae import PAEModel, PAEStepResult
     from supaernova.steps.nflow import NFlowModel, NFlowStepResult
     from supaernova.configs.steps.data import LazySNPAEData, DataStepResult
@@ -644,11 +646,37 @@ class Posterior(ModelStep[PosteriorConfig]):
                             )
                             return False
 
+                if self.analysis.plot_comparison_array is not None:
+                    if not isinstance(self.analysis.plot_comparison_array, list):
+                        self.analysis.plot_comparison_array = [
+                            self.analysis.plot_comparison_array
+                        ]
+                    for opts in self.analysis.plot_comparison_array:
+                        name = "comparison_array" if opts.name is None else opts.name
+                        savepath = (
+                            self.paths.plots
+                            / str(self.seeds[0])
+                            / subset
+                            / str(seed)
+                            / f"{name}.{opts.ext}"
+                            if opts.savepath is None
+                            else opts.savepath
+                        )
+                        if not savepath.exists():
+                            self.log.debug(
+                                f"{self.name} is missing analyses as {savepath} does not exist"
+                            )
+                            return False
+
                 if self.analysis.plot_map_init is not None:
                     if not isinstance(self.analysis.plot_map_init, list):
                         self.analysis.plot_map_init = [self.analysis.plot_map_init]
                     for opts in self.analysis.plot_map_init:
                         name = "map_init" if opts.name is None else opts.name
+                        if opts.masked:
+                            name += "_masked"
+                        if opts.mean:
+                            name += "_mean"
                         savepath = (
                             self.paths.plots
                             / str(self.seeds[0])
@@ -669,6 +697,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                         self.analysis.plot_map_best = [self.analysis.plot_map_best]
                     for opts in self.analysis.plot_map_best:
                         name = "map_best" if opts.name is None else opts.name
+                        if opts.masked:
+                            name += "_masked"
+                        if opts.mean:
+                            name += "_mean"
                         savepath = (
                             self.paths.plots
                             / str(self.seeds[0])
@@ -689,6 +721,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                         self.analysis.plot_hmc = [self.analysis.plot_hmc]
                     for opts in self.analysis.plot_hmc:
                         name = "hmc" if opts.name is None else opts.name
+                        if opts.masked:
+                            name += "_masked"
+                        if opts.mean:
+                            name += "_mean"
                         savepath = (
                             self.paths.plots
                             / str(self.seeds[0])
@@ -792,11 +828,21 @@ class Posterior(ModelStep[PosteriorConfig]):
         input_sn_mask: "npt.NDArray[bool]",
         input_spec_mask: "npt.NDArray[bool]",
         input_wl_mask: "npt.NDArray[bool]",
-    ) -> None:
+        *,
+        figs: "list[Figure] | None" = None,
+        axes: "list[Axis] | None" = None,
+        save: bool = True,
+        force: bool = False,
+        decorate: bool = True,
+    ) -> list[tuple["Figure | None", "list[Axis] | None"]]:
+        rtn = []
         if self.analysis.plot_comparison is not None:
             if not isinstance(self.analysis.plot_comparison, list):
                 self.analysis.plot_comparison = [self.analysis.plot_comparison]
-            for opts in self.analysis.plot_comparison:
+            for i, opts in enumerate(self.analysis.plot_comparison):
+                fig = figs[i] if figs is not None else None
+                ax = axes[i] if axes is not None else None
+
                 o = opts.model_copy(deep=True)
                 if o.name is None:
                     o.name = "comparison"
@@ -804,12 +850,16 @@ class Posterior(ModelStep[PosteriorConfig]):
                     o.plot_kwargs = {
                         "title": f"{subset}_{self.name}_{o.name}",
                     }
-                self.log.debug(f"Plotting {o.name}")
                 if o.savepath is None:
                     o.savepath = (
                         self.paths.plots / str(self.seeds[0]) / subset / str(seed)
                     )
                 o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists() and not force:
+                    rtn.append((None, None))
+                    continue
+                if not force:
+                    self.log.debug(f"Plotting {o.name}")
 
                 (
                     wl,
@@ -943,9 +993,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                     )
                 )
 
-                o.plot_kwargs["label"] = (
-                    f"PAE\n(log prob: {mean_pae_log_prior:.2E} + {mean_pae_log_like:.2E} = {mean_pae_log_prob:.2E})"
-                )
+                if not force:
+                    o.plot_kwargs["label"] = (
+                        f"PAE\n(log prob: {mean_pae_log_prior:.2E} + {mean_pae_log_like:.2E} = {mean_pae_log_prob:.2E})"
+                    )
 
                 data.amplitude = pae_amplitude.numpy()
                 data.sigma = pae_sigma.numpy()
@@ -957,7 +1008,11 @@ class Posterior(ModelStep[PosteriorConfig]):
                     sn_mask=input_sn_mask,
                     spec_mask=input_spec_mask,
                     wl_mask=input_wl_mask,
+                    fig=fig,
+                    ax=ax,
                     save=False,
+                    force=force,
+                    decorate=decorate,
                 )
                 o.plot_base = False
 
@@ -1037,9 +1092,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                     )
                 )
 
-                o.plot_kwargs["label"] = (
-                    f"MAP\n(log prob: {mean_map_log_prior:.2E} + {mean_map_log_like:.2E} = {mean_map_log_prob:.2E})"
-                )
+                if not force:
+                    o.plot_kwargs["label"] = (
+                        f"MAP\n(log prob: {mean_map_log_prior:.2E} + {mean_map_log_like:.2E} = {mean_map_log_prob:.2E})"
+                    )
 
                 data.amplitude = map_amplitude.numpy()
                 data.sigma = map_sigma.numpy()
@@ -1054,6 +1110,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                     fig=fig,
                     ax=ax,
                     save=False,
+                    force=force,
+                    decorate=decorate,
                 )
 
                 # === Posterior ===
@@ -1132,23 +1190,127 @@ class Posterior(ModelStep[PosteriorConfig]):
                     )
                 )
 
-                o.plot_kwargs["label"] = (
-                    f"Posterior\n(log prob: {mean_pos_log_prior:.2E} + {mean_pos_log_like:.2E} = {mean_pos_log_prob:.2E})"
-                )
+                if not force:
+                    o.plot_kwargs["label"] = (
+                        f"Posterior\n(log prob: {mean_pos_log_prior:.2E} + {mean_pos_log_like:.2E} = {mean_pos_log_prob:.2E})"
+                    )
 
                 data.amplitude = pos_amplitude.numpy()
                 data.sigma = pos_sigma.numpy()
 
-                fig, ax = SpectraPlotter.plot_comparison(
-                    data,
-                    o,
-                    mask=input_mask,
-                    sn_mask=input_sn_mask,
-                    spec_mask=input_spec_mask,
-                    wl_mask=input_wl_mask,
-                    fig=fig,
-                    ax=ax,
+                rtn.append(
+                    SpectraPlotter.plot_comparison(
+                        data,
+                        o,
+                        mask=input_mask,
+                        sn_mask=input_sn_mask,
+                        spec_mask=input_spec_mask,
+                        wl_mask=input_wl_mask,
+                        fig=fig,
+                        ax=ax,
+                        save=save,
+                        force=force,
+                        decorate=decorate,
+                    )
                 )
+        return rtn
+
+    def _plot_comparison_array(
+        self: Self,
+        subset: str,
+        seed: int,
+        model: "TFPosteriorModel",
+        data: "LazySNPAEData",
+        input_mask: "npt.NDArray[bool]",
+        input_sn_mask: "npt.NDArray[bool]",
+        input_spec_mask: "npt.NDArray[bool]",
+        input_wl_mask: "npt.NDArray[bool]",
+    ) -> None:
+        if self.analysis.plot_comparison_array is not None:
+            if not isinstance(self.analysis.plot_comparison_array, list):
+                self.analysis.plot_comparison_array = [
+                    self.analysis.plot_comparison_array
+                ]
+            for opts in self.analysis.plot_comparison_array:
+                o = opts.model_copy(deep=True)
+                if o.name is None:
+                    o.name = "comparison_array"
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {
+                        "title": f"{subset}_{self.name}_{o.name}",
+                    }
+                self.log.debug(f"Plotting {o.name}")
+                if o.savepath is None:
+                    o.savepath = (
+                        self.paths.plots / str(self.seeds[0]) / subset / str(seed)
+                    )
+                o.savepath.mkdir(parents=True, exist_ok=True)
+
+                plot_types = []
+                if o.plot_best:
+                    plot_types.append("Best")
+                if o.plot_worst:
+                    plot_types.append("Worst")
+                if o.plot_mean:
+                    plot_types.append("Mean")
+                if o.plot_median:
+                    plot_types.append("Median")
+
+                n_plot_types = len(plot_types)
+                n_random_plots = o.plot_random
+                if o.plot_random == "auto":
+                    n_random_plots = 9 if n_plot_types == 0 else 0
+
+                n_plots = n_plot_types + n_random_plots
+
+                n_plots = np.square(np.ceil(np.sqrt(n_plots)))
+
+                if n_random_plots == 0:
+                    n_random_plots = n_plots - np.square(
+                        np.floor(np.sqrt(n_plot_types))
+                    )
+                    if n_random_plots == 0:
+                        n_plots = np.square(np.sqrt(n_plots) + 1)
+                        n_random_plots = n_plots - np.square(
+                            np.floor(np.sqrt(n_plot_types))
+                        )
+                n_plot_types = int(n_plot_types)
+                n_random_plots = int(n_random_plots)
+                n_plots = int(n_plots)
+
+                plot_types += ["Random"] * n_random_plots
+                plot_types += ["Blank"] * (n_plots - len(plot_types))
+
+                nrows = ncols = int(np.sqrt(n_plots))
+
+                supfig = Plotter.figure(scale=nrows)
+                subfigs = Plotter.subfig(supfig, nrows, ncols).flatten()
+                axes = []
+
+                for i, subfig in enumerate(subfigs):
+                    plot_type = plot_types[i]
+                    if plot_type == "Blank":
+                        continue
+                    fig, ax = self._plot_comparison(
+                        subset,
+                        seed,
+                        model,
+                        data,
+                        input_mask,
+                        input_sn_mask,
+                        input_spec_mask,
+                        input_wl_mask,
+                        figs=[subfig],
+                        save=False,
+                        force=True,
+                        decorate=False,
+                    )[-1]
+                    subfigs[i] = fig
+                    ax[0].set_title(plot_type)
+                    axes.extend(ax)
+                supfig.suptitle(o.plot_kwargs["title"])
+                supfig = Plotter.save(supfig, o.savepath / f"{o.name}.{o.ext}")
+                Plotter.close(supfig, axes)
 
     def _plot_map(
         self: Self,
@@ -1179,25 +1341,10 @@ class Posterior(ModelStep[PosteriorConfig]):
             for opts in analysis:
                 o = opts.model_copy(deep=True)
                 if o.name is None:
-                    o.name = "map_" + "init" if is_init else "best"
+                    o.name = "map_" + ("init" if is_init else "best")
 
-                plot_cloud = {}
-                smooth = {}
-                bins = {}
                 chain_data = {}
-
-                if o.plot_kwargs is None:
-                    o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
-                if o.labels is None:
-                    o.labels = {}
-                title = o.plot_kwargs["title"]
-
                 samples = map_results
-                chain_data[title] = samples
-                o.labels[title] = map_labels
-                plot_cloud[title] = True
-                smooth[title] = 0
-                bins[title] = samples.shape[0]
 
                 if o.masked:
                     (
@@ -1228,13 +1375,16 @@ class Posterior(ModelStep[PosteriorConfig]):
                     mask_sn = mask_spec.max(axis=-1).astype(bool)
 
                     samples = samples[mask_sn, ...]
-                    title += "_masked"
+                    o.name += "_masked"
 
-                    chain_data[title] = samples
-                    o.labels[title] = map_labels
-                    plot_cloud[title] = True
-                    smooth[title] = 0
-                    bins[title] = samples.shape[0]
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
+                if o.labels is None:
+                    o.labels = {}
+                title = o.plot_kwargs["title"]
+
+                chain_data[title] = samples
+                o.labels[title] = map_labels
 
                 self.log.debug(f"Plotting {o.name}")
                 if o.savepath is None:
@@ -1246,10 +1396,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                     chain_data,
                     o,
                     statistics="max_central",
-                    shade_alpha=0,
-                    plot_cloud=plot_cloud,
-                    smooth=smooth,
-                    bins=bins,
                 )
 
     def _plot_hmc(
@@ -1272,29 +1418,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                 if o.name is None:
                     o.name = "hmc"
 
-                plot_cloud = {}
-                smooth = {}
-                bins = {}
                 chain_data = {}
-
-                if o.plot_kwargs is None:
-                    o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
-                if o.labels is None:
-                    o.labels = {}
-                title = o.plot_kwargs["title"]
-
                 samples = results.hmc.samples
-                chains = np.reshape(samples, (-1, samples.shape[-1]))
-                chain_data[title] = chains
-                o.labels[title] = hmc_labels
-
-                if o.mean:
-                    chains = np.mean(samples, axis=0)
-                    chain_data[title + "_mean"] = chains
-                    o.labels[title + "_mean"] = hmc_labels
-                    plot_cloud[title + "_mean"] = True
-                    smooth[title + "_mean"] = 0
-                    bins[title + "_mean"] = chains.shape[0]
 
                 if o.masked:
                     (
@@ -1325,21 +1450,23 @@ class Posterior(ModelStep[PosteriorConfig]):
                     mask_sn = mask_spec.max(axis=-1).astype(bool)
 
                     samples = samples[:, mask_sn, :]
-                    title += "_masked"
+                    o.name += "_masked"
 
-                    chains = np.reshape(samples, (-1, samples.shape[-1]))
-                    chain_data[title] = chains
-                    o.labels[title] = hmc_labels
-
-                if o.mean and o.masked:
+                if o.mean:
+                    o.name += "_mean"
                     chains = np.mean(samples, axis=0)
-                    chain_data[title + "_mean"] = chains
-                    o.labels[title + "_mean"] = hmc_labels
-                    plot_cloud[title + "_mean"] = True
-                    smooth[title + "_mean"] = 0
-                    bins[title + "_mean"] = chains.shape[0]
-
+                else:
+                    chains = np.reshape(samples, (-1, samples.shape[-1]))
                 o.mean = False
+
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
+                if o.labels is None:
+                    o.labels = {}
+                title = o.plot_kwargs["title"]
+
+                chain_data[title] = chains
+                o.labels[title] = hmc_labels
 
                 if o.savepath is None:
                     o.savepath = (
@@ -1351,10 +1478,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                     chain_data,
                     o,
                     statistics="max_central",
-                    shade_alpha=0.0,
-                    plot_cloud=plot_cloud,
-                    smooth=smooth,
-                    bins=bins,
                 )
 
     def _plot_dispersion(
@@ -1440,58 +1563,42 @@ class Posterior(ModelStep[PosteriorConfig]):
 
                 map_init_results = []
                 map_best_results = []
-                map_labels = {}
+                labels = {}
                 ind = 0
+                if model.map.train_delta_m:
+                    labels[ind] = "Δℳ"
+                    map_init_results.append(results.map.init_delta_m)
+                    map_best_results.append(results.map.best_delta_m)
+                    ind += 1
+                if model.map.train_delta_p:
+                    labels[ind] = "Δp"
+                    map_init_results.append(results.map.init_delta_p)
+                    map_best_results.append(results.map.best_delta_p)
+                    ind += 1
                 if self.nflow.physical_latents:
+                    labels[ind] = "μΔAᵥ"
                     map_init_results.append(results.map.init_u_delta_av)
                     map_best_results.append(results.map.best_u_delta_av)
-                    map_labels[0] = "μΔAᵥ"
-                    ind = 1
-                for i in range(model.map.n_u_latents):
-                    map_labels[ind] = f"μ{i + 1}"
                     ind += 1
+                for i in range(model.map.n_u_latents):
+                    labels[ind + i] = f"μ{i + 1}"
                 map_init_results.append(results.map.init_u_latents)
                 map_best_results.append(results.map.best_u_latents)
-                if self.pae.physical_latents:
-                    map_init_results.append(results.map.init_delta_av)
-                    map_best_results.append(results.map.best_delta_av)
-                    map_labels[ind] = "ΔAᵥ"
-                    ind += 1
-                for i in range(model.map.n_z_latents):
-                    map_labels[ind] = f"z{i + 1}"
-                    ind += 1
-                map_init_results.append(results.map.init_z_latents)
-                map_best_results.append(results.map.best_z_latents)
-                if self.pae.physical_latents:
-                    map_init_results.extend((
-                        results.map.init_delta_m,
-                        results.map.init_delta_p,
-                    ))
-                    map_best_results.extend((
-                        results.map.best_delta_m,
-                        results.map.best_delta_p,
-                    ))
-                    map_labels[ind] = "Δℳ"
-                    ind += 1
-                    map_labels[ind] = "Δp"
                 map_init_results = np.concatenate(map_init_results, axis=-1)
                 map_best_results = np.concatenate(map_best_results, axis=-1)
 
-                hmc_labels = {}
-                hmc_ind = 0
-                if model.map.train_delta_m:
-                    hmc_labels[hmc_ind] = "Δℳ"
-                    hmc_ind += 1
-                if model.map.train_delta_p:
-                    hmc_labels[hmc_ind] = "Δp"
-                    hmc_ind += 1
-                if self.nflow.physical_latents:
-                    hmc_labels[hmc_ind] = "μΔAᵥ"
-                    hmc_ind += 1
-                for i in range(model.map.n_u_latents):
-                    hmc_labels[hmc_ind + i] = f"μ{i + 1}"
-
                 self._plot_comparison(
+                    subset,
+                    seed,
+                    model,
+                    data,
+                    input_mask,
+                    input_sn_mask,
+                    input_spec_mask,
+                    input_wl_mask,
+                )
+
+                self._plot_comparison_array(
                     subset,
                     seed,
                     model,
@@ -1511,7 +1618,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     input_spec_mask,
                     input_wl_mask,
                     map_init_results,
-                    map_labels,
+                    labels,
                     is_init=True,
                 )
 
@@ -1524,7 +1631,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     input_spec_mask,
                     input_wl_mask,
                     map_best_results,
-                    map_labels,
+                    labels,
                     is_init=False,
                 )
 
@@ -1537,7 +1644,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     input_sn_mask,
                     input_spec_mask,
                     input_wl_mask,
-                    hmc_labels,
+                    labels,
                 )
 
                 self._plot_dispersion(

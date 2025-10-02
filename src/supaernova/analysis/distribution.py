@@ -50,6 +50,7 @@ class DistributionPlotter(Plotter):
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
+            Plotter.close(fig, ax)
             return None, None
 
         labels = None

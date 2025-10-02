@@ -32,12 +32,14 @@ COLOURS = (
 
 mpl.use("Cairo")
 mpl.rcParams["axes.prop_cycle"] = cycler(color=COLOURS)
-
+width, height = mpl.rcParams["figure.figsize"]
+dpi = mpl.rcParams["figure.dpi"]
 
 if TYPE_CHECKING:
     from typing import Literal
     from collections.abc import Sequence
 
+    from numpy import typing as npt
     import pandas as pd
     from matplotlib.lines import Line2D
     from matplotlib.colors import Colormap, Normalize
@@ -86,8 +88,19 @@ class Plotter:
     ]
 
     @staticmethod
-    def figure(*args: "Any", **kwargs: "Any") -> "Figure":
-        return plt.figure(*args, **kwargs)
+    def figure(*args: "Any", scale: int = 1, **kwargs: "Any") -> "Figure":
+        return plt.figure(
+            *args,
+            figsize=(width * scale, height * scale),
+            layout="constrained",
+            **kwargs,
+        )
+
+    @staticmethod
+    def subfig(
+        fig: "Figure", nrows: int, ncols: int, *args: "Any", **kwargs: "Any"
+    ) -> "npt.NDArray[Figure]":
+        return fig.subfigures(nrows, ncols, *args, **kwargs)
 
     @staticmethod
     def axis(fig: "Figure", *args: "Any", **kwargs: "Any") -> "Axis":
@@ -314,8 +327,10 @@ class Plotter:
         return fig, ax
 
     @staticmethod
-    def save(fig: "Figure", savepath: "Path", *, clear: bool = True) -> "Figure":
-        fig.savefig(savepath, transparent=True, bbox_inches="tight", dpi=300)
+    def save(
+        fig: "Figure", savepath: "Path", *, clear: bool = True, scale: int = 3
+    ) -> "Figure":
+        fig.savefig(savepath, transparent=True, bbox_inches="tight", dpi=dpi * scale)
         if clear:
             fig, _ = Plotter.clear(fig=fig)
         return fig
@@ -335,9 +350,8 @@ class Plotter:
         if fig is not None:
             Plotter.clear(fig=fig)
         if ax is not None:
-            if not isinstance(ax, Iterable):
-                ax = [ax]
-            for a in ax:
+            axes = [ax] if not isinstance(ax, Iterable) else ax
+            for a in axes:
                 Plotter.clear(ax=a)
         if fig is not None:
             plt.close(fig)

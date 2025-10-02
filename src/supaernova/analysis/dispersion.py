@@ -49,27 +49,59 @@ class DispersionPlotter(Plotter):
             n_rows = 2
             n_cols = 2
             spectra_ax = Plotter.axis(fig_1, n_rows, n_cols, 1)
-            spectra_ax.tick_params("x", labelbottom=False)
-            spectra_hist_ax = Plotter.axis(fig_1, n_rows, n_cols, 2, sharey=spectra_ax)
-            spectra_hist_ax.tick_params("x", labelbottom=False)
-            spectra_hist_ax.tick_params("y", labelleft=False)
-            pull_ax = Plotter.axis(fig_1, n_rows, n_cols, 3, sharex=spectra_ax)
-            pull_hist_ax = Plotter.axis(
-                fig_1, n_rows, n_cols, 4, sharey=pull_ax, sharex=spectra_hist_ax
+            spectra_ax.tick_params("x", labelbottom=False, bottom=False)
+            spectra_hist_ax = Plotter.axis(
+                fig_1,
+                n_rows,
+                n_cols,
+                2,
+                sharey=spectra_ax,
             )
-            pull_hist_ax.tick_params("y", labelleft=False)
-            fig_1.subplots_adjust(hspace=0, wspace=0)
+            spectra_hist_ax.tick_params("x", labelbottom=False, bottom=False)
+            spectra_hist_ax.tick_params("y", labelleft=False, left=False)
+            pull_ax = Plotter.axis(
+                fig_1,
+                n_rows,
+                n_cols,
+                3,
+                sharex=spectra_ax,
+            )
+            pull_hist_ax = Plotter.axis(
+                fig_1,
+                n_rows,
+                n_cols,
+                4,
+                sharey=pull_ax,
+                sharex=spectra_hist_ax,
+            )
+            pull_hist_ax.tick_params("y", labelleft=False, left=False)
+            fig_1.get_layout_engine().set(
+                wspace=0, hspace=0, w_pad=0 / 72, h_pad=0 / 72
+            )
 
             if fig_2 is not None:
-                residual_ax = Plotter.axis(fig_2, n_rows, n_cols, 1)
-                residual_ax.tick_params("x", labelbottom=False)
-                residual_hist_ax = Plotter.axis(
-                    fig_2, n_rows, n_cols, 2, sharey=residual_ax
+                residual_ax = Plotter.axis(
+                    fig_2,
+                    n_rows,
+                    n_cols,
+                    1,
                 )
-                residual_hist_ax.tick_params("x", labelbottom=False)
-                residual_hist_ax.tick_params("y", labelleft=False)
+                residual_ax.tick_params("x", labelbottom=False, bottom=False)
+                residual_hist_ax = Plotter.axis(
+                    fig_2,
+                    n_rows,
+                    n_cols,
+                    2,
+                    sharey=residual_ax,
+                )
+                residual_hist_ax.tick_params("x", labelbottom=False, bottom=False)
+                residual_hist_ax.tick_params("y", labelleft=False, left=False)
                 legacy_pull_ax = Plotter.axis(
-                    fig_2, n_rows, n_cols, 3, sharex=residual_ax
+                    fig_2,
+                    n_rows,
+                    n_cols,
+                    3,
+                    sharex=residual_ax,
                 )
                 legacy_pull_hist_ax = Plotter.axis(
                     fig_2,
@@ -79,8 +111,10 @@ class DispersionPlotter(Plotter):
                     sharey=legacy_pull_ax,
                     sharex=residual_hist_ax,
                 )
-                legacy_pull_hist_ax.tick_params("y", labelleft=False)
-                fig_2.subplots_adjust(hspace=0, wspace=0)
+                legacy_pull_hist_ax.tick_params("y", labelleft=False, left=False)
+                fig_2.get_layout_engine().set(
+                    wspace=0, hspace=0, w_pad=0 / 72, h_pad=0 / 72
+                )
             else:
                 residual_ax = None
                 residual_hist_ax = None
@@ -639,7 +673,6 @@ class DispersionPlotter(Plotter):
 
         # fig_1.align_ylabels([spectra_ax, pull_ax])
         # fig_1.align_ylabels([spectra_hist_ax, pull_hist_ax])
-        spectra_ax.legend(bbox_to_anchor=(2.0, 1.0), ncols=1 if legacy is None else 2)
         fig_1.suptitle(
             (config.plot_kwargs or {}).get("title", config.name.capitalize())
         )
@@ -648,6 +681,18 @@ class DispersionPlotter(Plotter):
         pull_ax.set_ylabel("Pull")
         pull_ax.set_xlabel("z")
         pull_hist_ax.set_xlabel("PDF")
+
+        leg = spectra_ax.legend(
+            bbox_to_anchor=(2.0, 1.0), ncols=1 if legacy is None else 2
+        )
+        leg.set_in_layout(False)
+        # Trigger a draw so that constrained layout is executed once
+        # before we turn it off when printing....
+        fig_1.canvas.draw()
+        # We want the legend included in the bbox_inches='tight' calcs.
+        leg.set_in_layout(True)
+        # We don't want the layout to change at this point.
+        fig_1.set_layout_engine("none")
 
         fig_1 = Plotter.save(fig_1, savepath)
         Plotter.close(fig_1, [spectra_ax, spectra_hist_ax, pull_ax, pull_hist_ax])

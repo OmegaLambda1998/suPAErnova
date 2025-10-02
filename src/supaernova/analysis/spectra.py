@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy import typing as npt  # noqa: TC002
+from pydantic import PositiveInt  # noqa: TC002
 
 from .analysis import Plotter, AbstractPlot
 
@@ -38,7 +39,7 @@ class ComparisonArrayPlot(ComparisonPlot):
     plot_worst: bool = True
     plot_mean: bool = True
     plot_median: bool = True
-    plot_random: bool = True
+    plot_random: PositiveInt | Literal["auto"] = "auto"
 
 
 CONSTRAINTS = {
@@ -133,6 +134,7 @@ class SpectraPlotter(Plotter):
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
+            Plotter.close(fig, ax)
             return None, None
         (
             wl,
@@ -210,10 +212,18 @@ class SpectraPlotter(Plotter):
         cbar.set_label("Normalised Phase")
         ax.set_xlabel("Wavelength [Å]")
         ax.set_ylabel("Amplitude")
-        ax.legend(bbox_to_anchor=(1.0, 1.0))
         ax.set_title((config.plot_kwargs or {}).get("title", config.name.capitalize()))
         if y_max > 2:
             ax.set_yscale("symlog", linthresh=2, linscale=2)
+        leg = ax.legend(bbox_to_anchor=(1.0, 1.0))
+        leg.set_in_layout(False)
+        # Trigger a draw so that constrained layout is executed once
+        # before we turn it off when printing....
+        fig.canvas.draw()
+        # We want the legend included in the bbox_inches='tight' calcs.
+        leg.set_in_layout(True)
+        # We don't want the layout to change at this point.
+        fig.set_layout_engine("none")
         if save:
             fig = Plotter.save(fig, savepath)
             Plotter.close(fig, ax)
@@ -237,6 +247,7 @@ class SpectraPlotter(Plotter):
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
+            Plotter.close(fig, ax)
             return None, None
         (
             wl,
@@ -313,10 +324,18 @@ class SpectraPlotter(Plotter):
 
         ax.set_xlabel("Wavelength [Å]")
         ax.set_ylabel("Amplitude")
-        ax.legend(bbox_to_anchor=(1.0, 1.0))
         ax.set_title((config.plot_kwargs or {}).get("title", config.name.capitalize()))
         if np.abs(y_mean + y_std).max() > 1 or np.abs(y_mean - y_std).max() > 1:
             ax.set_yscale("symlog", linthresh=1, linscale=2)
+        leg = ax.legend(bbox_to_anchor=(1.0, 1.0))
+        leg.set_in_layout(False)
+        # Trigger a draw so that constrained layout is executed once
+        # before we turn it off when printing....
+        fig.canvas.draw()
+        # We want the legend included in the bbox_inches='tight' calcs.
+        leg.set_in_layout(True)
+        # We don't want the layout to change at this point.
+        fig.set_layout_engine("none")
         if save:
             fig = Plotter.save(fig, savepath)
             Plotter.close(fig, ax)
@@ -332,6 +351,7 @@ class SpectraPlotter(Plotter):
         ax: "Axis | None" = None,
         force: bool = False,
         save: bool = True,
+        decorate: bool = True,
         mask: "npt.NDArray[float] | None" = None,
         sn_mask: "npt.NDArray[float] | None" = None,
         spec_mask: "npt.NDArray[float] | None" = None,
@@ -340,6 +360,7 @@ class SpectraPlotter(Plotter):
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
+            Plotter.close(fig, ax)
             return None, None
         (
             wl,
@@ -373,12 +394,23 @@ class SpectraPlotter(Plotter):
         if fig is None:
             fig = Plotter.figure(fig)
         if ax is None:
-            spectra_ax = Plotter.axis(fig, 311)
-            residual_ax = Plotter.axis(fig, 312, sharex=spectra_ax)
-            pull_ax = Plotter.axis(fig, 313, sharex=residual_ax)
-            spectra_ax.tick_params("x", labelbottom=False)
-            residual_ax.tick_params("x", labelbottom=False)
-            fig.subplots_adjust(wspace=0, hspace=0)
+            spectra_ax = Plotter.axis(
+                fig,
+                311,
+            )
+            residual_ax = Plotter.axis(
+                fig,
+                312,
+                sharex=spectra_ax,
+            )
+            pull_ax = Plotter.axis(
+                fig,
+                313,
+                sharex=residual_ax,
+            )
+            spectra_ax.tick_params("x", labelbottom=False, bottom=False)
+            residual_ax.tick_params("x", labelbottom=False, bottom=False)
+            fig.get_layout_engine().set(wspace=0, hspace=0, w_pad=0 / 72, h_pad=0 / 72)
             ax = [spectra_ax, residual_ax, pull_ax]
         else:
             spectra_ax, residual_ax, pull_ax = ax
@@ -477,8 +509,6 @@ class SpectraPlotter(Plotter):
                 **kwargs,
             )
 
-        spectra_ax.set_ylabel("Amplitude")
-
         fig, residual_ax, _hline = Plotter.axhline(
             0, color="black", fig=fig, ax=residual_ax
         )
@@ -530,8 +560,10 @@ class SpectraPlotter(Plotter):
             **kwargs,
         )
 
-        residual_ax.set_ylabel("Residual")
-        if np.abs(y_residual_mean).max() > 0.01:
+        if (
+            np.abs(y_residual_mean + yerr_residual_mean).max() > 0.01
+            or np.abs(y_residual_mean - yerr_residual_mean).max() > 0.01
+        ):
             residual_ax.set_yscale("symlog", linthresh=0.01, linscale=2)
 
         fig, pull_ax, _hline = Plotter.axhline(1, color="black", fig=fig, ax=pull_ax)
@@ -548,19 +580,31 @@ class SpectraPlotter(Plotter):
             **kwargs,
         )
 
-        pull_ax.set_xlabel("Wavelength [Å]")
-        pull_ax.set_ylabel("Abs Pull")
         if y_pull_mean.max() > 25:
             pull_ax.set_yscale("symlog", linthresh=25, linscale=2)
 
-        spectra_ax.set_title(
-            (config.plot_kwargs or {}).get("title", config.name.capitalize())
-        )
-        spectra_ax.legend(bbox_to_anchor=(1.0, 1.0))
         if np.abs(y_mean + y_std).max() > 1 or np.abs(y_mean - y_std).max() > 1:
             spectra_ax.set_yscale("symlog", linthresh=1, linscale=2)
 
         fig.align_ylabels(ax)
+
+        if decorate:
+            spectra_ax.set_ylabel("Amplitude")
+            residual_ax.set_ylabel("Residual")
+            pull_ax.set_xlabel("Wavelength [Å]")
+            pull_ax.set_ylabel("Abs Pull")
+            spectra_ax.set_title(
+                (config.plot_kwargs or {}).get("title", config.name.capitalize())
+            )
+            leg = spectra_ax.legend(bbox_to_anchor=(1.0, 1.0))
+            leg.set_in_layout(False)
+            # Trigger a draw so that constrained layout is executed once
+            # before we turn it off when printing....
+            fig.canvas.draw()
+            # We want the legend included in the bbox_inches='tight' calcs.
+            leg.set_in_layout(True)
+            # We don't want the layout to change at this point.
+            fig.set_layout_engine("none")
 
         if save:
             fig = Plotter.save(fig, savepath)
