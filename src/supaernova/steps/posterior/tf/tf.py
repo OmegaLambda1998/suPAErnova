@@ -115,7 +115,6 @@ class TFPosteriorModel(ks.Model):
         )
         self.log_path: str = f"{'best' if self.save_best else 'latest'}_logs/"
 
-        self.input_error = config.input_error[self.subset]
         self.recon_error = config.recon_error[self.subset]
         self.recon_error_centers = config.recon_error_centers[self.subset]
 
@@ -364,7 +363,7 @@ class TFPosteriorModel(ks.Model):
             )
         )
 
-        synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (self.input_error**2))
+        synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (input_sigma**2))
 
         # Set missing values to 1 for all times
         synth_sigma = tf.where(posterior_mask, synth_sigma, tf.ones_like(synth_sigma))
@@ -379,9 +378,7 @@ class TFPosteriorModel(ks.Model):
         )
 
         log_likelihood = likelihood.log_prob(input_amp)
-        log_likelihood = tf.where(
-            mask_spec, log_likelihood, tf.zeros_like(log_likelihood)
-        )
+        log_likelihood = tf.where(mask_spec, log_likelihood, inf_prob)
 
         log_likelihood_num = tf.reduce_sum(
             tf.where(mask_spec, log_likelihood, tf.zeros_like(log_likelihood)), axis=-1

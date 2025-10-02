@@ -352,7 +352,6 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.wl_dim = data.wl_dim
 
         self.step_sizes = {}
-        self.input_error = {}
         self.recon_error = {}
         self.recon_error_centers = {}
         for subset in self.subsets:
@@ -393,7 +392,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                 stage.input_spec_mask,
                 stage.input_wl_mask,
             ))
-            self.input_error[subset] = stage.input_d_amp
             self.recon_error[subset] = recon_error
             self.recon_error_centers[subset] = recon_error_centers
 
