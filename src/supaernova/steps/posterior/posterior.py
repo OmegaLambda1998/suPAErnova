@@ -1243,14 +1243,11 @@ class Posterior(ModelStep[PosteriorConfig]):
                     log_prob = model.hmc.log_prob.numpy()
                     mean_log_prob = np.mean(log_prob, axis=0)
                     valid_log_prob = input_sn_mask[:, 0, 0] & np.isfinite(mean_log_prob)
-                    print("init", mean_log_prob, valid_log_prob)
                     if plot_type == "Best":
                         mean_log_prob[~valid_log_prob] = -np.inf
-                        print("best", mean_log_prob)
                         sn_mask = (mean_log_prob == mean_log_prob.max())[:, None, None]
                     elif plot_type == "Worst":
                         mean_log_prob[~valid_log_prob] = np.inf
-                        print("worst", mean_log_prob)
                         sn_mask = (mean_log_prob == mean_log_prob.min())[:, None, None]
                     elif plot_type == "Mean":
                         mean_log_prob[~valid_log_prob] = np.nan
@@ -1258,7 +1255,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                             mean_log_prob - np.nanmean(mean_log_prob)
                         )
                         mean_log_prob_dist[~valid_log_prob] = np.inf
-                        print("mean", mean_log_prob_dist)
                         sn_mask = (mean_log_prob_dist == mean_log_prob_dist.min())[
                             :, None, None
                         ]
@@ -1269,7 +1265,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                             - np.nanmedian(mean_log_prob[input_sn_mask[:, 0, 0]])
                         )
                         median_log_prob_dist[~valid_log_prob] = np.inf
-                        print("median", median_log_prob_dist)
                         sn_mask = (median_log_prob_dist == median_log_prob_dist.min())[
                             :, None, None
                         ]
@@ -1279,12 +1274,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                             - self.rng.choice(mean_log_prob[valid_log_prob])
                         )
                         random_log_prob_dist[~valid_log_prob] = np.inf
-                        print("random", random_log_prob_dist)
                         sn_mask = (random_log_prob_dist == random_log_prob_dist.min())[
                             :, None, None
                         ]
 
-                    print(plot_type, sn_mask[:, 0, 0])
                     lp = mean_log_prob[sn_mask[:, 0, 0]][0]
 
                     fig, ax = self._plot_comparison(
