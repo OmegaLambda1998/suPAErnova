@@ -162,6 +162,33 @@ class TFPosteriorModel(ks.Model):
                     self.sn_dim,
                 ),
             ),
+            tf.Variable(  # Log Prior
+                tf.convert_to_tensor(
+                    [[0] * self.sn_dim] * self.n_samples, dtype=tf.bool
+                ),
+                shape=(
+                    self.n_samples,
+                    self.sn_dim,
+                ),
+            ),
+            tf.Variable(  # Log Like
+                tf.convert_to_tensor(
+                    [[0] * self.sn_dim] * self.n_samples, dtype=tf.bool
+                ),
+                shape=(
+                    self.n_samples,
+                    self.sn_dim,
+                ),
+            ),
+            tf.Variable(  # Log Prob
+                tf.convert_to_tensor(
+                    [[0] * self.sn_dim] * self.n_samples, dtype=tf.bool
+                ),
+                shape=(
+                    self.n_samples,
+                    self.sn_dim,
+                ),
+            ),
             tf.Variable(  # UDeltaAv
                 tf.convert_to_tensor(
                     [[[0] * 1] * self.sn_dim] * self.n_samples, dtype=tf.float32
@@ -1760,7 +1787,7 @@ class TFPosteriorModel(ks.Model):
         *pos: tf.Tensor,
         sample: bool | None = None,
         pkr: "DualAveragingStepSizeAdaptationResults | None" = None,
-    ) -> tf.Tensor:
+    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
         if sample is None:
             sample = pkr is None
 
@@ -1802,39 +1829,59 @@ class TFPosteriorModel(ks.Model):
         if pkr is not None:
             self.update_run_progress(log_prior, log_like, log_prob, pkr)
 
-        return log_prob
+        return log_prior, log_like, log_prob
 
     def trace_fn(
         self: "Self", state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
-    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        self.unnormalized_posterior_log_prob(state, pkr=pkr)
+    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        log_prior, log_like, log_prob = self.unnormalized_posterior_log_prob(
+            state, pkr=pkr
+        )
         step_size = pkr.inner_results.step_size
         is_accepted = pkr.inner_results.is_accepted
         log_accept_ratio = pkr.inner_results.log_accept_ratio
-        return step_size, is_accepted, log_accept_ratio
+        return step_size, is_accepted, log_accept_ratio, log_prior, log_like, log_prob
 
     @tf.function
     def sample_chain(
         self: "Self",
         position: tf.Tensor,
         kernel: tfp.mcmc.TransitionKernel,
-    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        samples, [step_sizes_final, is_accepted, log_accept_ratio] = (
-            tfp.mcmc.sample_chain(
-                num_results=self.n_samples,
-                current_state=position,
-                kernel=kernel,
-                num_burnin_steps=self.n_burnin,
-                num_steps_between_results=self.n_thinning,
-                trace_fn=self.trace_fn,
-                name="run",
-                parallel_iterations=NPROC,
-            )
+    ) -> tuple[
+        tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor
+    ]:
+        (
+            samples,
+            [
+                step_sizes_final,
+                is_accepted,
+                log_accept_ratio,
+                log_prior,
+                log_like,
+                log_prob,
+            ],
+        ) = tfp.mcmc.sample_chain(
+            num_results=self.n_samples,
+            current_state=position,
+            kernel=kernel,
+            num_burnin_steps=self.n_burnin,
+            num_steps_between_results=self.n_thinning,
+            trace_fn=self.trace_fn,
+            name="run",
+            parallel_iterations=NPROC,
         )
 
         samples = self.map.constrain(samples)
 
-        return samples, step_sizes_final, is_accepted, log_accept_ratio
+        return (
+            samples,
+            step_sizes_final,
+            is_accepted,
+            log_accept_ratio,
+            log_prior,
+            log_like,
+            log_prob,
+        )
 
     def hmc_train(
         self: "Self",
@@ -1888,6 +1935,9 @@ class TFPosteriorModel(ks.Model):
                     tf.Variable(samples),
                     tf.Variable(self.hmc.step_sizes_final),
                     tf.Variable(self.hmc.is_accepted),
+                    tf.Variable(self.hmc.log_prior),
+                    tf.Variable(self.hmc.log_like),
+                    tf.Variable(self.hmc.log_prob),
                     tf.Variable(u_delta_av),
                     tf.Variable(u_latents),
                     tf.Variable(delta_av),
@@ -1944,9 +1994,15 @@ class TFPosteriorModel(ks.Model):
             target_accept_prob=self.target_acceptance_rate,
         )
 
-        samples, step_sizes_final, is_accepted, log_accept_ratio = self.sample_chain(
-            initial_position, kernel
-        )
+        (
+            samples,
+            step_sizes_final,
+            is_accepted,
+            log_accept_ratio,
+            log_prior,
+            log_like,
+            log_prob,
+        ) = self.sample_chain(initial_position, kernel)
 
         self.run_progress.close()
         self.run_progress = None
@@ -1956,11 +2012,22 @@ class TFPosteriorModel(ks.Model):
             self.summary_writer.close()
         self.summary_writer = None
 
-        samples, step_sizes_final, is_accepted, log_accept_ratio = (
+        (
+            samples,
+            step_sizes_final,
+            is_accepted,
+            log_accept_ratio,
+            log_prior,
+            log_like,
+            log_prob,
+        ) = (
             samples.numpy(),
             step_sizes_final.numpy(),
             is_accepted.numpy(),
             log_accept_ratio.numpy(),
+            log_prior.numpy(),
+            log_like.numpy(),
+            log_prob.numpy(),
         )
 
         ind = 0
@@ -2001,6 +2068,9 @@ class TFPosteriorModel(ks.Model):
             tf.Variable(samples),
             tf.Variable(step_sizes_final),
             tf.Variable(is_accepted),
+            tf.Variable(log_prior),
+            tf.Variable(log_like),
+            tf.Variable(log_prob),
             tf.Variable(u_delta_av),
             tf.Variable(u_latents),
             tf.Variable(delta_av),

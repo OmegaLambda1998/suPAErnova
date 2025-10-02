@@ -1291,6 +1291,9 @@ class Posterior(ModelStep[PosteriorConfig]):
                     plot_type = plot_types[i]
                     if plot_type == "Blank":
                         continue
+                    if plot_type == "Best":
+                        print(model.hmc.log_prob)
+
                     fig, ax = self._plot_comparison(
                         subset,
                         seed,

@@ -10,6 +10,9 @@ class PosteriorHMCValue(tf.Module):
         samples: tf.Variable,
         step_sizes_final: tf.Variable,
         is_accepted: tf.Variable,
+        log_prior: tf.Variable,
+        log_like: tf.Variable,
+        log_prob: tf.Variable,
         u_delta_av: tf.Variable,
         u_latents: tf.Variable,
         delta_av: tf.Variable,
@@ -20,6 +23,9 @@ class PosteriorHMCValue(tf.Module):
         self.samples: tf.Variable = samples
         self.step_sizes_final: tf.Variable = step_sizes_final
         self.is_accepted: tf.Variable = is_accepted
+        self.log_prior: tf.Variable = log_prior
+        self.log_like: tf.Variable = log_like
+        self.log_prob: tf.Variable = log_prob
 
         self.u_delta_av: tf.Variable = u_delta_av
         self.u_latents: tf.Variable = u_latents
