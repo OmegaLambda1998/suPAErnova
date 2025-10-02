@@ -1239,12 +1239,14 @@ class Posterior(ModelStep[PosteriorConfig]):
                     o.plot_kwargs = {
                         "title": f"{subset}_{self.name}_{o.name}",
                     }
-                self.log.debug(f"Plotting {o.name}")
                 if o.savepath is None:
                     o.savepath = (
                         self.paths.plots / str(self.seeds[0]) / subset / str(seed)
                     )
                 o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists():
+                    continue
+                self.log.debug(f"Plotting {o.name}")
 
                 plot_types = []
                 if o.plot_best:
@@ -1380,6 +1382,15 @@ class Posterior(ModelStep[PosteriorConfig]):
                     samples = samples[mask_sn, ...]
                     o.name += "_masked"
 
+                if o.savepath is None:
+                    o.savepath = (
+                        self.paths.plots / str(self.seeds[0]) / subset / str(seed)
+                    )
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists():
+                    continue
+                self.log.debug(f"Plotting {o.name}")
+
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
                 if o.labels is None:
@@ -1389,12 +1400,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                 chain_data[title] = samples
                 o.labels[title] = map_labels
 
-                self.log.debug(f"Plotting {o.name}")
-                if o.savepath is None:
-                    o.savepath = (
-                        self.paths.plots / str(self.seeds[0]) / subset / str(seed)
-                    )
-                o.savepath.mkdir(parents=True, exist_ok=True)
                 DistributionPlotter.plot_corner(
                     chain_data,
                     o,
@@ -1462,6 +1467,15 @@ class Posterior(ModelStep[PosteriorConfig]):
                     chains = np.reshape(samples, (-1, samples.shape[-1]))
                 o.mean = False
 
+                if o.savepath is None:
+                    o.savepath = (
+                        self.paths.plots / str(self.seeds[0]) / subset / str(seed)
+                    )
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists():
+                    continue
+                self.log.debug(f"Plotting {o.name}")
+
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
                 if o.labels is None:
@@ -1471,12 +1485,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                 chain_data[title] = chains
                 o.labels[title] = hmc_labels
 
-                if o.savepath is None:
-                    o.savepath = (
-                        self.paths.plots / str(self.seeds[0]) / subset / str(seed)
-                    )
-                o.savepath.mkdir(parents=True, exist_ok=True)
-                self.log.debug(f"Plotting {o.name}")
                 DistributionPlotter.plot_corner(
                     chain_data,
                     o,

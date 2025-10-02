@@ -711,7 +711,6 @@ class PAE(ModelStep[PAEConfig]):
                 o.plot_base = o.plot_base and plot_base
                 if o.name is None:
                     o.name = "comparison"
-                self.log.debug(f"Plotting {o.name}")
                 if o.savepath is None:
                     o.savepath = (
                         (
@@ -724,6 +723,11 @@ class PAE(ModelStep[PAEConfig]):
                         else Path(savepath)
                     )
                 o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists() and not force:
+                    rtn.append((None, None))
+                    continue
+                if not force:
+                    self.log.debug(f"Plotting {o.name}")
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {
                         "label": f"{dt}{self.name}_{stage.name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})",
@@ -794,7 +798,6 @@ class PAE(ModelStep[PAEConfig]):
                     o.labels = labels
                 if o.name is None:
                     o.name = "latents"
-                self.log.debug(f"Plotting {o.name}")
                 if o.savepath is None:
                     o.savepath = (
                         (
@@ -807,6 +810,9 @@ class PAE(ModelStep[PAEConfig]):
                         else Path(savepath)
                     )
                 o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists():
+                    continue
+                self.log.debug(f"Plotting {o.name}")
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {"title": f"{dt}{self.name}_{stage.name}"}
 

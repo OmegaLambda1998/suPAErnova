@@ -472,10 +472,12 @@ class NFlow(ModelStep[NFlowConfig]):
                     }
                 if o.name is None:
                     o.name = "u_latents"
-                self.log.debug(f"Plotting {o.name}")
                 if o.savepath is None:
                     o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
                 o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists():
+                    continue
+                self.log.debug(f"Plotting {o.name}")
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {"title": f"{dt}{self.name}"}
                 DistributionPlotter.plot_corner(
@@ -510,10 +512,12 @@ class NFlow(ModelStep[NFlowConfig]):
                     o.labels = {"z_latents": z_labels, "u_to_z_latents": z_labels}
                 if o.name is None:
                     o.name = "z_latents"
-                self.log.debug(f"Plotting {o.name}")
                 if o.savepath is None:
                     o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
                 o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists():
+                    continue
+                self.log.debug(f"Plotting {o.name}")
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {"title": f"{dt}{self.name}"}
                 DistributionPlotter.plot_corner(
@@ -546,10 +550,12 @@ class NFlow(ModelStep[NFlowConfig]):
                     }
                 if o.name is None:
                     o.name = "latents"
-                self.log.debug(f"Plotting {o.name}")
                 if o.savepath is None:
                     o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
                 o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists():
+                    continue
+                self.log.debug(f"Plotting {o.name}")
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {"title": f"{dt}{self.name}"}
                 DistributionPlotter.plot_corner(
@@ -605,12 +611,14 @@ class NFlow(ModelStep[NFlowConfig]):
                         }
                     if o.name is None:
                         o.name = f"step_{step}_latent_steps"
-                    self.log.debug(f"Plotting {o.name}")
                     if o.savepath is None:
                         o.savepath = (
                             self.paths.plots / dt[:-1] / str(self.seed) / "steps"
                         )
                     o.savepath.mkdir(parents=True, exist_ok=True)
+                    if (o.savepath / f"{o.name}.{o.ext}").exists():
+                        continue
+                    self.log.debug(f"Plotting {o.name}")
                     if o.plot_kwargs is None:
                         o.plot_kwargs = {"title": f"{dt}{self.name}"}
 
