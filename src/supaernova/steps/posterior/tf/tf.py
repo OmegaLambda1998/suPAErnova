@@ -164,7 +164,7 @@ class TFPosteriorModel(ks.Model):
             ),
             tf.Variable(  # Log Prior
                 tf.convert_to_tensor(
-                    [[0] * self.sn_dim] * self.n_samples, dtype=tf.bool
+                    [[0] * self.sn_dim] * self.n_samples, dtype=tf.float32
                 ),
                 shape=(
                     self.n_samples,
@@ -173,7 +173,7 @@ class TFPosteriorModel(ks.Model):
             ),
             tf.Variable(  # Log Like
                 tf.convert_to_tensor(
-                    [[0] * self.sn_dim] * self.n_samples, dtype=tf.bool
+                    [[0] * self.sn_dim] * self.n_samples, dtype=tf.float32
                 ),
                 shape=(
                     self.n_samples,
@@ -182,7 +182,7 @@ class TFPosteriorModel(ks.Model):
             ),
             tf.Variable(  # Log Prob
                 tf.convert_to_tensor(
-                    [[0] * self.sn_dim] * self.n_samples, dtype=tf.bool
+                    [[0] * self.sn_dim] * self.n_samples, dtype=tf.float32
                 ),
                 shape=(
                     self.n_samples,
