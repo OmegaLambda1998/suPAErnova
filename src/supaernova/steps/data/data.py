@@ -336,10 +336,12 @@ class Data(Step[DataConfig]):
             for opts in self.analysis.plot_spectra:
                 if opts.name is None:
                     opts.name = "spectra"
-                self.log.debug(f"Plotting {opts.name}")
                 if opts.savepath is None:
                     opts.savepath = self.paths.plots / str(self.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
+                if (opts.savepath / f"{opts.name}.{opts.ext}").exists():
+                    continue
+                self.log.debug(f"Plotting {opts.name}")
                 if opts.plot_kwargs is None:
                     opts.plot_kwargs = {"title": self.name}
                 SpectraPlotter.plot_spectra(
@@ -353,10 +355,12 @@ class Data(Step[DataConfig]):
             for opts in self.analysis.plot_summary:
                 if opts.name is None:
                     opts.name = "summary"
-                self.log.debug(f"Plotting {opts.name}")
                 if opts.savepath is None:
                     opts.savepath = self.paths.plots / str(self.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
+                if (opts.savepath / f"{opts.name}.{opts.ext}").exists():
+                    continue
+                self.log.debug(f"Plotting {opts.name}")
                 if opts.plot_kwargs is None:
                     opts.plot_kwargs = {"label": self.name}
                 SpectraPlotter.plot_summary(
@@ -370,10 +374,12 @@ class Data(Step[DataConfig]):
             for opts in self.analysis.plot_comparison:
                 if opts.name is None:
                     opts.name = "comparison"
-                self.log.debug(f"Plotting {opts.name}")
                 if opts.savepath is None:
                     opts.savepath = self.paths.plots / str(self.seed)
                 opts.savepath.mkdir(parents=True, exist_ok=True)
+                if (opts.savepath / f"{opts.name}.{opts.ext}").exists():
+                    continue
+                self.log.debug(f"Plotting {opts.name}")
                 if opts.plot_kwargs is None:
                     opts.plot_kwargs = {"label": self.name}
                 SpectraPlotter.plot_comparison(

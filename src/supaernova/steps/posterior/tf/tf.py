@@ -1787,13 +1787,14 @@ class TFPosteriorModel(ks.Model):
         *pos: tf.Tensor,
         sample: bool | None = None,
         pkr: "DualAveragingStepSizeAdaptationResults | None" = None,
-    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+        additional_outputs: bool = False,
+    ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
         if sample is None:
             sample = pkr is None
 
         def _step(
             position: tf.Tensor,
-        ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+        ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
             input_position = self.map.get_position(position)
             log_prob, log_like, log_prior, _, _ = self(
                 input_position,
@@ -1829,13 +1830,15 @@ class TFPosteriorModel(ks.Model):
         if pkr is not None:
             self.update_run_progress(log_prior, log_like, log_prob, pkr)
 
-        return log_prior, log_like, log_prob
+        if additional_outputs:
+            return log_prior, log_like, log_prob
+        return log_prob
 
     def trace_fn(
         self: "Self", state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
     ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         log_prior, log_like, log_prob = self.unnormalized_posterior_log_prob(
-            state, pkr=pkr
+            state, pkr=pkr, additional_outputs=True
         )
         step_size = pkr.inner_results.step_size
         is_accepted = pkr.inner_results.is_accepted
@@ -1852,14 +1855,14 @@ class TFPosteriorModel(ks.Model):
     ]:
         (
             samples,
-            [
+            (
                 step_sizes_final,
                 is_accepted,
                 log_accept_ratio,
                 log_prior,
                 log_like,
                 log_prob,
-            ],
+            ),
         ) = tfp.mcmc.sample_chain(
             num_results=self.n_samples,
             current_state=position,
