@@ -330,7 +330,7 @@ class TFPosteriorModel(ks.Model):
                 x_ref_min=self.recon_error_centers[0],
                 x_ref_max=self.recon_error_centers[-1],
                 y_ref=self.recon_error,
-                fill_value=tf.convert_to_tensor(np.inf),
+                fill_value=np.inf,
             )
         )
 
