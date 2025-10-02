@@ -352,6 +352,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.wl_dim = data.wl_dim
 
         self.step_sizes = {}
+        self.input_error = {}
         self.recon_error = {}
         self.recon_error_centers = {}
         for subset in self.subsets:
@@ -392,6 +393,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 stage.input_spec_mask,
                 stage.input_wl_mask,
             ))
+            self.input_error[subset] = stage.input_d_amp
             self.recon_error[subset] = recon_error
             self.recon_error_centers[subset] = recon_error_centers
 
@@ -741,7 +743,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                             return False
                 if self.analysis.plot_dispersion is not None:
                     if not isinstance(self.analysis.plot_dispersion, list):
-                        self.analysis.plot_hmc = [self.analysis.plot_dispersion]
+                        self.analysis.plot_dispersion = [self.analysis.plot_dispersion]
                     for opts in self.analysis.plot_dispersion:
                         name = "dispersion" if opts.name is None else opts.name
                         savepath = (
@@ -749,64 +751,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                             / str(self.seeds[0])
                             / subset
                             / str(seed)
-                            / f"{name}.{opts.ext}"
-                            if opts.savepath is None
-                            else opts.savepath
-                        )
-                        if not savepath.exists():
-                            self.log.debug(
-                                f"{self.name} is missing analyses as {savepath} does not exist"
-                            )
-                            return False
-
-            if len(self.seeds) > 1:
-                if self.analysis.plot_map_init is not None:
-                    if not isinstance(self.analysis.plot_map_init, list):
-                        self.analysis.plot_map_init = [self.analysis.plot_map_init]
-                    for opts in self.analysis.plot_map_init:
-                        name = "map_init" if opts.name is None else opts.name
-                        savepath = (
-                            self.paths.plots
-                            / str(self.seeds[0])
-                            / subset
-                            / f"{name}.{opts.ext}"
-                            if opts.savepath is None
-                            else opts.savepath
-                        )
-                        if not savepath.exists():
-                            self.log.debug(
-                                f"{self.name} is missing analyses as {savepath} does not exist"
-                            )
-                            return False
-
-                if self.analysis.plot_map_best is not None:
-                    if not isinstance(self.analysis.plot_map_best, list):
-                        self.analysis.plot_map_best = [self.analysis.plot_map_best]
-                    for opts in self.analysis.plot_map_best:
-                        name = "map_best" if opts.name is None else opts.name
-                        savepath = (
-                            self.paths.plots
-                            / str(self.seeds[0])
-                            / subset
-                            / f"{name}.{opts.ext}"
-                            if opts.savepath is None
-                            else opts.savepath
-                        )
-                        if not savepath.exists():
-                            self.log.debug(
-                                f"{self.name} is missing analyses as {savepath} does not exist"
-                            )
-                            return False
-
-                if self.analysis.plot_hmc is not None:
-                    if not isinstance(self.analysis.plot_hmc, list):
-                        self.analysis.plot_hmc = [self.analysis.plot_hmc]
-                    for opts in self.analysis.plot_hmc:
-                        name = "hmc" if opts.name is None else opts.name
-                        savepath = (
-                            self.paths.plots
-                            / str(self.seeds[0])
-                            / subset
                             / f"{name}.{opts.ext}"
                             if opts.savepath is None
                             else opts.savepath
@@ -1000,6 +944,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
                 data.amplitude = pae_amplitude.numpy()
                 data.sigma = pae_sigma.numpy()
+                data.sigma[~np.isfinite(data.sigma)] = 1e-7
 
                 fig, ax = SpectraPlotter.plot_comparison(
                     data,
@@ -1099,6 +1044,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
                 data.amplitude = map_amplitude.numpy()
                 data.sigma = map_sigma.numpy()
+                data.sigma[~np.isfinite(data.sigma)] = 1e-7
 
                 fig, ax = SpectraPlotter.plot_comparison(
                     data,
@@ -1197,6 +1143,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
                 data.amplitude = pos_amplitude.numpy()
                 data.sigma = pos_sigma.numpy()
+                data.sigma[~np.isfinite(data.sigma)] = 1e-7
 
                 rtn.append(
                     SpectraPlotter.plot_comparison(
@@ -1293,8 +1240,52 @@ class Posterior(ModelStep[PosteriorConfig]):
                     plot_type = plot_types[i]
                     if plot_type == "Blank":
                         continue
+                    log_prob = model.hmc.log_prob.numpy()
+                    mean_log_prob = np.mean(log_prob, axis=0)
+                    valid_log_prob = input_sn_mask[:, 0, 0] & np.isfinite(mean_log_prob)
+                    print("init", mean_log_prob, valid_log_prob)
                     if plot_type == "Best":
-                        print(model.hmc.log_prob)
+                        mean_log_prob[~valid_log_prob] = -np.inf
+                        print("best", mean_log_prob)
+                        sn_mask = (mean_log_prob == mean_log_prob.max())[:, None, None]
+                    elif plot_type == "Worst":
+                        mean_log_prob[~valid_log_prob] = np.inf
+                        print("worst", mean_log_prob)
+                        sn_mask = (mean_log_prob == mean_log_prob.min())[:, None, None]
+                    elif plot_type == "Mean":
+                        mean_log_prob[~valid_log_prob] = np.nan
+                        mean_log_prob_dist = np.abs(
+                            mean_log_prob - np.nanmean(mean_log_prob)
+                        )
+                        mean_log_prob_dist[~valid_log_prob] = np.inf
+                        print("mean", mean_log_prob_dist)
+                        sn_mask = (mean_log_prob_dist == mean_log_prob_dist.min())[
+                            :, None, None
+                        ]
+                    elif plot_type == "Median":
+                        mean_log_prob[~valid_log_prob] = np.nan
+                        median_log_prob_dist = np.abs(
+                            mean_log_prob
+                            - np.nanmedian(mean_log_prob[input_sn_mask[:, 0, 0]])
+                        )
+                        median_log_prob_dist[~valid_log_prob] = np.inf
+                        print("median", median_log_prob_dist)
+                        sn_mask = (median_log_prob_dist == median_log_prob_dist.min())[
+                            :, None, None
+                        ]
+                    else:
+                        random_log_prob_dist = np.abs(
+                            mean_log_prob
+                            - self.rng.choice(mean_log_prob[valid_log_prob])
+                        )
+                        random_log_prob_dist[~valid_log_prob] = np.inf
+                        print("random", random_log_prob_dist)
+                        sn_mask = (random_log_prob_dist == random_log_prob_dist.min())[
+                            :, None, None
+                        ]
+
+                    print(plot_type, sn_mask[:, 0, 0])
+                    lp = mean_log_prob[sn_mask[:, 0, 0]][0]
 
                     fig, ax = self._plot_comparison(
                         subset,
@@ -1302,7 +1293,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                         model,
                         data,
                         input_mask,
-                        input_sn_mask,
+                        sn_mask,
                         input_spec_mask,
                         input_wl_mask,
                         figs=[subfig],
@@ -1311,7 +1302,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                         decorate=False,
                     )[-1]
                     subfigs[i] = fig
-                    ax[0].set_title(plot_type)
+                    ax[0].set_title(plot_type + f" ({lp:.2E})")
                     axes.extend(ax)
                 supfig.suptitle(o.plot_kwargs["title"])
                 supfig = Plotter.save(supfig, o.savepath / f"{o.name}.{o.ext}")
@@ -1512,12 +1503,14 @@ class Posterior(ModelStep[PosteriorConfig]):
                     o.name = "dispersion"
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {"title": f"{subset}_{self.name}"}
-                self.log.debug(f"Plotting {o.name}")
                 if o.savepath is None:
                     o.savepath = (
                         self.paths.plots / str(self.seeds[0]) / subset / str(seed)
                     )
                 o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists():
+                    continue
+                self.log.debug(f"Plotting {o.name}")
 
                 twins = None
                 if o.twins is not None:

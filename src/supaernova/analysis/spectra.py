@@ -76,10 +76,12 @@ class SpectraPlotter(Plotter):
         sigma = data.sigma.copy()
         sn_name = data.sn_name.copy()
         time = data.time.copy()
-        input_mask = np.ones_like(data.mask, dtype=np.bool) if mask is None else mask
+        input_mask = (
+            np.ones_like(data.mask, dtype=np.bool) if mask is None else mask.copy()
+        )
 
         # Wavelength Range Mask
-        input_wl_mask = np.ones_like(input_mask) if wl_mask is None else wl_mask
+        input_wl_mask = np.ones_like(input_mask) if wl_mask is None else wl_mask.copy()
 
         if config.filter is not None:
             for key, constraints in config.filter.items():
@@ -94,11 +96,13 @@ class SpectraPlotter(Plotter):
         input_spec_mask = (
             input_wl_mask.any(axis=-1, keepdims=True)
             if spec_mask is None
-            else spec_mask
+            else spec_mask.copy()
         )
         # Redshift Range Mask
         input_sn_mask = (
-            input_spec_mask.any(axis=-2, keepdims=True) if sn_mask is None else sn_mask
+            input_spec_mask.any(axis=-2, keepdims=True)
+            if sn_mask is None
+            else sn_mask.copy()
         )
 
         input_spec_mask &= input_wl_mask.any(axis=-1, keepdims=True)
@@ -583,7 +587,12 @@ class SpectraPlotter(Plotter):
         if y_pull_mean.max() > 25:
             pull_ax.set_yscale("symlog", linthresh=25, linscale=2)
 
-        if np.abs(y_mean + y_std).max() > 1 or np.abs(y_mean - y_std).max() > 1:
+        if (
+            np.abs(y_mean + yerr_mean).max() > 1
+            or np.abs(y_mean - yerr_mean).max() > 1
+            or np.abs(y_mean + y_std).max() > 1
+            or np.abs(y_mean - y_std).max() > 1
+        ):
             spectra_ax.set_yscale("symlog", linthresh=1, linscale=2)
 
         fig.align_ylabels(ax)

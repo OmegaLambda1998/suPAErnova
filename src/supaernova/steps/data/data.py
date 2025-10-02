@@ -334,18 +334,19 @@ class Data(Step[DataConfig]):
             if not isinstance(self.analysis.plot_spectra, list):
                 self.analysis.plot_spectra = [self.analysis.plot_spectra]
             for opts in self.analysis.plot_spectra:
-                if opts.name is None:
-                    opts.name = "spectra"
-                if opts.savepath is None:
-                    opts.savepath = self.paths.plots / str(self.seed)
-                opts.savepath.mkdir(parents=True, exist_ok=True)
-                if (opts.savepath / f"{opts.name}.{opts.ext}").exists():
+                o = opts.model_copy(deep=True)
+                if o.name is None:
+                    o.name = "spectra"
+                if o.savepath is None:
+                    o.savepath = self.paths.plots / str(self.seed)
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists():
                     continue
-                self.log.debug(f"Plotting {opts.name}")
-                if opts.plot_kwargs is None:
-                    opts.plot_kwargs = {"title": self.name}
+                self.log.debug(f"Plotting {o.name}")
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"title": self.name}
                 SpectraPlotter.plot_spectra(
-                    self.results.data, opts, mask=self.results.data.mask
+                    self.results.data, o, mask=self.results.data.mask
                 )
 
     def _plot_summary(self: Self) -> None:
@@ -353,18 +354,19 @@ class Data(Step[DataConfig]):
             if not isinstance(self.analysis.plot_summary, list):
                 self.analysis.plot_summary = [self.analysis.plot_summary]
             for opts in self.analysis.plot_summary:
-                if opts.name is None:
-                    opts.name = "summary"
-                if opts.savepath is None:
-                    opts.savepath = self.paths.plots / str(self.seed)
-                opts.savepath.mkdir(parents=True, exist_ok=True)
-                if (opts.savepath / f"{opts.name}.{opts.ext}").exists():
+                o = opts.model_copy(deep=True)
+                if o.name is None:
+                    o.name = "summary"
+                if o.savepath is None:
+                    o.savepath = self.paths.plots / str(self.seed)
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists():
                     continue
-                self.log.debug(f"Plotting {opts.name}")
-                if opts.plot_kwargs is None:
-                    opts.plot_kwargs = {"label": self.name}
+                self.log.debug(f"Plotting {o.name}")
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"label": self.name}
                 SpectraPlotter.plot_summary(
-                    self.results.data, opts, mask=self.results.data.mask
+                    self.results.data, o, mask=self.results.data.mask
                 )
 
     def _plot_comparison(self: Self) -> None:
@@ -372,18 +374,19 @@ class Data(Step[DataConfig]):
             if not isinstance(self.analysis.plot_comparison, list):
                 self.analysis.plot_comparison = [self.analysis.plot_comparison]
             for opts in self.analysis.plot_comparison:
-                if opts.name is None:
-                    opts.name = "comparison"
-                if opts.savepath is None:
-                    opts.savepath = self.paths.plots / str(self.seed)
-                opts.savepath.mkdir(parents=True, exist_ok=True)
-                if (opts.savepath / f"{opts.name}.{opts.ext}").exists():
+                o = opts.model_copy(deep=True)
+                if o.name is None:
+                    o.name = "comparison"
+                if o.savepath is None:
+                    o.savepath = self.paths.plots / str(self.seed)
+                o.savepath.mkdir(parents=True, exist_ok=True)
+                if (o.savepath / f"{o.name}.{o.ext}").exists():
                     continue
-                self.log.debug(f"Plotting {opts.name}")
-                if opts.plot_kwargs is None:
-                    opts.plot_kwargs = {"label": self.name}
+                self.log.debug(f"Plotting {o.name}")
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"label": self.name}
                 SpectraPlotter.plot_comparison(
-                    self.results.data, opts, mask=self.results.data.mask
+                    self.results.data, o, mask=self.results.data.mask
                 )
 
     @override
@@ -944,6 +947,8 @@ class DataStep(Variant[DataStepConfig, Data]):
                 variant.analysis.plot_comparison = [variant.analysis.plot_comparison]
             for opts in variant.analysis.plot_comparison:
                 self._setup(*args, **{**kwargs, "variants": [opts.base]})
+                if opts.name is None:
+                    opts.name = "comparison"
                 name = f"{opts.name}.{opts.ext}"
                 self.bases[name] = self.bases.get(
                     name, {"wl": None, "amp": None, "sigma": None, "mask": None}
@@ -986,10 +991,14 @@ class DataStep(Variant[DataStepConfig, Data]):
         if variant.analysis.plot_summary is not None:
             for opts in variant.analysis.plot_summary:
                 o = opts.model_copy(deep=True)
+                if o.name is None:
+                    o.name = "summary"
                 name = f"{o.name}.{o.ext}"
                 self.plots[name] = self.plots.get(name, {"fig": None, "ax": None})
                 fig = self.plots[name]["fig"]
                 ax = self.plots[name]["ax"]
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"label": variant.name}
                 fig, ax = SpectraPlotter.plot_summary(
                     variant.results.data,
                     o,
@@ -1006,6 +1015,8 @@ class DataStep(Variant[DataStepConfig, Data]):
         if variant.analysis.plot_comparison is not None:
             for opts in variant.analysis.plot_comparison:
                 o = opts.model_copy(deep=True)
+                if o.name is None:
+                    o.name = "comparison"
                 name = f"{o.name}.{o.ext}"
                 self.plots[name] = self.plots.get(
                     name, {"fig": None, "ax": None, "base": True}
@@ -1013,6 +1024,8 @@ class DataStep(Variant[DataStepConfig, Data]):
                 fig = self.plots[name]["fig"]
                 ax = self.plots[name]["ax"]
                 o.plot_base = self.plots[name]["base"]
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"label": variant.name}
                 fig, ax = SpectraPlotter.plot_comparison(
                     variant.results.data,
                     o,

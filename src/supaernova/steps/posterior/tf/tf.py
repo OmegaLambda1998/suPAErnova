@@ -115,6 +115,7 @@ class TFPosteriorModel(ks.Model):
         )
         self.log_path: str = f"{'best' if self.save_best else 'latest'}_logs/"
 
+        self.input_error = config.input_error[self.subset]
         self.recon_error = config.recon_error[self.subset]
         self.recon_error_centers = config.recon_error_centers[self.subset]
 
@@ -349,6 +350,8 @@ class TFPosteriorModel(ks.Model):
         if self.map.train_delta_p:  # and not self.pae.physical_latents:
             delta_p = tf.expand_dims(delta_p, axis=-2)
             phase += delta_p
+        valid_phase = ((phase >= 0) & (phase <= 1))[..., 0]
+        mask_spec &= valid_phase
 
         # Measured average AE reconstruction error at current times
         sigma_recon = tf.transpose(
@@ -357,11 +360,11 @@ class TFPosteriorModel(ks.Model):
                 x_ref_min=self.recon_error_centers[0],
                 x_ref_max=self.recon_error_centers[-1],
                 y_ref=self.recon_error,
-                fill_value=np.inf,
+                fill_value=0.0,
             )
         )
 
-        synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (input_sigma**2))
+        synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (self.input_error**2))
 
         # Set missing values to 1 for all times
         synth_sigma = tf.where(posterior_mask, synth_sigma, tf.ones_like(synth_sigma))
