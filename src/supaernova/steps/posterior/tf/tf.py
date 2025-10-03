@@ -286,16 +286,11 @@ class TFPosteriorModel(ks.Model):
         # Will mask out any SN with *no* unmasked spectra
         mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
 
-        zero_prob = tf.zeros_like(mask_sn, dtype=tf.float32)
-        inf_prob = -tf.ones_like(mask_sn, dtype=tf.float32) * np.inf
-
         # Unconstrained -> Constrained
         input_position = self.map.constrain(input_position, full=True)
 
         # Determine the prior probability early to avoid exploring non-physical parameter spaces.
         log_prior = self.map.prior(input_position)
-
-        # log_prior = tf.where(mask_sn, log_prior, inf_prob)
 
         delta_m = input_position[..., 0:1]
         delta_p = input_position[..., 1:2]
@@ -378,7 +373,9 @@ class TFPosteriorModel(ks.Model):
         )
 
         log_likelihood = likelihood.log_prob(input_amp)
-        log_likelihood = tf.where(mask_spec, log_likelihood, inf_prob)
+        log_likelihood = tf.where(
+            mask_spec, log_likelihood, -np.inf * tf.ones_like(log_likelihood)
+        )
 
         log_likelihood_num = tf.reduce_sum(
             tf.where(mask_spec, log_likelihood, tf.zeros_like(log_likelihood)), axis=-1
@@ -393,14 +390,12 @@ class TFPosteriorModel(ks.Model):
 
         log_likelihood = log_likelihood_num / log_likelihood_sum
 
-        # log_likelihood = tf.where(valid_spectra, log_likelihood, inf_prob)
-
         log_probability = log_likelihood + log_prior
 
         log_probability = tf.where(
             tf.math.is_finite(log_probability),
             log_probability,
-            inf_prob,
+            -np.inf * tf.ones_like(log_probability),
         )
 
         if additional_outputs:
