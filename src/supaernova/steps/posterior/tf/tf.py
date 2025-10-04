@@ -344,8 +344,8 @@ class TFPosteriorModel(ks.Model):
         if self.map.train_delta_p:  # and not self.pae.physical_latents:
             delta_p = tf.expand_dims(delta_p, axis=-2)
             phase += delta_p
-        valid_phase = ((phase >= 0) & (phase <= 1))[..., 0]
-        mask_spec &= valid_phase
+        # valid_phase = ((phase >= 0) & (phase <= 1))[..., 0]
+        # mask_spec &= valid_phase
 
         # Measured average AE reconstruction error at current times
         sigma_recon = tf.transpose(

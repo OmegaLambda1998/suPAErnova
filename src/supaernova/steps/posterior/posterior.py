@@ -1200,8 +1200,16 @@ class Posterior(ModelStep[PosteriorConfig]):
                     plot_types.append("Worst")
                 if o.plot_mean:
                     plot_types.append("Mean")
+                if o.plot_max_delta_m:
+                    plot_types.append("Max DeltaM")
+                if o.plot_min_delta_m:
+                    plot_types.append("Min DeltaM")
                 if o.plot_median:
                     plot_types.append("Median")
+                if o.plot_max_delta_p:
+                    plot_types.append("Max DeltaP")
+                if o.plot_min_delta_p:
+                    plot_types.append("Min DeltaP")
 
                 n_plot_types = len(plot_types)
                 n_random_plots = o.plot_random
@@ -1238,9 +1246,19 @@ class Posterior(ModelStep[PosteriorConfig]):
                     plot_type = plot_types[i]
                     if plot_type == "Blank":
                         continue
+
                     log_prob = model.hmc.log_prob.numpy()
                     mean_log_prob = np.mean(log_prob, axis=0)
                     valid_log_prob = input_sn_mask[:, 0, 0] & np.isfinite(mean_log_prob)
+                    delta_m = model.hmc.delta_m.numpy()[..., 0]
+                    mean_delta_m = np.mean(delta_m, axis=0)
+                    delta_p = model.hmc.delta_p.numpy()[..., 0]
+                    mean_delta_p = np.mean(delta_p, axis=0)
+                    log_prior = model.hmc.log_prior.numpy()
+                    mean_log_prior = np.mean(log_prior, axis=0)
+                    log_like = model.hmc.log_like.numpy()
+                    mean_log_like = np.mean(log_like, axis=0)
+
                     if plot_type == "Best":
                         mean_log_prob[~valid_log_prob] = -np.inf
                         sn_mask = (mean_log_prob == mean_log_prob.max())[:, None, None]
@@ -1256,6 +1274,14 @@ class Posterior(ModelStep[PosteriorConfig]):
                         sn_mask = (mean_log_prob_dist == mean_log_prob_dist.min())[
                             :, None, None
                         ]
+                    elif plot_type == "Max DeltaM":
+                        dm = np.abs(mean_delta_m)
+                        dm[~valid_log_prob] = -np.inf
+                        sn_mask = (dm == dm.max())[:, None, None]
+                    elif plot_type == "Min DeltaM":
+                        dm = np.abs(mean_delta_m)
+                        dm[~valid_log_prob] = np.inf
+                        sn_mask = (dm == dm.min())[:, None, None]
                     elif plot_type == "Median":
                         mean_log_prob[~valid_log_prob] = np.nan
                         median_log_prob_dist = np.abs(
@@ -1266,6 +1292,14 @@ class Posterior(ModelStep[PosteriorConfig]):
                         sn_mask = (median_log_prob_dist == median_log_prob_dist.min())[
                             :, None, None
                         ]
+                    elif plot_type == "Max DeltaP":
+                        dp = np.abs(mean_delta_p)
+                        dp[~valid_log_prob] = -np.inf
+                        sn_mask = (dp == dp.max())[:, None, None]
+                    elif plot_type == "Min DeltaP":
+                        dp = np.abs(mean_delta_p)
+                        dp[~valid_log_prob] = np.inf
+                        sn_mask = (dp == dp.min())[:, None, None]
                     else:
                         random_log_prob_dist = np.abs(
                             mean_log_prob
@@ -1276,7 +1310,11 @@ class Posterior(ModelStep[PosteriorConfig]):
                             :, None, None
                         ]
 
-                    lp = mean_log_prob[sn_mask[:, 0, 0]][0]
+                    lp = mean_log_prior[sn_mask[:, 0, 0]][0]
+                    ll = mean_log_like[sn_mask[:, 0, 0]][0]
+                    lP = mean_log_prob[sn_mask[:, 0, 0]][0]
+                    dm = mean_delta_m[sn_mask[:, 0, 0]][0]
+                    dp = mean_delta_p[sn_mask[:, 0, 0]][0]
 
                     fig, ax = self._plot_comparison(
                         subset,
@@ -1293,7 +1331,9 @@ class Posterior(ModelStep[PosteriorConfig]):
                         decorate=False,
                     )[-1]
                     subfigs[i] = fig
-                    ax[0].set_title(plot_type + f" ({lp:.2E})")
+                    ax[0].set_title(
+                        plot_type + f" ({lp:.2E}+{ll:.2E}={lP:.2E}, {dm:.2E}, {dp:.2E})"
+                    )
                     axes.extend(ax)
                 supfig.suptitle(o.plot_kwargs["title"])
                 supfig = Plotter.save(supfig, o.savepath / f"{o.name}.{o.ext}")

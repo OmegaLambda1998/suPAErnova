@@ -38,7 +38,11 @@ class ComparisonArrayPlot(ComparisonPlot):
     plot_best: bool = True
     plot_worst: bool = True
     plot_mean: bool = True
+    plot_max_delta_m: bool = True
+    plot_min_delta_m: bool = True
     plot_median: bool = True
+    plot_max_delta_p: bool = True
+    plot_min_delta_p: bool = True
     plot_random: PositiveInt | Literal["auto"] = "auto"
 
 
@@ -588,12 +592,12 @@ class SpectraPlotter(Plotter):
             pull_ax.set_yscale("symlog", linthresh=25, linscale=2)
 
         if (
-            np.abs(y_mean + yerr_mean).max() > 1
-            or np.abs(y_mean - yerr_mean).max() > 1
-            or np.abs(y_mean + y_std).max() > 1
-            or np.abs(y_mean - y_std).max() > 1
+            np.abs(y_mean + yerr_mean).max() > 0.1
+            or np.abs(y_mean - yerr_mean).max() > 0.1
+            or np.abs(y_mean + y_std).max() > 0.1
+            or np.abs(y_mean - y_std).max() > 0.1
         ):
-            spectra_ax.set_yscale("symlog", linthresh=1, linscale=2)
+            spectra_ax.set_yscale("symlog", linthresh=0.1, linscale=2)
 
         fig.align_ylabels(ax)
 
