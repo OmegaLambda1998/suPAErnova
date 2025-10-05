@@ -389,6 +389,9 @@ class TFPosteriorModel(ks.Model):
         )
 
         log_likelihood = log_likelihood_num / log_likelihood_sum
+        log_likelihood = tf.where(
+            valid_spectra, log_likelihood, -np.inf * tf.ones_like(log_likelihood)
+        )
 
         log_probability = log_likelihood + log_prior
 
