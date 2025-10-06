@@ -649,21 +649,25 @@ class PosteriorMap(tf.Module):
             delta_m_log_prior = self.delta_m_prior.log_prob(delta_m)[:, 0]
         else:
             delta_m_log_prior = zero_prior
+        log_prior += delta_m_log_prior
 
         if self.use_delta_p_prior and self.train_delta_p:
             delta_p_log_prior = self.delta_p_prior.log_prob(delta_p)[:, 0]
         else:
             delta_p_log_prior = zero_prior
+        log_prior += delta_p_log_prior
 
         if self.use_bias_prior and self.train_bias:
             bias_log_prior = self.bias_prior.log_prob(bias)[:, 0]
         else:
             bias_log_prior = zero_prior
+        log_prior += bias_log_prior
 
         if self.use_u_delta_av_prior and self.nflow.physical_latents:
             u_delta_av_log_prior = self.u_delta_av_prior.log_prob(u_delta_av)[:, 0]
         else:
             u_delta_av_log_prior = zero_prior
+        log_prior += u_delta_av_log_prior
 
         u_latents_log_prior = self.u_latents_prior.log_prob(u_latents)
         if not self.use_u_latents_prior:
