@@ -269,24 +269,24 @@ class PosteriorConfig(BackendConfig):
     delta_av_mean: float = 0
     delta_av_std: float = 1
 
-    delta_m_min: float | None = -10
-    delta_m_max: float | None = 10
+    delta_m_min: float | None = -2.5
+    delta_m_max: float | None = 2.5
     delta_m_start: float = -0.5
     delta_m_end: float = 0.5
     delta_m_mean: float = 0
     delta_m_std: float = 1
     delta_m_prior: bool = False
 
-    delta_p_min: float | None = -10
-    delta_p_max: float | None = 10
+    delta_p_min: float | None = -2.5
+    delta_p_max: float | None = 2.5
     delta_p_start: float = -0.5
     delta_p_end: float = 0.5
     delta_p_mean: float = 0
     delta_p_std: float = 1
     delta_p_prior: bool = False
 
-    bias_min: float | None = -10
-    bias_max: float | None = 10
+    bias_min: float | None = -2.5
+    bias_max: float | None = 2.5
     bias_start: float = -0.5
     bias_end: float = 0.5
     bias_mean: float = 0
