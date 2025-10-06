@@ -126,7 +126,7 @@ class TFPosteriorModel(ks.Model):
         self.max_samples: int = self.options.max_samples
         self.run_to_burn_ratio: int = self.options.run_to_burn_ratio
         self.n_leapfrog: int = self.options.n_leapfrog
-        max_leapfrog = 2**self.n_leapfrog
+        max_leapfrog = (2**self.n_leapfrog) - 1
         num_steps = self.max_samples / max_leapfrog
         n_burnin = round(num_steps / (1 + self.run_to_burn_ratio))
         n_samples = round(
