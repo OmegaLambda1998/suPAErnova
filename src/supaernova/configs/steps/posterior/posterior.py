@@ -248,7 +248,7 @@ class PosteriorConfig(BackendConfig):
     max_iterations: PositiveInt = 2500
     max_line_search_iterations: PositiveInt | None = None
     num_correction_pairs: PositiveInt | None = None
-    target_acceptance_rate: PositiveFloat = 0.8
+    target_acceptance_rate: PositiveFloat = 0.651
 
     u_delta_av_min: float | None = -5
     u_delta_av_max: float | None = 5
