@@ -45,10 +45,6 @@ class NFlow(ModelStep[NFlowConfig]):
         self.kfold = self.options.kfold
         self.save_best: bool = self.options.save_best
         self.patience: float = self.options.patience
-        self.lr: float = self.options.lr
-        self.lr_decay_steps: float = self.options.lr_decay_steps
-        self.lr_decay_rate: float = self.options.lr_decay_rate
-        self.lr_weight_decay_rate: float | None = self.options.lr_weight_decay_rate
         self.repeats: int = self.options.repeats
         self.epochs: int = self.options.epochs
         self.batch_normalisation: bool = self.options.batch_normalisation

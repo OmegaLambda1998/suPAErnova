@@ -5,10 +5,6 @@ from supaernova._tf import tf
 from .utils import pf
 
 
-def pp(expression: object) -> None:
-    tf.print(pf(expression))
-
-
 def db(
     tensor: "tf.Tensor",
     name: str,
@@ -31,3 +27,10 @@ def db(
         print(msg)
     if debug:
         __import__("tensorflow").debugging.check_numerics(tensor, message=msg)
+
+
+def pp(expression: object, *, name: str | None = None) -> None:
+    if isinstance(expression, tf.Tensor):
+        db(expression, name or "Tensor", verbose=True, debug=False)
+    else:
+        tf.print(pf(expression))

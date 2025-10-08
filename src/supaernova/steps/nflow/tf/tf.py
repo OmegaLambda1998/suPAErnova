@@ -4,7 +4,8 @@ from typing import TYPE_CHECKING, Self, cast, override
 import numpy as np
 from tqdm.keras import TqdmCallback
 
-from supaernova._tf import ks, tf, tfb, tfd
+from supaernova._tf import JIT_COMPILE, ks, tf, tfb, tfd
+from supaernova.utils.tf import db, pp
 
 if TYPE_CHECKING:
     from typing import Any, Self
@@ -71,9 +72,9 @@ class TFNFlowModel(ks.Model):
         self.train_wl_mask: npt.NDArray[bool] = config.train_wl_mask
         input_train_mask = (
             self.train_data_mask
-            * self.train_sn_mask
-            * self.train_spec_mask
-            * self.train_wl_mask
+            & self.train_sn_mask
+            & self.train_spec_mask
+            & self.train_wl_mask
         )
         valid_wl_train_mask = tf.logical_not(
             tf.logical_and(tf.logical_not(input_train_mask), self.train_wl_mask)
@@ -90,9 +91,9 @@ class TFNFlowModel(ks.Model):
         self.test_wl_mask: npt.NDArray[bool] = config.test_wl_mask
         input_test_mask = (
             self.test_data_mask
-            * self.test_sn_mask
-            * self.test_spec_mask
-            * self.test_wl_mask
+            & self.test_sn_mask
+            & self.test_spec_mask
+            & self.test_wl_mask
         )
         valid_wl_test_mask = tf.logical_not(
             tf.logical_and(tf.logical_not(input_test_mask), self.test_wl_mask)
@@ -109,9 +110,9 @@ class TFNFlowModel(ks.Model):
         self.val_wl_mask: npt.NDArray[bool] = config.val_wl_mask
         input_val_mask = (
             self.val_data_mask
-            * self.val_sn_mask
-            * self.val_spec_mask
-            * self.val_wl_mask
+            & self.val_sn_mask
+            & self.val_spec_mask
+            & self.val_wl_mask
         )
         valid_wl_val_mask = tf.logical_not(
             tf.logical_and(tf.logical_not(input_val_mask), self.val_wl_mask)
@@ -139,10 +140,12 @@ class TFNFlowModel(ks.Model):
         self.log_path: str = f"{'best' if self.save_best else 'latest'}_logs/"
         self.patience: int = self.options.patience
 
-        self.lr: float = self.options.lr
-        self.lr_decay_steps: int = self.options.lr_decay_steps
-        self.lr_decay_rate: float = self.options.lr_decay_rate
-        self.lr_weight_decay_rate: float = self.options.lr_weight_decay_rate
+        # TODO: Softcode
+        self.lr: list[float] = [1e-4, 5e-5, 2.5e-5, 2e-5, 1.25e-5, 1e-5]
+        self.steps: list[int] = [500, 1500, 2500, 5000, 10000]
+
+        self.ema_steps: int = self.options.ema_steps
+        self.ema_momentum: float = self.options.ema_momentum
 
         self.activation: Callable[[tf.Tensor], tf.Tensor] | None = (
             self.options.activation_fn
@@ -266,21 +269,29 @@ class TFNFlowModel(ks.Model):
 
         # === Unpack Inputs ===
         latents = inputs[..., :-1]
+        # pp(latents, name="latents")
+
+        # u_latents = self.z_to_u(latents, permute=True)
+        # pp(u_latents, name="u_latents")
+
         mask = tf.cast(inputs[..., -1:][..., 0], tf.bool)
+        # pp(mask, name="mask")
 
         # === Calculate Log Probability ===
         log_prob = self.flow.log_prob(latents)
+        # pp(log_prob, name="log_prob")
 
         # Replace NaN and inf with infinitely low log prob
         inf_log_prob = -np.inf * tf.ones_like(log_prob)
         zero_log_prob = tf.zeros_like(log_prob)
 
         masked_log_prob = tf.where(mask, log_prob, zero_log_prob)
+        # pp(masked_log_prob, name="masked_log_prob")
 
         return tf.where(
             tf.math.is_finite(masked_log_prob),
             masked_log_prob,
-            inf_log_prob,
+            zero_log_prob,
         )
 
     def u_to_z(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
@@ -460,21 +471,27 @@ class TFNFlowModel(ks.Model):
         if not self.built:
             self.build(self.train_latents.shape)
 
-            if self._scheduler is not None:
-                schedule = self._scheduler(
-                    initial_learning_rate=self.lr,
-                    decay_steps=self.lr_decay_steps,
-                    decay_rate=self.lr_decay_rate,
-                )
-            else:
-                schedule = self.lr
+            schedule = ks.optimizers.schedules.PiecewiseConstantDecay(
+                self.steps, self.lr
+            )
             optimiser = self._optimiser(
                 learning_rate=schedule,
-                weight_decay=self.lr_weight_decay_rate,
+                beta_1=0.85,
+                beta_2=0.999,
+                amsgrad=True,
+                clipnorm=3,
+                use_ema=self.ema_steps > 0,
+                ema_momentum=self.ema_momentum,
+                ema_overwrite_frequency=self.ema_steps,
             )
 
             loss = self._loss
-            self.compile(optimizer=optimiser, loss=loss, run_eagerly=self.debug)
+            self.compile(
+                optimizer=optimiser,
+                loss=loss,
+                run_eagerly=self.debug,
+                jit_compile=JIT_COMPILE,
+            )
 
             self.built = True
 
@@ -482,7 +499,7 @@ class TFNFlowModel(ks.Model):
             (self.train_latents, tf.cast(self.train_mask, tf.float32)),
             axis=-1,
         )
-        self(train_data, training=False)
+        self(train_data)
         if self.debug:
             self.log.debug("Trainable variables:")
             for var in self.trainable_variables:

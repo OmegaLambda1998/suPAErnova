@@ -1,11 +1,11 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, Self, Literal, ClassVar, Annotated
+from typing import Any, Self, ClassVar, Annotated
 import importlib
 from collections.abc import Callable
 
 import numpy as np
 from numpy import typing as npt
-from pydantic import Field, PositiveInt, PositiveFloat, model_validator
+from pydantic import Field, PositiveInt, PositiveFloat, NonNegativeInt, model_validator
 
 from supaernova.configs.steps import StepResult, StepAnalysis
 from supaernova.configs.steps.pae import PAEStepConfig
@@ -89,13 +89,11 @@ class NFlowConfig(BackendConfig):
     save_best: bool = False
     repeats: PositiveInt = 1
 
-    lr: PositiveFloat = 0.00025
-    lr_decay_steps: PositiveInt = 250
-    lr_decay_rate: PositiveFloat = 0.95
-    lr_weight_decay_rate: PositiveFloat | None = None
+    ema_steps: NonNegativeInt = 0
+    ema_momentum: PositiveFloat = 0.999
 
-    epochs: PositiveInt = 10000
-    patience: PositiveFloat = 0.01
+    epochs: PositiveInt = 100000
+    patience: PositiveFloat = 2500
     batch_normalisation: bool = False
 
     min_redshift: float | None = None
