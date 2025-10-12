@@ -852,11 +852,11 @@ class Data(Step[DataConfig]):
         time = data["phase"][spec_mask]
         min_phase = time.min()
         if not np.isinf(self.min_phase):
-            min_phase = max(self.min_phase, min_phase)
+            min_phase = min(self.min_phase, min_phase)
         self.log.debug(f"{self.min_phase = }, {time.min() = }, {min_phase = }")
         max_phase = time.max()
         if not np.isinf(self.max_phase):
-            max_phase = min(self.max_phase, max_phase)
+            max_phase = max(self.max_phase, max_phase)
         self.log.debug(f"{self.max_phase = }, {time.max() = }, {max_phase = }")
         data["time"] = (data["phase"] - min_phase) / (max_phase - min_phase)
         data["time"][~spec_mask] = -np.inf

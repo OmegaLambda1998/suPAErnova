@@ -63,7 +63,7 @@ class AbstractPlot(BaseModel):
 
     name: str | None = None
     savepath: Path | None = None
-    ext: str = "png"
+    ext: str = "svg"
     plot_args: list[Any] | None = None
     plot_kwargs: dict[str, Any] | None = None
 

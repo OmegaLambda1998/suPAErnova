@@ -43,7 +43,8 @@ class ComparisonArrayPlot(ComparisonPlot):
     plot_median: bool = True
     plot_max_delta_p: bool = True
     plot_min_delta_p: bool = True
-    plot_random: PositiveInt | Literal["auto"] = "auto"
+    plot_names: list[str] | None = None
+    plot_random: PositiveInt | Literal["auto", "none"] = "auto"
 
 
 CONSTRAINTS = {
@@ -111,7 +112,7 @@ class SpectraPlotter(Plotter):
 
         input_spec_mask &= input_wl_mask.any(axis=-1, keepdims=True)
         input_sn_mask &= input_spec_mask.any(axis=-2, keepdims=True)
-        input_mask &= input_sn_mask & input_spec_mask * input_wl_mask
+        input_mask &= input_sn_mask & input_spec_mask & input_wl_mask
 
         return (
             wl,
@@ -134,10 +135,12 @@ class SpectraPlotter(Plotter):
         ax: "Axis | None" = None,
         force: bool = False,
         save: bool = True,
-        mask: "npt.NDArray[float] | None" = None,
-        sn_mask: "npt.NDArray[float] | None" = None,
-        spec_mask: "npt.NDArray[float] | None" = None,
-        wl_mask: "npt.NDArray[float] | None" = None,
+        mask: "npt.NDArray[bool] | None" = None,
+        sn_mask: "npt.NDArray[bool] | None" = None,
+        spec_mask: "npt.NDArray[bool] | None" = None,
+        wl_mask: "npt.NDArray[bool] | None" = None,
+        decorate: bool = True,
+        offset: int = 0,
         **kwargs: "Any",
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
@@ -167,7 +170,7 @@ class SpectraPlotter(Plotter):
 
         y_max = -np.inf
 
-        i = 0
+        i = 0 + offset
         for sn in range(n_sn):
             if input_sn_mask[sn, 0, 0]:
                 colours = Plotter.colour_maps[i % len(Plotter.colour_maps)]
@@ -180,7 +183,7 @@ class SpectraPlotter(Plotter):
                     ax=ax,
                     linestyle="-",
                     c=colours(0.5),
-                    label=sn_name[sn, 0, 0],
+                    label=sn_name[sn, 0, 0] + config.plot_kwargs.get("label", ""),
                     **kwargs,
                 )
                 for spec in range(n_spec):
@@ -195,7 +198,9 @@ class SpectraPlotter(Plotter):
                         y = y[order]
                         yerr = yerr[order]
                         if y.size > 0:
-                            y_max = max(y_max, np.abs(y).max())
+                            y_max = max(
+                                y_max, np.abs(y + yerr).max(), np.abs(y - yerr).max()
+                            )
 
                         (
                             fig,
@@ -210,19 +215,22 @@ class SpectraPlotter(Plotter):
                             yerr=yerr,
                             linestyle="-",
                             c=c,
+                            alpha=0.25,
                         )
 
-        fig, ax, cbar = Plotter.colourbar(
-            fig=fig,
-            ax=ax,
-            cmap=colours,
-        )
-        cbar.set_label("Normalised Phase")
+        if decorate:
+            fig, ax, cbar = Plotter.colourbar(
+                fig=fig,
+                ax=ax,
+                cmap=colours,
+            )
+            cbar.set_label("Normalised Phase")
         ax.set_xlabel("Wavelength [Å]")
         ax.set_ylabel("Amplitude")
         ax.set_title((config.plot_kwargs or {}).get("title", config.name.capitalize()))
-        if y_max > 2:
-            ax.set_yscale("symlog", linthresh=2, linscale=2)
+        symlog_max = 1
+        if y_max > symlog_max:
+            ax.set_yscale("symlog", linthresh=symlog_max, linscale=2)
         leg = ax.legend(bbox_to_anchor=(1.0, 1.0))
         leg.set_in_layout(False)
         # Trigger a draw so that constrained layout is executed once

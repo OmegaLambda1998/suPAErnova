@@ -18,7 +18,7 @@ from pydantic import (
 
 from supaernova.configs.base import BaseConfig
 from supaernova.configs.steps import StepResult, StepAnalysis
-from supaernova.analysis.spectra import ComparisonPlot, ComparisonArrayPlot
+from supaernova.analysis.spectra import SpectraPlot, ComparisonPlot, ComparisonArrayPlot
 from supaernova.configs.steps.pae import PAEStepConfig
 from supaernova.configs.steps.data import DataStepConfig
 from supaernova.analysis.dispersion import DispersionPlot
@@ -168,6 +168,7 @@ class PosteriorStepAnalysis(StepAnalysis):
     plot_hmc: DistributionPlot | list[DistributionPlot] | None = None
     plot_dispersion: DispersionPlot | list[DispersionPlot] | None = None
     plot_comparison: ComparisonPlot | list[ComparisonPlot] | None = None
+    plot_comparison_spectra: SpectraPlot | list[SpectraPlot] | None = None
     plot_comparison_array: ComparisonArrayPlot | list[ComparisonArrayPlot] | None = None
     # === Model Validators ===
     # --- Before ---
@@ -252,6 +253,8 @@ class PosteriorConfig(BackendConfig):
 
     u_delta_av_min: float | None = -10
     u_delta_av_max: float | None = 10
+    # u_delta_av_min: float | None = None
+    # u_delta_av_max: float | None = None
     u_delta_av_start: float = -0.5
     u_delta_av_end: float = 0.5
     u_delta_av_mean: float = 0
@@ -260,6 +263,8 @@ class PosteriorConfig(BackendConfig):
 
     u_latents_min: float | None = -10
     u_latents_max: float | None = 10
+    # u_latents_min: float | None = None
+    # u_latents_max: float | None = None
     u_latents_mean: float = 0
     u_latents_std: float = 1
     u_latents_prior: bool = True
@@ -271,6 +276,8 @@ class PosteriorConfig(BackendConfig):
 
     delta_m_min: float | None = -2.5
     delta_m_max: float | None = 2.5
+    # delta_m_min: float | None = None
+    # delta_m_max: float | None = None
     delta_m_start: float = -0.5
     delta_m_end: float = 0.5
     delta_m_mean: float = 0
@@ -279,6 +286,8 @@ class PosteriorConfig(BackendConfig):
 
     delta_p_min: float | None = -2.5
     delta_p_max: float | None = 2.5
+    # delta_p_min: float | None = None
+    # delta_p_max: float | None = None
     delta_p_start: float = -0.5
     delta_p_end: float = 0.5
     delta_p_mean: float = 0
@@ -287,6 +296,8 @@ class PosteriorConfig(BackendConfig):
 
     bias_min: float | None = -2.5
     bias_max: float | None = 2.5
+    # bias_min: float | None = None
+    # bias_max: float | None = None
     bias_start: float = -0.5
     bias_end: float = 0.5
     bias_mean: float = 0

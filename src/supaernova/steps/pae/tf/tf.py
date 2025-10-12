@@ -260,12 +260,6 @@ class TFPAEEncoder(ks.layers.Layer):
                 self.moving_means,
                 tf.zeros_like(self.moving_means),
             )
-            latents_mean = (
-                tf.reduce_sum(
-                    tf.where(mask_sn, latents, tf.zeros_like(latents)), axis=0
-                )
-                / n_unmasked_sn
-            )
 
         # Repeat latent layers across spec_dim
         return self.repeat_latent_layer(latents)
@@ -485,14 +479,15 @@ class TFPAEDecoder(ks.layers.Layer):
             colourlaw = self.colourlaw_layer(delta_av_latent, training=training)
             amplitude *= tf.pow(10.0, -0.4 * (colourlaw + delta_m_latent))
 
-        # Apply RELU activation function
-        # Clips negative amplitudes to 0
-        if not training:
+        if training:
+            # Zero out masked elements
+            masked_spectra = tf.math.reduce_any(input_mask, axis=-1, keepdims=True)
+            amplitude = tf.where(masked_spectra, amplitude, tf.zeros_like(amplitude))
+        else:
+            # Apply RELU activation function
+            # Clips negative amplitudes to 0
             amplitude = tf.nn.relu(amplitude)
-
-        # Zero out masked elements
-        masked_spectra = tf.math.reduce_any(input_mask, axis=-1, keepdims=True)
-        return tf.where(masked_spectra, amplitude, tf.zeros_like(amplitude))
+        return amplitude
 
     @override
     def __call__(
@@ -827,7 +822,7 @@ class TFPAEModel(ks.Model):
 
         # Determine which spectra to keep
         # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-        mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True)
+        mask_spec = tf.math.reduce_any(valid_wl_mask, axis=-1, keepdims=True)
 
         # The number of unmasked spectra
         n_unmasked_spec = tf.math.maximum(
@@ -1163,7 +1158,7 @@ class TFPAEModel(ks.Model):
             patience = int(self.stage.epochs * patience)
         callbacks.append(
             ks.callbacks.EarlyStopping(
-                monitor="val_loss_pred",
+                monitor="val_loss",
                 patience=patience,
                 mode="min",
                 start_from_epoch=patience,

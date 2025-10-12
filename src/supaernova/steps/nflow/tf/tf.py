@@ -142,7 +142,7 @@ class TFNFlowModel(ks.Model):
 
         # TODO: Softcode
         self.lr: list[float] = [1e-4, 5e-5, 2.5e-5, 2e-5, 1.25e-5, 1e-5]
-        self.steps: list[int] = [500, 1500, 2500, 5000, 10000]
+        self.steps: list[int] = [500, 1000, 2500, 5000, 10000]
 
         self.ema_steps: int = self.options.ema_steps
         self.ema_momentum: float = self.options.ema_momentum

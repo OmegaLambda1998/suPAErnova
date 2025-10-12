@@ -261,14 +261,17 @@ class TFPosteriorModel(ks.Model):
         # --- Masks ---
         # Data Mask
         input_mask = tf.ones_like(input_amp, dtype=tf.bool) if mask is None else mask
+
         # Wavelength Range Mask
         input_wl_mask = tf.ones_like(input_mask) if wl_mask is None else wl_mask
+
         # Phase Range Mask
         input_spec_mask = (
             tf.math.reduce_any(input_wl_mask, axis=-1, keepdims=True)
             if spec_mask is None
             else spec_mask
         )
+
         # Redshift Range Mask
         input_sn_mask = (
             tf.math.reduce_any(input_spec_mask, axis=-2, keepdims=True)
@@ -389,9 +392,9 @@ class TFPosteriorModel(ks.Model):
         )
 
         log_likelihood = log_likelihood_num / log_likelihood_sum
-        log_likelihood = tf.where(
-            valid_spectra, log_likelihood, -np.inf * tf.ones_like(log_likelihood)
-        )
+        # log_likelihood = tf.where(
+        #     valid_spectra, log_likelihood, -np.inf * tf.ones_like(log_likelihood)
+        # )
 
         log_probability = log_likelihood + log_prior
 
@@ -795,6 +798,34 @@ class TFPosteriorModel(ks.Model):
                                 f"z_{i + 1}",
                                 tf.boolean_mask(
                                     self.map.z_latents.best[..., i], converged
+                                ),
+                                step=chain,
+                            )
+                        unconstrained = self.map.unconstrain(self.map.position.best)
+                        j = 0
+                        tf.summary.histogram(
+                            "unconstrained/delta_m",
+                            tf.boolean_mask(unconstrained[..., j : j + 1], converged),
+                            step=chain,
+                        )
+                        j += 1
+                        tf.summary.histogram(
+                            "unconstrained/delta_p",
+                            tf.boolean_mask(unconstrained[..., j : j + 1], converged),
+                            step=chain,
+                        )
+                        j += 1
+                        tf.summary.histogram(
+                            "unconstrained/u_delta_av",
+                            tf.boolean_mask(unconstrained[..., j : j + 1], converged),
+                            step=chain,
+                        )
+                        j += 1
+                        for i in range(self.map.n_u_latents):
+                            tf.summary.histogram(
+                                f"unconstrained/u_{i + 1}",
+                                tf.boolean_mask(
+                                    unconstrained[..., j + i : j + i + 1], converged
                                 ),
                                 step=chain,
                             )
@@ -1799,14 +1830,11 @@ class TFPosteriorModel(ks.Model):
         self.log.debug("Running HMC")
         initial_position = self.map.unconstrain(self.map.position.best)
         step_size_init = self.map.unconstrain(self.step_size)
-        tf.print(step_size_init)
         step_size_std = tf.math.reduce_std(initial_position, axis=0)
         step_size_std = tf.where(
             tf.math.is_finite(step_size_std), step_size_std, step_size_init
         )
-        tf.print(step_size_std)
-        step_size_inner = tf.math.sqrt(step_size_init * step_size_std)
-        tf.print(step_size_inner)
+        step_size_inner = tf.math.maximum(step_size_init, step_size_std)
         step_size = tf.repeat(
             tf.expand_dims(step_size_inner, axis=0),
             repeats=initial_position.shape[0],

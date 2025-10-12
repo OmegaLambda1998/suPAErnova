@@ -187,12 +187,12 @@ class DispersionPlotter(Plotter):
         )
 
         # Determine which spectra to keep
-        # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-        mask_spec = input_mask.max(axis=-1)
+        # Will mask out any spectrum without at least one masked wavelength within the valid wavelength range
+        mask_spec = np.any(input_mask, axis=-1)
 
         # Determine which SNe to keep
         # Will mask out any SN with *no* unmasked spectra
-        mask_sn = mask_spec.max(axis=-1)
+        mask_sn = np.any(mask_spec, axis=-1)
 
         pae_order = np.argsort(pae_redshift)
         pae_redshift = pae_redshift[pae_order]
@@ -207,20 +207,27 @@ class DispersionPlotter(Plotter):
             [np.mean(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
             axis=0,
         )[..., 0][..., pae_order]
+        print(f"{pae_amplitudes = }")
 
         pae_amplitude_stds = np.concatenate(
-            [
-                np.sqrt(np.square(np.std(hmc.hmc.delta_m, axis=0, keepdims=True)))
-                for hmc in hmcs
-            ],
+            [np.std(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
             axis=0,
         )[..., 0][..., pae_order]
+        print(f"{pae_amplitude_stds = }")
+
+        pae_log_prob = np.concatenate([hmc.hmc.log_prob for hmc in hmcs], axis=0)[
+            ..., pae_order
+        ]
+        print(f"{pae_log_prob = }")
 
         pae_weights = 1 / (pae_amplitude_stds * pae_amplitude_stds)
+        print(f"{pae_weights = }")
+
         pae_weighted_sum = pae_weights.sum(axis=0)
         pae_weighted_amplitudes = (pae_weights * pae_amplitudes).sum(
             axis=0
         ) / pae_weighted_sum
+        print(f"{pae_weighted_amplitudes = }")
 
         pae_n_iter = len(hmcs)
         pae_n_eff = 1 if pae_n_iter == 1 else pae_n_iter / (pae_n_iter - 1)
@@ -229,17 +236,20 @@ class DispersionPlotter(Plotter):
             (pae_weights * pae_amplitudes * pae_amplitudes).sum(axis=0)
             / pae_weighted_sum
         ) - (pae_weighted_amplitudes * pae_weighted_amplitudes)
+        print(f"{pae_weighted_variance = }")
 
         pae_weighted_deviations = np.sqrt(pae_n_eff * np.abs(pae_weighted_variance))
+        print(f"{pae_weighted_deviations = }")
 
         pae_weighted_stds = np.sqrt(
             pae_weighted_deviations * pae_weighted_deviations
             + pae_magshift_error * pae_magshift_error
         )
+        print(f"{pae_weighted_stds = }")
 
-        pae_twins_mask = np.ones_like(pae_mask)
+        pae_twins_mask = np.ones_like(pae_mask, dtype=bool)
         if twins is not None:
-            pae_twins_mask = np.zeros_like(pae_mask)
+            pae_twins_mask = np.zeros_like(pae_mask, dtype=bool)
             twins_names = twins.name
             pae_intersection = set(pae_names) & set(twins_names)
             for name in pae_intersection:
@@ -417,9 +427,9 @@ class DispersionPlotter(Plotter):
         pae_y = pae_weighted_amplitudes
         pae_yerr = pae_weighted_stds
         no_plot_mask = None
-        sn_plot_mask = pae_mask.astype(bool)
-        twins_plot_mask = pae_twins_mask.astype(bool)
-        combined_plot_mask = (pae_mask * pae_twins_mask).astype(bool)
+        sn_plot_mask = pae_mask
+        twins_plot_mask = pae_twins_mask
+        combined_plot_mask = pae_mask & pae_twins_mask
 
         residual_max = np.log10(np.max(np.abs(pae_y[combined_plot_mask])))
         residual_scale_min = np.floor(residual_max)
@@ -449,6 +459,14 @@ class DispersionPlotter(Plotter):
             5 * residual_scale + 1.5 * residual_step,
             residual_step,
         )
+
+        max_pull = np.abs(
+            np.abs(np.abs(pae_y) / pae_yerr)
+            - np.max(np.abs((np.abs(pae_y) / pae_yerr)[combined_plot_mask]))
+        )
+        # print(max_pull)
+        # print(max_pull < 1e-3)
+        # print(pae_names[max_pull < 1e-3])
 
         pull_max = np.log10(
             np.max(np.abs((np.abs(pae_y) / pae_yerr)[combined_plot_mask]))
