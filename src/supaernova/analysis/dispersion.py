@@ -3,6 +3,8 @@ from pathlib import Path
 
 import numpy as np
 
+from supaernova.utils import max_central, jackknife_resample
+
 from .spectra import SpectraPlot, SpectraPlotter
 from .analysis import Plotter, scale_lightness
 
@@ -203,31 +205,62 @@ class DispersionPlotter(Plotter):
 
         pae_names = sn_name[:, 0, 0][pae_order]
 
-        pae_amplitudes = np.concatenate(
-            [np.mean(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
-            axis=0,
-        )[..., 0][..., pae_order]
-        print(f"{pae_amplitudes = }")
+        pae_amplitudes = []
+        pae_amplitude_errs_lower = []
+        pae_amplitude_stds = []
+        pae_amplitude_errs_upper = []
+        for i, hmc in enumerate(hmcs):
+            amplitudes = []
+            amplitude_errs_lower = []
+            amplitude_stds = []
+            amplitude_errs_upper = []
+            for sn in range(hmc.hmc.delta_m.shape[1]):
+                name = f"{i}_{sn}"
+                delta_m = hmc.hmc.delta_m[:, sn, 0]
+                lower, center, upper = max_central(delta_m)
+                amplitudes.append(center)
+                amplitude_errs_lower.append(lower)
+                amplitude_stds.append(np.sqrt(np.abs(lower * upper)))
+                amplitude_errs_upper.append(upper)
+            pae_amplitudes.append(np.array(amplitudes))
+            pae_amplitude_errs_lower.append(np.array(amplitude_errs_lower))
+            pae_amplitude_stds.append(np.array(amplitude_stds))
+            pae_amplitude_errs_upper.append(np.array(amplitude_errs_upper))
 
-        pae_amplitude_stds = np.concatenate(
-            [np.std(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
-            axis=0,
-        )[..., 0][..., pae_order]
-        print(f"{pae_amplitude_stds = }")
+        pae_amplitudes = np.vstack(pae_amplitudes)[..., pae_order]
+        pae_amplitude_errs_lower = np.vstack(pae_amplitude_errs_lower)[..., pae_order]
+        pae_amplitude_stds = np.vstack(pae_amplitude_stds)[..., pae_order]
+        pae_amplitude_errs_upper = np.vstack(pae_amplitude_errs_upper)[..., pae_order]
 
-        pae_log_prob = np.concatenate([hmc.hmc.log_prob for hmc in hmcs], axis=0)[
-            ..., pae_order
-        ]
-        print(f"{pae_log_prob = }")
+        # pae_amplitudes = np.vstack(
+        #     [np.mean(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
+        # )[..., 0][..., pae_order]
+        #
+        # pae_amplitude_stds = np.vstack(
+        #     [np.std(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
+        # )[..., 0][..., pae_order]
 
-        pae_weights = 1 / (pae_amplitude_stds * pae_amplitude_stds)
-        print(f"{pae_weights = }")
+        pae_weights = 1 / np.clip(pae_amplitude_stds * pae_amplitude_stds, 1e-7, np.inf)
 
         pae_weighted_sum = pae_weights.sum(axis=0)
         pae_weighted_amplitudes = (pae_weights * pae_amplitudes).sum(
             axis=0
         ) / pae_weighted_sum
-        print(f"{pae_weighted_amplitudes = }")
+
+        pae_weighted_amplitude_errs_lower = (
+            pae_weights * pae_amplitude_errs_lower
+        ).sum(axis=0) / pae_weighted_sum
+        pae_weighted_amplitude_errs_lower = np.sqrt(
+            pae_weighted_amplitude_errs_lower * pae_weighted_amplitude_errs_lower
+            + pae_magshift_error * pae_magshift_error
+        )
+        pae_weighted_amplitude_errs_upper = (
+            pae_weights * pae_amplitude_errs_upper
+        ).sum(axis=0) / pae_weighted_sum
+        pae_weighted_amplitude_errs_upper = np.sqrt(
+            pae_weighted_amplitude_errs_upper * pae_weighted_amplitude_errs_upper
+            + pae_magshift_error * pae_magshift_error
+        )
 
         pae_n_iter = len(hmcs)
         pae_n_eff = 1 if pae_n_iter == 1 else pae_n_iter / (pae_n_iter - 1)
@@ -236,16 +269,13 @@ class DispersionPlotter(Plotter):
             (pae_weights * pae_amplitudes * pae_amplitudes).sum(axis=0)
             / pae_weighted_sum
         ) - (pae_weighted_amplitudes * pae_weighted_amplitudes)
-        print(f"{pae_weighted_variance = }")
 
         pae_weighted_deviations = np.sqrt(pae_n_eff * np.abs(pae_weighted_variance))
-        print(f"{pae_weighted_deviations = }")
 
         pae_weighted_stds = np.sqrt(
             pae_weighted_deviations * pae_weighted_deviations
             + pae_magshift_error * pae_magshift_error
         )
-        print(f"{pae_weighted_stds = }")
 
         pae_twins_mask = np.ones_like(pae_mask, dtype=bool)
         if twins is not None:
@@ -273,6 +303,8 @@ class DispersionPlotter(Plotter):
             hist: bool = True,
             y_prime: "npt.NDArray[Any] | None" = None,
             yerr_prime: "npt.NDArray[Any] | None" = None,
+            yerr_lower: "npt.NDArray[Any] | None" = None,
+            yerr_upper: "npt.NDArray[Any] | None" = None,
         ) -> tuple[
             tuple["Figure", "Figure | None"],
             tuple[
@@ -303,13 +335,28 @@ class DispersionPlotter(Plotter):
                 x = x[mask]
                 y = y[mask]
                 yerr = yerr[mask]
+                if yerr_lower is not None and yerr_upper is not None:
+                    yerr_lower = yerr_lower[mask]
+                    yerr_upper = yerr_upper[mask]
                 y_prime = y_prime[mask] if y_prime is not None else None
                 yerr_prime = yerr_prime[mask] if yerr_prime is not None else None
 
-            k = 1.4826
+            pull_y = np.abs(y)
+            pull_yerr = yerr
+            if yerr_lower is not None and yerr_upper is not None:
+                pull_yerr = np.abs(np.where(y > 0, yerr_lower, yerr_upper))
+                yerr = (yerr_lower, yerr_upper)
 
-            w_rms = np.std(y, axis=0)
-            w_nmad = k * np.median(np.abs(y - np.median(y, axis=0)))
+            w_rms_jackknife = jackknife_resample(y, np.std)
+            w_rms = np.mean(w_rms_jackknife)
+            w_rms_std = np.std(w_rms_jackknife)
+
+            k = 1.4826
+            w_nmad_jackknife = k * jackknife_resample(
+                y, lambda a: np.median(np.abs(a - np.median(a, axis=0)))
+            )
+            w_nmad = np.mean(w_nmad_jackknife)
+            w_nmad_std = np.std(w_nmad_jackknife)
 
             fig_1, s_ax, _ebar = Plotter.errorbar(
                 x,
@@ -320,7 +367,7 @@ class DispersionPlotter(Plotter):
                 color=color,
                 marker=marker,
                 alpha=alpha,
-                label=f"{title}\n{np.size(y)} SN\nRMS: {w_rms:.3f}\nNMAD: {w_nmad:.3f}",
+                label=f"{title}\n{np.size(y)} SN\nRMS: {w_rms:.3f}±{w_rms_std:.3f}\nNMAD: {w_nmad:.3f}±{w_nmad_std:.3f}",
             )
             if hist:
                 fig_1, s_h_ax, _hist = Plotter.hist(
@@ -340,7 +387,7 @@ class DispersionPlotter(Plotter):
             )
             fig_1, p_ax, _ebar = Plotter.errorbar(
                 x,
-                np.abs(y) / yerr,
+                pull_y / pull_yerr,
                 fig=fig_1,
                 ax=p_ax,
                 color=color,
@@ -349,7 +396,7 @@ class DispersionPlotter(Plotter):
             )
             if hist:
                 fig_1, p_h_ax, _hist = Plotter.hist(
-                    np.abs(y) / yerr,
+                    pull_y / pull_yerr,
                     bins=pull_bins,
                     norm=True,
                     orientation="horizontal",
@@ -361,8 +408,15 @@ class DispersionPlotter(Plotter):
 
             if (y_prime is not None) and (yerr_prime is not None):
                 y_residual = y - y_prime
-                err = np.sqrt(yerr * yerr + yerr_prime * yerr_prime)
-                y_pull = np.abs(y_residual) / err
+                if isinstance(yerr, tuple):
+                    err = (
+                        np.sqrt(yerr[0] * yerr[0] + yerr_prime * yerr_prime),
+                        np.sqrt(yerr[1] * yerr[1] + yerr_prime * yerr_prime),
+                    )
+                else:
+                    err = np.sqrt(yerr * yerr + yerr_prime * yerr_prime)
+                pull_err = np.sqrt(pull_yerr * pull_yerr + yerr_prime * yerr_prime)
+                y_pull = np.abs(y_residual) / pull_err
 
                 fig_2, r_ax, _ebar = Plotter.errorbar(
                     x,
@@ -426,6 +480,8 @@ class DispersionPlotter(Plotter):
         pae_x = pae_redshift
         pae_y = pae_weighted_amplitudes
         pae_yerr = pae_weighted_stds
+        pae_yerr_lower = pae_weighted_amplitude_errs_lower
+        pae_yerr_upper = pae_weighted_amplitude_errs_upper
         no_plot_mask = None
         sn_plot_mask = pae_mask
         twins_plot_mask = pae_twins_mask
@@ -460,17 +516,13 @@ class DispersionPlotter(Plotter):
             residual_step,
         )
 
-        max_pull = np.abs(
-            np.abs(np.abs(pae_y) / pae_yerr)
-            - np.max(np.abs((np.abs(pae_y) / pae_yerr)[combined_plot_mask]))
-        )
-        # print(max_pull)
-        # print(max_pull < 1e-3)
-        # print(pae_names[max_pull < 1e-3])
+        pull_y = np.abs(pae_y)
+        yerr = np.where(pae_y > 0, pae_yerr_lower, pae_yerr_upper)
+        pull_yerr = np.abs(yerr)
+        max_pull = np.max((pull_y / pull_yerr)[combined_plot_mask])
+        print(max_pull, pae_names[np.abs((pull_y / pull_yerr) - max_pull) < 1e-3])
 
-        pull_max = np.log10(
-            np.max(np.abs((np.abs(pae_y) / pae_yerr)[combined_plot_mask]))
-        )
+        pull_max = np.log10(max_pull)
         pull_scale_min = np.floor(pull_max)
         pull_scale_max = np.ceil(pull_max)
         pull_scale = 10 ** (
@@ -624,6 +676,8 @@ class DispersionPlotter(Plotter):
             pull_bins=pull_bins,
             y_prime=legacy_y,
             yerr_prime=legacy_yerr,
+            yerr_lower=pae_yerr_lower,
+            yerr_upper=pae_yerr_upper,
         )
 
         if twins is not None:
@@ -643,6 +697,8 @@ class DispersionPlotter(Plotter):
                 pull_bins=pull_bins,
                 y_prime=legacy_y,
                 yerr_prime=legacy_yerr,
+                yerr_lower=pae_yerr_lower,
+                yerr_upper=pae_yerr_upper,
             )
 
             # === Twins Mask ===
@@ -661,6 +717,8 @@ class DispersionPlotter(Plotter):
                 pull_bins=pull_bins,
                 y_prime=legacy_y,
                 yerr_prime=legacy_yerr,
+                yerr_lower=pae_yerr_lower,
+                yerr_upper=pae_yerr_upper,
             )
 
         # === Combined Mask ===
@@ -679,18 +737,18 @@ class DispersionPlotter(Plotter):
             pull_bins=pull_bins,
             y_prime=legacy_y,
             yerr_prime=legacy_yerr,
+            yerr_lower=pae_yerr_lower,
+            yerr_upper=pae_yerr_upper,
         )
         spectra_ax.set_ylim(
-            -1.1 * np.abs((pae_y - pae_yerr)[combined_plot_mask].min()),
-            1.1 * np.abs(pae_y + pae_yerr)[combined_plot_mask].max(),
+            -1.1 * np.abs((pae_y - yerr)[combined_plot_mask].min()),
+            1.1 * np.abs(pae_y + yerr)[combined_plot_mask].max(),
         )
         pull_ax.set_ylim(
             0,
-            1.1 * np.abs(pae_y / pae_yerr)[combined_plot_mask].max(),
+            1.1 * np.abs(pae_y / yerr)[combined_plot_mask].max(),
         )
 
-        # fig_1.align_ylabels([spectra_ax, pull_ax])
-        # fig_1.align_ylabels([spectra_hist_ax, pull_hist_ax])
         fig_1.suptitle(
             (config.plot_kwargs or {}).get("title", config.name.capitalize())
         )
@@ -730,13 +788,12 @@ class DispersionPlotter(Plotter):
             residual_ax.set_ylabel("Residual")
 
             residual_ax.set_ylim(
-                -1.1
-                * np.abs(((pae_y - legacy_y) - pae_yerr)[combined_plot_mask].min()),
-                1.1 * np.abs((pae_y - legacy_y) + pae_yerr)[combined_plot_mask].max(),
+                -1.1 * np.abs(((pae_y - legacy_y) - yerr)[combined_plot_mask].min()),
+                1.1 * np.abs((pae_y - legacy_y) + yerr)[combined_plot_mask].max(),
             )
             legacy_pull_ax.set_ylim(
                 0,
-                1.1 * np.abs((pae_y - legacy_y) / pae_yerr)[combined_plot_mask].max(),
+                1.1 * np.abs((pae_y - legacy_y) / yerr)[combined_plot_mask].max(),
             )
 
             legacy_pull_ax.set_ylabel("Pull")
