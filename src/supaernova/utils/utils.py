@@ -1,7 +1,15 @@
 from typing import TYPE_CHECKING
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+import chainconsumer as cc
+
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from numpy import typing as npt
+
     from supaernova.typing import T, Config
 
 
@@ -43,3 +51,23 @@ def resolve_path(
     if mkdir:
         final_path.mkdir(parents=True, exist_ok=True)
     return final_path
+
+
+def jackknife_resample(arr: "npt.NDArray", func: "Callable") -> "npt.NDArray":
+    n = len(arr)
+    jackknife_values = np.zeros(n)
+    for i in range(n):
+        jackknife_values[i] = func(np.delete(arr, i))
+    return jackknife_values
+
+
+def max_central(
+    data: "npt.NDArray",
+) -> tuple[float, float, float]:
+    c = cc.ChainConsumer()
+    chain = cc.Chain(samples=pd.DataFrame({"data": data}), name="data")
+    max_central = c.analysis.get_parameter_summary_max_central(chain, "data")
+    center = max_central.center
+    lower = max_central.center - max_central.lower
+    upper = max_central.upper - max_central.center
+    return (lower, center, upper)
