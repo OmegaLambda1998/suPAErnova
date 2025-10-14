@@ -363,7 +363,6 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
                 analyse=analyse,
                 **kwargs,
             )
-            # self.variant_required_steps[variant_name] = {}
         super()._clear(
             *args,
             setup=setup,

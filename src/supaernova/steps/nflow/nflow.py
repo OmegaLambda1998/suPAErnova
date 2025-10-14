@@ -1,3 +1,4 @@
+import shutil
 from typing import TYPE_CHECKING, Any, Self, ClassVar, override
 import importlib
 
@@ -40,7 +41,7 @@ class NFlow(ModelStep[NFlowConfig]):
         # --- Required ---
         self.validation_frac: float = self.options.validation_frac
         # --- Optional ---
-        self.debug: bool = self.options.debug
+        self.debug: bool = config.config.debug or self.options.debug
         self.profile: bool = self.options.profile
         self.kfold = self.options.kfold
         self.save_best: bool = self.options.save_best
@@ -168,6 +169,10 @@ class NFlow(ModelStep[NFlowConfig]):
         self.wl_dim: int
 
         self.model: NFlowModel
+        self.model_name: str = self.name.rsplit()[-1]
+        self.ckpt_path: str = (
+            f"{'best' if self.options.save_best else 'latest'}.model.checkpoint"
+        )
 
         # === Run / Save / Load Variables ===
         self._run_flag: bool
@@ -690,6 +695,31 @@ class NFlow(ModelStep[NFlowConfig]):
             self._plot_latent_steps(
                 gaussian, results, mask, labels, dt, n_latents, n_bins
             )
+
+    @override
+    def _is_cleaned(self: Self, *args: Any, **kwargs: Any) -> bool:
+        base_path = self.paths.results / self.model_name
+        profile_path = base_path / "latest_logs"
+        if profile_path.exists():
+            self.log.debug(f"{self.name} is not cleaned as {profile_path} exists")
+            return False
+        for path in base_path.iterdir():
+            if path.name != self.ckpt_path:
+                self.log.debug(f"{self.name} is not cleaned as {path} exists")
+                return False
+        return True
+
+    @override
+    def _clean(self: Self, *args: Any, **kwargs: Any) -> None:
+        base_path = self.paths.results / self.model_name
+        profile_path = base_path / "latest_logs"
+        if profile_path.exists():
+            self.log.warning(f"Removing {profile_path}!")
+            shutil.rmtree(profile_path)
+        for path in base_path.iterdir():
+            if path.name != self.ckpt_path:
+                self.log.warning(f"Removing {path}!")
+                shutil.rmtree(path)
 
     @override
     def _clear(

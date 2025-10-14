@@ -41,7 +41,7 @@ class TFNFlowModel(ks.Model):
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
         self.seed: int = config.options.seed
-        self.debug: bool = self.options.debug
+        self.debug: bool = config.config.debug or self.options.debug
         self.profile: bool = self.options.profile
         self.set_seed()
 

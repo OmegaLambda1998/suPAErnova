@@ -133,7 +133,10 @@ class PAEStepResult(StepResult):
     # === Field Variables ===
     # --- Required ---
     model: Any
-    stages: dict[str, dict[str, Annotated[LazyPAEStageResult, AfterValidator(clear)]]]
+    stages: dict[
+        str,
+        dict[str, Annotated[LazyPAEStageResult, AfterValidator(clear)]],
+    ]
     min_redshift: float
     max_redshift: float
     min_phase: float
