@@ -28,6 +28,8 @@ def prepare_config(
     config: "Config[JsonValue]",
     *,  # Force keyword-only arguments
     verbose: bool = False,
+    clean: bool = False,
+    debug: bool = False,
     force: bool = False,
     base_path: Path | None = None,
     out_path: Path | None = None,
@@ -40,6 +42,8 @@ def prepare_config(
     # Setup global config
     config["config"] = GlobalConfig(
         verbose=config.get("config", {}).get("verbose", verbose),
+        clean=config.get("config", {}).get("clean", clean),
+        debug=config.get("config", {}).get("debug", debug),
         force=config.get("config", {}).get("force", force),
     )
 
@@ -98,6 +102,8 @@ def main(
     input_config: "Config[JsonValue]",
     *,  # Force keyword-only arguments
     verbose: bool = False,
+    clean: bool = False,
+    debug: bool = False,
     force: bool = False,
     base_path: Path | None = None,
     out_path: Path | None = None,
@@ -112,6 +118,8 @@ def main(
             config = prepare_config(
                 input_config,
                 verbose=verbose,
+                clean=clean,
+                debug=debug,
                 force=force,
                 base_path=base_path,
                 out_path=out_path,

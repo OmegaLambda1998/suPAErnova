@@ -51,8 +51,10 @@ class Step[C: StepConfig]:
         self.config: GlobalConfig = config.config
         self.paths: PathConfig = config.paths
         self.log: Logger = config.log
-        self.force: bool = self.config.force
         self.verbose: bool = self.config.verbose
+        self.cleanup: bool = self.config.clean
+        self.debug: bool = self.config.debug
+        self.force: bool = self.config.force
         self.callbacks: dict[str, str | dict[str, Callable[[Any], None]]] = (
             config.callbacks
         )
@@ -201,6 +203,26 @@ class Step[C: StepConfig]:
             self._analyse(*args, **kwargs)
             self.log.info(f"Finished analysing {self.name}")
 
+    def _is_cleaned(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        return False
+
+    @callback
+    def is_cleaned(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        self.log.debug(f"Checking if {self.name} is cleaned")
+        is_cleaned = self._is_cleaned(*args, **kwargs)
+        self.log.debug(f"{self.name} is {'' if is_cleaned else 'not '}cleaned")
+        return is_cleaned
+
+    def _clean(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        pass
+
+    @callback
+    def clean(self: Self, *args: "Any", **kwargs: "Any") -> None:
+        if self.cleanup and not self.is_cleaned(*args, **kwargs):
+            self.log.info(f"Cleaning {self.name}")
+            self._clean(*args, **kwargs)
+            self.log.info(f"Finished cleaning {self.name}")
+
     def has_attributes(self: Self, attributes: str | Iterable[str]) -> bool:
         if not isinstance(attributes, Iterable):
             attributes = [attributes]
@@ -247,6 +269,7 @@ class Step[C: StepConfig]:
             analyse = True
 
         self.set_seed()
+        self.clean(*args, **kwargs)
         self.log.info(f"Clearing {self.name}")
         self._clear(
             *args,

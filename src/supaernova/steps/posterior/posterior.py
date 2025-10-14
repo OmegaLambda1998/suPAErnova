@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, Any, Self, ClassVar, override
+import shutil
+from typing import TYPE_CHECKING, Any, Self, Literal, ClassVar, override
 import importlib
 
 import numpy as np
@@ -54,13 +55,13 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.train_delta_p: bool = self.options.train_delta_p
         self.train_bias: bool = self.options.train_bias
         # --- Optional ---
-        self.debug: bool = self.options.debug
+        self.debug: bool = self.config.debug or self.options.debug
         self.profile: bool = self.options.profile
         self.kfold: int = self.options.kfold
         self.save_best: bool = self.options.save_best
-        self.subsets = (["train"] if self.options.train_subset else []) + (
-            ["test"] if self.options.test_subset else []
-        )
+        self.subsets: list[Literal["train", "test"]] = (
+            ["train"] if self.options.train_subset else []
+        ) + (["test"] if self.options.test_subset else [])
         self.tolerance: float = self.options.tolerance
         self.target_acceptance_rate: float = self.options.target_acceptance_rate
         self.random_initial_positions: bool = self.options.random_initial_positions
@@ -244,6 +245,10 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.load_attributes: set[str] = self.save_attributes
 
         self.models: dict[str, dict[str, PosteriorModel]]
+        self.model_name: str = self.name.rsplit()[-1]
+        self.ckpt_path: str = (
+            f"{'best' if self.options.save_best else 'latest'}.model.checkpoint/"
+        )
 
         # === Result Variables ===
         self.results: dict[str, dict[str, PosteriorStepResult]]
@@ -2240,6 +2245,45 @@ class Posterior(ModelStep[PosteriorConfig]):
                     input_spec_mask,
                     input_wl_mask,
                 )
+
+    @override
+    def _is_cleaned(self: Self, *args: Any, **kwargs: Any) -> bool:
+        base_path = self.paths.results / self.model_name
+        profile_path = base_path / "latest_logs"
+        if profile_path.exists():
+            self.log.debug(f"{self.name} is not cleaned as {profile_path} exists")
+            return False
+        for subset in self.subsets:
+            for seed in self.seeds:
+                subset_path = base_path / subset / str(seed)
+                map_path = subset_path / "map"
+                if map_path.exists():
+                    self.log.debug(f"{self.name} is not cleaned as {map_path} exists")
+                    return False
+                hmc_path = subset_path / "hmc"
+                if hmc_path.exists():
+                    self.log.debug(f"{self.name} is not cleaned as {hmc_path} exists")
+                    return False
+        return True
+
+    @override
+    def _clean(self: Self, *args: Any, **kwargs: Any) -> None:
+        base_path = self.paths.results / self.model_name
+        profile_path = base_path / "latest_logs"
+        if profile_path.exists():
+            self.log.warning(f"Removing {profile_path}!")
+            shutil.rmtree(profile_path)
+        for subset in self.subsets:
+            for seed in self.seeds:
+                subset_path = base_path / subset / str(seed)
+                map_path = subset_path / "map"
+                if map_path.exists():
+                    self.log.warning(f"Removing {map_path}!")
+                    shutil.rmtree(map_path)
+                hmc_path = subset_path / "hmc"
+                if hmc_path.exists():
+                    self.log.warning(f"Removing {hmc_path}!")
+                    shutil.rmtree(hmc_path)
 
     @override
     def _clear(

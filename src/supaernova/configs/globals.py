@@ -25,6 +25,8 @@ class GlobalConfig(BaseConfig):
     # === Field Variables ===
     # --- Required ---
     verbose: StrictBool
+    clean: StrictBool
+    debug: StrictBool
     force: StrictBool
 
     # --- Optional ---

@@ -59,7 +59,7 @@ class TFPosteriorModel(ks.Model):
         self.subset: Literal["train", "test"] = subset
         self.step_size = config.step_sizes[self.subset]
 
-        self.debug: bool = self.options.debug
+        self.debug: bool = config.config.debug or self.options.debug
         self.profile: bool = self.options.profile
 
         self.data: LazySNPAEData = getattr(config, f"{self.subset}_data")

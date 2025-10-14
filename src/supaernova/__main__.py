@@ -17,6 +17,8 @@ if TYPE_CHECKING:
 @click.command()
 @click.argument("input_path", type=click.Path(exists=True, path_type=Path))
 @click.option("-v", "--verbose", is_flag=True, type=bool, default=False)
+@click.option("-c", "--clean", is_flag=True, type=bool, default=False)
+@click.option("-d", "--debug", is_flag=True, type=bool, default=False)
 @click.option("-f", "--force", is_flag=True, type=bool, default=False)
 @click.option(
     "-b",
@@ -52,6 +54,8 @@ def cli(
     input_path: Path,
     *,  # Force keyword-only arguments
     verbose: bool = False,
+    clean: bool = False,
+    debug: bool = False,
     force: bool = False,
     base_path: Path | None = None,
     out_path: Path | None = None,
@@ -71,6 +75,8 @@ def cli(
     return main(
         input_config,
         verbose=verbose,
+        clean=clean,
+        debug=debug,
         force=force,
         base_path=base_path,
         out_path=out_path,

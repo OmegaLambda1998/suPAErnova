@@ -396,6 +396,10 @@ class Data(Step[DataConfig]):
         self._plot_comparison()
 
     @override
+    def _is_cleaned(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+        return True
+
+    @override
     def _clear(
         self: Self,
         *args: "Any",

@@ -1,4 +1,5 @@
 # Copyright 2025 Patrick Armstrong
+import shutil
 from typing import TYPE_CHECKING, Any, Self, override
 from pathlib import Path
 import importlib
@@ -47,7 +48,7 @@ class PAE(ModelStep[PAEConfig]):
         self.validation_frac: float = self.options.validation_frac
 
         # --- Optional ---
-        self.debug: bool = self.options.debug
+        self.debug: bool = config.config.debug or self.options.debug
         self.profile: bool = self.options.profile
         self.n_z_latents: int = self.options.n_z_latents
         self.n_pae_latents = self.n_physical_latents + self.n_z_latents
@@ -460,7 +461,7 @@ class PAE(ModelStep[PAEConfig]):
     @override
     def _save(self: Self, *args: "Any", **kwargs: "Any") -> None:
         self.model = self.model.__class__(self)
-        final_savepath = self.paths.results / self.model_name
+        final_savepath = self.paths.results / self.model_name / self.ckpt_path
         final_stage = self.run_stages[-1]
         final_stage.prev_stage = None
         self.model.stage = final_stage
@@ -471,7 +472,7 @@ class PAE(ModelStep[PAEConfig]):
         )
         self.model.load_checkpoint(savepath, reset_weights=False)
         self.log.debug(f"Saving final PAE model weights to {final_savepath}")
-        self.model.save_checkpoint(final_savepath)
+        final_savepath.symlink_to(savepath / self.ckpt_path)
 
     @override
     def _load(self: Self, *args: Any, **kwargs: Any) -> None:
@@ -583,9 +584,9 @@ class PAE(ModelStep[PAEConfig]):
 
             return _wrapped
 
-        dt_results: dict[str, dict[str, PAEStageResult]] = {}
+        dt_results: dict[str, dict[str, LazyPAEStageResult]] = {}
         for dt in ["train_", "test_"]:
-            model_results: dict[str, PAEStageResult] = {}
+            model_results: dict[str, LazyPAEStageResult] = {}
             for stage in self.run_stages:
                 model_results[str(stage.stage)] = LazyPAEStageResult(
                     _stage_results(dt, stage)
@@ -1021,6 +1022,23 @@ class PAE(ModelStep[PAEConfig]):
                             ),
                         )
                     Plotter.close(fig, ax)
+
+    @override
+    def _is_cleaned(self: Self, *args: Any, **kwargs: Any) -> bool:
+        base_path = self.paths.results / self.model_name
+        profile_path = base_path / "latest_logs"
+        if profile_path.exists():
+            self.log.debug(f"{self.name} is not cleaned as {profile_path} exists")
+            return False
+        return True
+
+    @override
+    def _clean(self: Self, *args: Any, **kwargs: Any) -> None:
+        base_path = self.paths.results / self.model_name
+        profile_path = base_path / "latest_logs"
+        if profile_path.exists():
+            self.log.warning(f"Removing {profile_path}!")
+            shutil.rmtree(profile_path)
 
     @override
     def _clear(
