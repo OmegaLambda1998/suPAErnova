@@ -4,6 +4,7 @@ import importlib
 import numpy as np
 import pandas as pd
 
+from supaernova.utils import max_central
 from supaernova.analysis import Plotter
 from supaernova.steps.models import Model, ModelStep
 from supaernova.analysis.spectra import SpectraPlotter
@@ -574,9 +575,16 @@ class Posterior(ModelStep[PosteriorConfig]):
                 }
 
                 samples = model.hmc.samples.numpy()
-                mean_samples = samples.mean(axis=0)
+                reduce_samples = samples.mean(axis=0)
+                reduce_samples = np.array([
+                    np.array([
+                        max_central(samples[:, sn, pos])[1]
+                        for pos in range(samples.shape[-1])
+                    ])
+                    for sn in range(samples.shape[-2])
+                ])
                 input_position = model.map.unconstrain(
-                    model.map.get_position(mean_samples), full=True
+                    model.map.get_position(reduce_samples), full=True
                 )
 
                 input_time = model.data.time
@@ -987,7 +995,9 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # --- PAE ---
                 # --- NFlow ---
                 # --- Posterior ---
-                map_position = model.map.get_position(model.map.position.best)
+                map_position = model.map.unconstrain(
+                    model.map.get_position(model.map.position.best)
+                )
                 (
                     map_log_prob,
                     map_log_like,
@@ -995,7 +1005,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     map_amplitude,
                     map_sigma,
                 ) = model(
-                    model.map.unconstrain(map_position),
+                    map_position,
                     training=False,
                     input_phase=data.time,
                     input_amp=data.amplitude,
@@ -1085,8 +1095,17 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # --- NFlow ---
                 # --- Posterior ---
                 samples = model.hmc.samples.numpy()
-                mean_samples = samples.mean(axis=0)
-                pos_position = model.map.get_position(mean_samples)
+                reduce_samples = samples.mean(axis=0)
+                reduce_samples = np.array([
+                    np.array([
+                        max_central(samples[:, sn, pos])[1]
+                        for pos in range(samples.shape[-1])
+                    ])
+                    for sn in range(samples.shape[-2])
+                ])
+                pos_position = model.map.unconstrain(
+                    model.map.get_position(reduce_samples), full=True
+                )
                 (
                     pos_log_prob,
                     pos_log_like,
@@ -1094,7 +1113,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     pos_amplitude,
                     pos_sigma,
                 ) = model(
-                    model.map.unconstrain(pos_position),
+                    pos_position,
                     training=False,
                     input_phase=data.time,
                     input_amp=data.amplitude,
@@ -1499,8 +1518,17 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # --- NFlow ---
                 # --- Posterior ---
                 samples = model.hmc.samples.numpy()
-                mean_samples = samples.mean(axis=0)
-                pos_position = model.map.get_position(mean_samples)
+                reduce_samples = samples.mean(axis=0)
+                reduce_samples = np.array([
+                    np.array([
+                        max_central(samples[:, sn, pos])[1]
+                        for pos in range(samples.shape[-1])
+                    ])
+                    for sn in range(samples.shape[-2])
+                ])
+                pos_position = model.map.unconstrain(
+                    model.map.get_position(reduce_samples), full=True
+                )
                 (
                     pos_log_prob,
                     pos_log_like,
@@ -1702,7 +1730,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 nrows = ncols = int(np.sqrt(n_plots))
 
                 supfig = Plotter.figure(scale=nrows)
-                subfigs = Plotter.subfig(supfig, nrows, ncols).flatten()
+                subfigs = np.array(Plotter.subfig(supfig, nrows, ncols)).flatten()
                 axes = []
 
                 for i, subfig in enumerate(subfigs):
@@ -1710,17 +1738,26 @@ class Posterior(ModelStep[PosteriorConfig]):
                     if plot_type == "Blank":
                         continue
 
-                    log_prob = model.hmc.log_prob.numpy()
-                    mean_log_prob = np.mean(log_prob, axis=0)
-                    valid_log_prob = input_sn_mask[:, 0, 0] & np.isfinite(mean_log_prob)
-                    delta_m = model.hmc.delta_m.numpy()[..., 0]
-                    mean_delta_m = np.mean(delta_m, axis=0)
-                    delta_p = model.hmc.delta_p.numpy()[..., 0]
-                    mean_delta_p = np.mean(delta_p, axis=0)
                     log_prior = model.hmc.log_prior.numpy()
                     mean_log_prior = np.mean(log_prior, axis=0)
                     log_like = model.hmc.log_like.numpy()
                     mean_log_like = np.mean(log_like, axis=0)
+                    log_prob = model.hmc.log_prob.numpy()
+                    mean_log_prob = np.mean(log_prob, axis=0)
+                    valid_log_prob = input_sn_mask[:, 0, 0] & np.isfinite(mean_log_prob)
+
+                    delta_m = model.hmc.delta_m.numpy()[..., 0]
+                    mean_delta_m = np.mean(delta_m, axis=0)
+                    mean_delta_m = np.array([
+                        max_central(delta_m[:, sn])[1]
+                        for sn in range(delta_m.shape[-1])
+                    ])
+                    delta_p = model.hmc.delta_p.numpy()[..., 0]
+                    mean_delta_p = np.mean(delta_p, axis=0)
+                    mean_delta_p = np.array([
+                        max_central(delta_p[:, sn])[1]
+                        for sn in range(delta_p.shape[-1])
+                    ])
                     names = data.sn_name
 
                     if plot_type == "Best":
