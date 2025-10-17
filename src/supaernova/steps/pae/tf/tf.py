@@ -155,41 +155,56 @@ class TFPAEEncoder(ks.layers.Layer):
         # === Unpack Inputs ===
         # --- Data Phase ---
         input_phase = inputs[..., :1]
+        pp(input_phase, name="input_phase")
 
         # --- Data Amplitude ---
         input_amp = inputs[..., 1:]
+        pp(input_amp, name="input_amp")
 
         # --- Masks ---
         # Data Mask
         input_mask = tf.ones_like(input_amp, dtype=tf.bool) if mask is None else mask
+        pp(input_mask, name="input_mask")
+
         # Wavelength Range Mask
         input_wl_mask = tf.ones_like(input_mask) if wl_mask is None else wl_mask
+        pp(input_wl_mask, name="input_wl_mask")
+
         # Phase Range Mask
         input_spec_mask = (
             tf.math.reduce_any(input_wl_mask, axis=-1, keepdims=True)
             if spec_mask is None
             else spec_mask
         )
+        pp(input_spec_mask, name="input_spec_mask")
+
         # Redshift Range Mask
         input_sn_mask = (
             tf.math.reduce_any(input_spec_mask, axis=-2, keepdims=True)
             if sn_mask is None
             else sn_mask
         )
+        pp(input_sn_mask, name="input_sn_mask")
 
         # === Setup Masks ===
         # Apply sn and spec masks
         input_mask &= input_sn_mask & input_spec_mask & input_wl_mask
+        pp(input_mask, name="input_mask")
 
         # ~(~input_mask & input_wl_mask)
         # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
         valid_wl_mask = tf.logical_not(
             tf.logical_and(tf.logical_not(input_mask), input_wl_mask)
         )
+        pp(valid_wl_mask, name="valid_wl_mask")
 
         # Determine which spectra to keep
         # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-        mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True)
+        if training or testing:
+            mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True)
+        else:
+            mask_spec = tf.math.reduce_any(valid_wl_mask, axis=-1, keepdims=True)
+        pp(mask_spec, name="mask_spec")
 
         # The number of unmasked spectra
         n_unmasked_spec = tf.math.maximum(
@@ -198,13 +213,16 @@ class TFPAEEncoder(ks.layers.Layer):
             ),
             y=1,
         )
+        pp(n_unmasked_spec, name="n_unmasked_spec")
 
         # Determine which SNe to keep
         # Will mask out any SN with *no* unmasked spectra
         mask_sn = tf.math.reduce_any(mask_spec, axis=-2)
+        pp(mask_sn, name="mask_sn")
 
         # The number of unmasked spectra
         n_unmasked_sn = tf.math.count_nonzero(mask_sn[:, 0], dtype=tf.float32)
+        pp(n_unmasked_sn, name="n_unmasked_sn")
 
         # Determine which latents to keep
         # The latents are ordered by training stage
@@ -1522,7 +1540,7 @@ class TFPAEModel(ks.Model):
 
             # Determine which spectra to keep
             # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-            mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True)
+            mask_spec = tf.math.reduce_any(valid_wl_mask, axis=-1, keepdims=True)
 
             # The number of unmasked spectra
             n_unmasked_spec = tf.math.maximum(
@@ -1563,6 +1581,8 @@ class TFPAEModel(ks.Model):
                 )
                 / n_unmasked_sn
             )
+
+            latents_mean = tf.reduce_mean(latents, axis=0)
 
             self.encoder.moving_means.assign(latents_mean)
 
@@ -1725,8 +1745,6 @@ class TFPAEModel(ks.Model):
         )
         wl_dim = tf.shape(mask)[-1]
 
-        outlier_cut = 100
-
         time_bin_width = 0.1
         time_min = 0.0
         time_max = 1.0
@@ -1799,10 +1817,6 @@ class TFPAEModel(ks.Model):
             in_bin_idx = tf.where(bin_indices == bin_id)[:, 0]
             bin_error = tf.gather(error, in_bin_idx)
             bin_mask = tf.gather(recon_mask, in_bin_idx)
-
-            upper_clip = tfp.stats.percentile(bin_error, outlier_cut, axis=0)
-            clip_mask = bin_error > upper_clip
-            bin_mask &= tf.math.logical_not(clip_mask)
 
             # Compute std of masked values
             numerator = tf.reduce_sum(

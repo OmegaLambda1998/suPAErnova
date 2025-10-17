@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +19,7 @@ class DistributionPlot(SpectraPlot):
     labels: "dict[str | int, str | dict[str | int, str]] | None" = None
     mean: bool = False
     masked: bool = False
+    reduce: Literal["mean", "max_central"] = "max_central"
 
 
 class DistributionPlotter(Plotter):

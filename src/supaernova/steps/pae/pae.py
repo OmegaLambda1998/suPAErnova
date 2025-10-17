@@ -824,10 +824,10 @@ class PAE(ModelStep[PAEConfig]):
                     _sigma,
                     _sn_name,
                     _time,
-                    _mask,
+                    mask,
                     _sn_mask,
                     _spec_mask,
-                    _wl_mask,
+                    wl_mask,
                 ) = SpectraPlotter.prep(
                     data,
                     o,
@@ -840,21 +840,21 @@ class PAE(ModelStep[PAEConfig]):
                 # ~(~input_mask & input_wl_mask)
                 # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
                 valid_wl_mask = np.logical_not(
-                    np.logical_and(np.logical_not(input_mask), input_wl_mask)
+                    np.logical_and(np.logical_not(mask), wl_mask)
                 )
 
                 # Determine which spectra to keep
                 # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-                mask_spec = np.min(valid_wl_mask, axis=-1, keepdims=True)
+                mask_spec = np.any(valid_wl_mask, axis=-1, keepdims=True)
 
                 # Determine which SNe to keep
                 # Will mask out any SN with *no* unmasked spectra
-                mask_sn = np.max(mask_spec, axis=-2)[:, 0]
+                mask_sn = np.any(mask_spec, axis=-2)[:, 0]
 
                 DistributionPlotter.plot_corner(
                     chains(mask_sn),
                     o,
-                    statistics="max_central",
+                    statistics=o.reduce,
                     shade_alpha=0.0,
                     plot_cloud=True,
                     smooth=0,
@@ -1115,6 +1115,14 @@ class PAE(ModelStep[PAEConfig]):
             )
             # Mask out wavelengths outside the wavelength range
             wl_mask = wavelength_mask
+
+            print(
+                input_mask.shape,
+                sn_mask.shape,
+                spec_mask.shape,
+                wl_mask.shape,
+                mask_type,
+            )
 
             setattr(self, f"{mask_type}mask", input_mask)
             setattr(self, f"{mask_type}sn_mask", sn_mask)

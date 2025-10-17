@@ -380,18 +380,35 @@ class TFPosteriorModel(ks.Model):
 
         log_likelihood = likelihood.log_prob(amp)
 
-        log_likelihood_num = tf.reduce_sum(
-            tf.where(mask_spec, log_likelihood, tf.zeros_like(log_likelihood)), axis=-1
+        log_likelihood_sum = tf.math.count_nonzero(
+            posterior_mask, axis=-1, dtype=log_likelihood.dtype
         )
-
-        # The number of unmasked spectra
-        log_likelihood_sum = tf.math.count_nonzero(mask_spec, axis=-1, dtype=tf.float32)
-        valid_spectra = log_likelihood_sum > 0
+        valid_wl = log_likelihood_sum > 0
         log_likelihood_sum = tf.math.maximum(
             log_likelihood_sum, tf.ones_like(log_likelihood_sum)
         )
+        log_likelihood /= log_likelihood_sum
 
-        log_likelihood = log_likelihood_num / log_likelihood_sum
+        log_likelihood = tf.where(
+            valid_wl, log_likelihood, -np.inf * tf.ones_like(log_likelihood)
+        )
+
+        log_likelihood = tf.reduce_sum(
+            tf.where(mask_spec, log_likelihood, tf.zeros_like(log_likelihood)), axis=-1
+        )
+
+        # log_likelihood_num = tf.reduce_sum(
+        #     tf.where(mask_spec, log_likelihood, tf.zeros_like(log_likelihood)), axis=-1
+        # )
+        # # The number of unmasked spectra
+        # log_likelihood_sum = tf.math.count_nonzero(
+        #     mask_spec, axis=-1, dtype=log_likelihood.dtype
+        # )
+        # valid_spectra = log_likelihood_sum > 0
+        # log_likelihood_sum = tf.math.maximum(
+        #     log_likelihood_sum, tf.ones_like(log_likelihood_sum)
+        # )
+        # log_likelihood = log_likelihood_num / log_likelihood_sum
         # log_likelihood = tf.where(
         #     valid_spectra, log_likelihood, -np.inf * tf.ones_like(log_likelihood)
         # )

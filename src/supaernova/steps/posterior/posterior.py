@@ -390,14 +390,23 @@ class Posterior(ModelStep[PosteriorConfig]):
             self.step_sizes[subset] = np.concatenate(step_sizes, axis=-1)
 
             recon_error, _, recon_error_centers = pae.model.recon_error((
-                stage.input_phase,
-                stage.input_amp,
-                stage.input_d_amp,
-                stage.input_mask,
-                stage.input_sn_mask,
-                stage.input_spec_mask,
-                stage.input_wl_mask,
+                self.data.time,
+                self.data.amplitude,
+                self.data.sigma,
+                self.mask,
+                self.sn_mask,
+                self.spec_mask,
+                self.wl_mask,
             ))
+            # recon_error, _, recon_error_centers = pae.model.recon_error((
+            #     stage.input_phase,
+            #     stage.input_amp,
+            #     stage.input_d_amp,
+            #     stage.input_mask,
+            #     stage.input_sn_mask,
+            #     stage.input_spec_mask,
+            #     stage.input_wl_mask,
+            # ))
             self.recon_error[subset] = recon_error
             self.recon_error_centers[subset] = recon_error_centers
 
@@ -580,38 +589,9 @@ class Posterior(ModelStep[PosteriorConfig]):
                 }
 
                 samples = model.hmc.samples.numpy()
-                reduce_samples = samples.mean(axis=0)
-                reduce_samples = np.array([
-                    np.array([
-                        max_central(samples[:, sn, pos])[1]
-                        for pos in range(samples.shape[-1])
-                    ])
-                    for sn in range(samples.shape[-2])
-                ])
-                input_position = model.map.unconstrain(
-                    model.map.get_position(reduce_samples), full=True
-                )
-
-                input_time = model.data.time
-                input_amplitude = model.data.amplitude
-                input_sigma = model.data.sigma
-                model.data.clear()
-
-                log_prob = model(
-                    input_position,
-                    training=False,
-                    input_phase=input_time,
-                    input_amp=input_amplitude,
-                    input_sigma=input_sigma,
-                    mask=model.data_mask,
-                    sn_mask=model.sn_mask,
-                    spec_mask=model.spec_mask,
-                    wl_mask=model.wl_mask,
-                )
 
                 hmc_results = {
                     "samples": samples,
-                    "log_prob": log_prob.numpy(),
                     "step_sizes_final": model.hmc.step_sizes_final.numpy(),
                     "is_accepted": model.hmc.is_accepted.numpy(),
                     "u_delta_av": model.hmc.u_delta_av.numpy(),
@@ -643,7 +623,11 @@ class Posterior(ModelStep[PosteriorConfig]):
                     if not isinstance(self.analysis.plot_comparison, list):
                         self.analysis.plot_comparison = [self.analysis.plot_comparison]
                     for opts in self.analysis.plot_comparison:
-                        name = "comparison" if opts.name is None else opts.name
+                        name = (
+                            f"comparison_{opts.reduce}"
+                            if opts.name is None
+                            else opts.name
+                        )
                         savepath = (
                             self.paths.plots
                             / str(self.seeds[0])
@@ -687,7 +671,11 @@ class Posterior(ModelStep[PosteriorConfig]):
                             self.analysis.plot_comparison_array
                         ]
                     for opts in self.analysis.plot_comparison_array:
-                        name = "comparison_array" if opts.name is None else opts.name
+                        name = (
+                            f"comparison_array_{opts.reduce}"
+                            if opts.name is None
+                            else opts.name
+                        )
                         savepath = (
                             self.paths.plots
                             / str(self.seeds[0])
@@ -778,7 +766,11 @@ class Posterior(ModelStep[PosteriorConfig]):
                     if not isinstance(self.analysis.plot_dispersion, list):
                         self.analysis.plot_dispersion = [self.analysis.plot_dispersion]
                     for opts in self.analysis.plot_dispersion:
-                        name = "dispersion" if opts.name is None else opts.name
+                        name = (
+                            f"dispersion_{opts.reduce}"
+                            if opts.name is None
+                            else opts.name
+                        )
                         savepath = (
                             self.paths.plots
                             / str(self.seeds[0])
@@ -822,7 +814,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
                 o = opts.model_copy(deep=True)
                 if o.name is None:
-                    o.name = "comparison"
+                    o.name = f"comparison_{o.reduce}"
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {
                         "title": f"{subset}_{self.name}_{o.name}",
@@ -1100,14 +1092,16 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # --- NFlow ---
                 # --- Posterior ---
                 samples = model.hmc.samples.numpy()
-                reduce_samples = samples.mean(axis=0)
-                reduce_samples = np.array([
-                    np.array([
-                        max_central(samples[:, sn, pos])[1]
-                        for pos in range(samples.shape[-1])
+                if o.reduce == "mean":
+                    reduce_samples = samples.mean(axis=0)
+                else:
+                    reduce_samples = np.array([
+                        np.array([
+                            max_central(samples[:, sn, pos])[1]
+                            for pos in range(samples.shape[-1])
+                        ])
+                        for sn in range(samples.shape[-2])
                     ])
-                    for sn in range(samples.shape[-2])
-                ])
                 pos_position = model.map.unconstrain(
                     model.map.get_position(reduce_samples), full=True
                 )
@@ -1523,14 +1517,16 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # --- NFlow ---
                 # --- Posterior ---
                 samples = model.hmc.samples.numpy()
-                reduce_samples = samples.mean(axis=0)
-                reduce_samples = np.array([
-                    np.array([
-                        max_central(samples[:, sn, pos])[1]
-                        for pos in range(samples.shape[-1])
+                if o.reduce == "mean":
+                    reduce_samples = samples.mean(axis=0)
+                else:
+                    reduce_samples = np.array([
+                        np.array([
+                            max_central(samples[:, sn, pos])[1]
+                            for pos in range(samples.shape[-1])
+                        ])
+                        for sn in range(samples.shape[-2])
                     ])
-                    for sn in range(samples.shape[-2])
-                ])
                 pos_position = model.map.unconstrain(
                     model.map.get_position(reduce_samples), full=True
                 )
@@ -1650,8 +1646,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                 ]
             for opts in self.analysis.plot_comparison_array:
                 o = opts.model_copy(deep=True)
+                plot_comparison = self.analysis.plot_comparison
+                self.analysis.plot_comparison = [o]
                 if o.name is None:
-                    o.name = "comparison_array"
+                    o.name = f"comparison_array_{o.reduce}"
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {
                         "title": f"{subset}_{self.name}_{o.name}",
@@ -1752,17 +1750,21 @@ class Posterior(ModelStep[PosteriorConfig]):
                     valid_log_prob = input_sn_mask[:, 0, 0] & np.isfinite(mean_log_prob)
 
                     delta_m = model.hmc.delta_m.numpy()[..., 0]
-                    mean_delta_m = np.mean(delta_m, axis=0)
-                    mean_delta_m = np.array([
-                        max_central(delta_m[:, sn])[1]
-                        for sn in range(delta_m.shape[-1])
-                    ])
+                    if o.reduce == "mean":
+                        mean_delta_m = np.mean(delta_m, axis=0)
+                    else:
+                        mean_delta_m = np.array([
+                            max_central(delta_m[:, sn])[1]
+                            for sn in range(delta_m.shape[-1])
+                        ])
                     delta_p = model.hmc.delta_p.numpy()[..., 0]
-                    mean_delta_p = np.mean(delta_p, axis=0)
-                    mean_delta_p = np.array([
-                        max_central(delta_p[:, sn])[1]
-                        for sn in range(delta_p.shape[-1])
-                    ])
+                    if o.reduce == "mean":
+                        mean_delta_p = np.mean(delta_p, axis=0)
+                    else:
+                        mean_delta_p = np.array([
+                            max_central(delta_p[:, sn])[1]
+                            for sn in range(delta_p.shape[-1])
+                        ])
                     names = data.sn_name
 
                     if plot_type == "Best":
@@ -1849,6 +1851,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 supfig.suptitle(o.plot_kwargs["title"])
                 supfig = Plotter.save(supfig, o.savepath / f"{o.name}.{o.ext}")
                 Plotter.close(supfig, axes)
+            self.analysis.plot_comparison = plot_comparison
 
     def _plot_map(
         self: Self,
@@ -1936,11 +1939,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 chain_data[title] = samples
                 o.labels[title] = map_labels
 
-                DistributionPlotter.plot_corner(
-                    chain_data,
-                    o,
-                    statistics="max_central",
-                )
+                DistributionPlotter.plot_corner(chain_data, o, statistics=o.reduce)
 
     def _plot_hmc(
         self: Self,
@@ -2050,11 +2049,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 chain_data[title] = chains
                 o.labels[title] = hmc_labels
 
-                DistributionPlotter.plot_corner(
-                    chain_data,
-                    o,
-                    statistics="max_central",
-                )
+                DistributionPlotter.plot_corner(chain_data, o, statistics=o.reduce)
 
     def _plot_dispersion(
         self: Self,
@@ -2074,9 +2069,9 @@ class Posterior(ModelStep[PosteriorConfig]):
                 if o.subset != subset:
                     continue
                 if o.name is None:
-                    o.name = "dispersion"
+                    o.name = f"dispersion_{o.reduce}"
                 if o.plot_kwargs is None:
-                    o.plot_kwargs = {"title": f"{subset}_{self.name}"}
+                    o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.reduce}"}
                 if o.savepath is None:
                     o.savepath = (
                         self.paths.plots / str(self.seeds[0]) / subset / str(seed)

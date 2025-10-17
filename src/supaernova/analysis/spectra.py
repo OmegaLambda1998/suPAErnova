@@ -31,6 +31,7 @@ class ComparisonPlot(SpectraPlot):
     base_amp: "npt.NDArray[int] | None" = None
     base_sigma: "npt.NDArray[int] | None" = None
     base_mask: "npt.NDArray[int] | None" = None
+    reduce: Literal["mean", "max_central"] = "mean"
     plot_base: bool = True
 
 

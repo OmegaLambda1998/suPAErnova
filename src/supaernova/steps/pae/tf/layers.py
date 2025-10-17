@@ -129,5 +129,5 @@ REDUCE_ANY: "Callable" = (
     ROCMLambda(tf.math.reduce_any) if IS_ROCM else tf.math.reduce_any
 )
 REDUCE_ALL: "Callable" = (
-    ROCMLambda(tf.math.reduce_any) if IS_ROCM else tf.math.reduce_all
+    ROCMLambda(tf.math.reduce_all) if IS_ROCM else tf.math.reduce_all
 )

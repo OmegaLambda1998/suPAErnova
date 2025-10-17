@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from supaernova.utils import max_central, jackknife_resample
+from supaernova.utils import pp, max_central, jackknife_resample
 
 from .spectra import SpectraPlot, SpectraPlotter
 from .analysis import Plotter, scale_lightness
@@ -22,6 +22,7 @@ class DispersionPlot(SpectraPlot):
     subset: Literal["train", "test"]
     legacy: tuple[Path, ...] | None = None
     twins: str | None = None
+    reduce: Literal["mean", "max_central"] = "mean"
 
 
 class DispersionPlotter(Plotter):
@@ -232,13 +233,14 @@ class DispersionPlotter(Plotter):
         pae_amplitude_stds = np.vstack(pae_amplitude_stds)[..., pae_order]
         pae_amplitude_errs_upper = np.vstack(pae_amplitude_errs_upper)[..., pae_order]
 
-        # pae_amplitudes = np.vstack(
-        #     [np.mean(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
-        # )[..., 0][..., pae_order]
-        #
-        # pae_amplitude_stds = np.vstack(
-        #     [np.std(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
-        # )[..., 0][..., pae_order]
+        if config.reduce == "mean":
+            pae_amplitudes = np.vstack(
+                [np.mean(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
+            )[..., 0][..., pae_order]
+
+            pae_amplitude_stds = np.vstack(
+                [np.std(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
+            )[..., 0][..., pae_order]
 
         pae_weights = 1 / np.clip(pae_amplitude_stds * pae_amplitude_stds, 1e-7, np.inf)
 
@@ -305,6 +307,7 @@ class DispersionPlotter(Plotter):
             yerr_prime: "npt.NDArray[Any] | None" = None,
             yerr_lower: "npt.NDArray[Any] | None" = None,
             yerr_upper: "npt.NDArray[Any] | None" = None,
+            tmp: bool = False,
         ) -> tuple[
             tuple["Figure", "Figure | None"],
             tuple[
@@ -347,7 +350,17 @@ class DispersionPlotter(Plotter):
                 pull_yerr = np.abs(np.where(y > 0, yerr_lower, yerr_upper))
                 yerr = (yerr_lower, yerr_upper)
 
+            names = pae_names[mask]
             w_rms_jackknife = jackknife_resample(y, np.std)
+            if tmp:
+                rms_sort = np.argsort(w_rms_jackknife)
+                rms_ = {}
+                for i, rms in enumerate(w_rms_jackknife[rms_sort]):
+                    if rms not in rms_:
+                        rms_[rms] = []
+                    rms_[rms].append(names[rms_sort][i])
+                print("rms")
+                pp(rms_)
             w_rms = np.mean(w_rms_jackknife)
             w_rms_std = np.std(w_rms_jackknife)
 
@@ -355,6 +368,15 @@ class DispersionPlotter(Plotter):
             w_nmad_jackknife = k * jackknife_resample(
                 y, lambda a: np.median(np.abs(a - np.median(a, axis=0)))
             )
+            if tmp:
+                nmad_sort = np.argsort(w_nmad_jackknife)
+                nmad_ = {}
+                for i, nmad in enumerate(w_nmad_jackknife[nmad_sort]):
+                    if nmad not in nmad_:
+                        nmad_[nmad] = []
+                    nmad_[nmad].append(names[nmad_sort][i])
+                print("nmad")
+                pp(nmad_)
             w_nmad = np.mean(w_nmad_jackknife)
             w_nmad_std = np.std(w_nmad_jackknife)
 
@@ -517,11 +539,36 @@ class DispersionPlotter(Plotter):
         )
 
         pull_y = np.abs(pae_y)
+        sort_y = np.argsort(pull_y[combined_plot_mask])
+        print("delta_m")
+        pp(
+            dict(
+                zip(
+                    [float(delta_m) for delta_m in pull_y[combined_plot_mask][sort_y]],
+                    pae_names[combined_plot_mask][sort_y],
+                    strict=True,
+                )
+            ),
+        )
+
         yerr = np.where(pae_y > 0, pae_yerr_lower, pae_yerr_upper)
         pull_yerr = np.abs(yerr)
-        max_pull = np.max((pull_y / pull_yerr)[combined_plot_mask])
-        print(max_pull, pae_names[np.abs((pull_y / pull_yerr) - max_pull) < 1e-3])
+        sort_pull = np.argsort((pull_y / pull_yerr)[combined_plot_mask])
+        print("pull")
+        pp(
+            dict(
+                zip(
+                    [
+                        float(pull)
+                        for pull in (pull_y / pull_yerr)[combined_plot_mask][sort_pull]
+                    ],
+                    pae_names[combined_plot_mask][sort_pull],
+                    strict=True,
+                )
+            ),
+        )
 
+        max_pull = np.max((pull_y / pull_yerr)[combined_plot_mask])
         pull_max = np.log10(max_pull)
         pull_scale_min = np.floor(pull_max)
         pull_scale_max = np.ceil(pull_max)
@@ -739,6 +786,7 @@ class DispersionPlotter(Plotter):
             yerr_prime=legacy_yerr,
             yerr_lower=pae_yerr_lower,
             yerr_upper=pae_yerr_upper,
+            tmp=True,
         )
         spectra_ax.set_ylim(
             -1.1 * np.abs((pae_y - yerr)[combined_plot_mask].min()),
