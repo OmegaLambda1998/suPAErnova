@@ -29,7 +29,7 @@ def db(
         __import__("tensorflow").debugging.check_numerics(tensor, message=msg)
 
 
-def pp(expression: object, *, name: str | None = None) -> None:
+def pp(expression: object, name: str | None = None) -> None:
     if isinstance(expression, tf.Tensor):
         db(expression, name or "Tensor", verbose=True, debug=False)
     else:

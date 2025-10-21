@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 
 def WHuber(
-    y_true: "tf.Tensor", y_pred: "tf.Tensor", *, model: "ks.Model"
+    y_true: "tf.Tensor", y_pred: "tf.Tensor", *, model: "ks.Model", reduce: bool = True
 ) -> "tf.Tensor":
     mask = tf.cast(model._loss.input_mask, tf.bool)
     d_amp = model._loss.input_d_amp
@@ -21,4 +21,8 @@ def WHuber(
     linear_loss = model.loss_clip_delta * (error - 0.5 * model.loss_clip_delta)
     huber_loss = tf.where(cond, squared_loss, linear_loss)
 
-    return tf.reduce_mean(tf.reduce_sum(huber_loss, axis=(-2, -1)))
+    loss = tf.reduce_sum(huber_loss, axis=(-2, -1))
+    if reduce:
+        loss = tf.reduce_mean(loss)
+
+    return loss

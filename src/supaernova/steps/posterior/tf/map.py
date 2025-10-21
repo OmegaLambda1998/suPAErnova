@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Self, ClassVar
 import numpy as np
 
 from supaernova._tf import tf, tfb, tfd
+from supaernova.utils.tf import db, pp
 
 if TYPE_CHECKING:
     from numpy import typing as npt
@@ -637,7 +638,8 @@ class PosteriorMap(tf.Module):
     def prior(self: Self, position: tf.Tensor) -> tf.Tensor:
         zero_prior = tf.zeros((position.shape[0],))
         log_prior = zero_prior
-        inf_prior = -tf.ones_like(log_prior) * np.inf
+
+        num_params = tf.constant(0, dtype=tf.float32)
 
         delta_m = position[..., 0:1]
         delta_p = position[..., 1:2]
@@ -647,24 +649,28 @@ class PosteriorMap(tf.Module):
 
         if self.use_delta_m_prior and self.train_delta_m:
             delta_m_log_prior = self.delta_m_prior.log_prob(delta_m)[:, 0]
+            num_params += 1
         else:
             delta_m_log_prior = zero_prior
         log_prior += delta_m_log_prior
 
         if self.use_delta_p_prior and self.train_delta_p:
             delta_p_log_prior = self.delta_p_prior.log_prob(delta_p)[:, 0]
+            num_params += 1
         else:
             delta_p_log_prior = zero_prior
         log_prior += delta_p_log_prior
 
         if self.use_bias_prior and self.train_bias:
             bias_log_prior = self.bias_prior.log_prob(bias)[:, 0]
+            num_params += 1
         else:
             bias_log_prior = zero_prior
         log_prior += bias_log_prior
 
         if self.use_u_delta_av_prior and self.nflow.physical_latents:
             u_delta_av_log_prior = self.u_delta_av_prior.log_prob(u_delta_av)[:, 0]
+            num_params += 1
         else:
             u_delta_av_log_prior = zero_prior
         log_prior += u_delta_av_log_prior
@@ -672,6 +678,10 @@ class PosteriorMap(tf.Module):
         u_latents_log_prior = self.u_latents_prior.log_prob(u_latents)
         if not self.use_u_latents_prior:
             u_latents_log_prior *= 0
+        else:
+            num_params += tf.cast(tf.shape(u_latents)[-1], tf.float32)
         log_prior += u_latents_log_prior
 
-        return tf.where(tf.math.is_finite(log_prior), log_prior, inf_prior)
+        log_prior /= num_params
+
+        return log_prior

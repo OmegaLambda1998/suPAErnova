@@ -82,8 +82,10 @@ def get_loss(
     @ks.utils.register_keras_serializable("SuPAErnova")
     class CustomLoss(Loss):
         @override
-        def call(self: Self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
-            return loss_fn(y_true, y_pred, model=self.model)
+        def call(
+            self: Self, y_true: tf.Tensor, y_pred: tf.Tensor, **kwargs: Any
+        ) -> tf.Tensor:
+            return loss_fn(y_true, y_pred, model=self.model, **kwargs)
 
     return CustomLoss
 

@@ -198,11 +198,10 @@ class PosteriorConfig(BackendConfig):
     n_delta_m_chains: int
     n_delta_av_chains: int
     # - HMC -
-    max_samples: PositiveInt
-    run_to_burn_ratio: PositiveInt
     n_leapfrog: PositiveInt
-    n_burnin: PositiveInt | None = None
-    n_samples: PositiveInt | None = None
+    n_run_steps: PositiveInt
+    n_burnin_steps: NonNegativeInt | NonNegativeFloat
+    n_adaption_steps: PositiveInt | PositiveFloat
     n_thinning: NonNegativeInt = 0
     # --- Optional ---
     debug: bool = False
@@ -248,22 +247,23 @@ class PosteriorConfig(BackendConfig):
     max_iterations: PositiveInt = 2500
     max_line_search_iterations: PositiveInt | None = None
     num_correction_pairs: PositiveInt | None = None
-    target_acceptance_rate: PositiveFloat = 0.9
+    # See [Betancourt et al (2014)](https://arxiv.org/abs/1411.6669) for why 0.8 is optimal for the NUTS Sampler
+    target_acceptance_rate: PositiveFloat = 0.8
 
-    # u_delta_av_min: float | None = -10
-    # u_delta_av_max: float | None = 10
-    u_delta_av_min: float | None = None
-    u_delta_av_max: float | None = None
+    u_delta_av_min: float | None = -5
+    u_delta_av_max: float | None = 5
+    # u_delta_av_min: float | None = None
+    # u_delta_av_max: float | None = None
     u_delta_av_start: float = -0.5
     u_delta_av_end: float = 0.5
     u_delta_av_mean: float = 0
     u_delta_av_std: float = 1
     u_delta_av_prior: bool = True
 
-    # u_latents_min: float | None = -10
-    # u_latents_max: float | None = 10
-    u_latents_min: float | None = None
-    u_latents_max: float | None = None
+    u_latents_min: float | None = -5
+    u_latents_max: float | None = 5
+    # u_latents_min: float | None = None
+    # u_latents_max: float | None = None
     u_latents_mean: float = 0
     u_latents_std: float = 1
     u_latents_prior: bool = True
@@ -273,30 +273,30 @@ class PosteriorConfig(BackendConfig):
     delta_av_mean: float = 0
     delta_av_std: float = 1
 
-    # delta_m_min: float | None = -2.5
-    # delta_m_max: float | None = 2.5
-    delta_m_min: float | None = None
-    delta_m_max: float | None = None
-    delta_m_start: float = -0.5
-    delta_m_end: float = 0.5
+    delta_m_min: float | None = -5
+    delta_m_max: float | None = 5
+    # delta_m_min: float | None = None
+    # delta_m_max: float | None = None
+    delta_m_start: float = -1.5
+    delta_m_end: float = 1.5
     delta_m_mean: float = 0
     delta_m_std: float = 1
     delta_m_prior: bool = False
 
-    # delta_p_min: float | None = -2.5
-    # delta_p_max: float | None = 2.5
-    delta_p_min: float | None = None
-    delta_p_max: float | None = None
+    delta_p_min: float | None = -5
+    delta_p_max: float | None = 5
+    # delta_p_min: float | None = None
+    # delta_p_max: float | None = None
     delta_p_start: float = -0.5
     delta_p_end: float = 0.5
     delta_p_mean: float = 0
     delta_p_std: float = 1
     delta_p_prior: bool = False
 
-    # bias_min: float | None = -2.5
-    # bias_max: float | None = 2.5
-    bias_min: float | None = None
-    bias_max: float | None = None
+    bias_min: float | None = -5
+    bias_max: float | None = 5
+    # bias_min: float | None = None
+    # bias_max: float | None = None
     bias_start: float = -0.5
     bias_end: float = 0.5
     bias_mean: float = 0

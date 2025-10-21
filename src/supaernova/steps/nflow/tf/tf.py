@@ -1,7 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 from typing import TYPE_CHECKING, Self, cast, override
 
-import numpy as np
 from tqdm.keras import TqdmCallback
 
 from supaernova._tf import JIT_COMPILE, ks, tf, tfb, tfd
@@ -141,8 +140,8 @@ class TFNFlowModel(ks.Model):
         self.patience: int = self.options.patience
 
         # TODO: Softcode
-        self.lr: list[float] = [1e-4, 5e-5, 2.5e-5, 2e-5, 1.25e-5, 1e-5]
-        self.steps: list[int] = [500, 1000, 2500, 5000, 10000]
+        self.lr: list[float] = [1e-3, 5e-4, 2.5e-4, 1e-4, 5e-5, 2.5e-5]
+        self.steps: list[int] = [50, 100, 250, 500, 1000]
 
         self.ema_steps: int = self.options.ema_steps
         self.ema_momentum: float = self.options.ema_momentum
@@ -269,29 +268,16 @@ class TFNFlowModel(ks.Model):
 
         # === Unpack Inputs ===
         latents = inputs[..., :-1]
-        # pp(latents, name="latents")
-
-        # u_latents = self.z_to_u(latents, permute=True)
-        # pp(u_latents, name="u_latents")
 
         mask = tf.cast(inputs[..., -1:][..., 0], tf.bool)
-        # pp(mask, name="mask")
 
         # === Calculate Log Probability ===
         log_prob = self.flow.log_prob(latents)
-        # pp(log_prob, name="log_prob")
-
-        # Replace NaN and inf with infinitely low log prob
-        inf_log_prob = -np.inf * tf.ones_like(log_prob)
-        zero_log_prob = tf.zeros_like(log_prob)
-
-        masked_log_prob = tf.where(mask, log_prob, zero_log_prob)
-        # pp(masked_log_prob, name="masked_log_prob")
 
         return tf.where(
-            tf.math.is_finite(masked_log_prob),
-            masked_log_prob,
-            zero_log_prob,
+            mask,
+            log_prob,
+            tf.zeros_like(log_prob),
         )
 
     def u_to_z(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:

@@ -92,8 +92,8 @@ class NFlowConfig(BackendConfig):
     ema_steps: NonNegativeInt = 0
     ema_momentum: PositiveFloat = 0.999
 
-    epochs: PositiveInt = 100000
-    patience: PositiveFloat = 2500
+    epochs: PositiveInt = 50000
+    patience: PositiveFloat = 500
     batch_normalisation: bool = False
 
     min_redshift: float | None = None

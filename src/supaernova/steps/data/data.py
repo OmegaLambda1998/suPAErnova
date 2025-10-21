@@ -863,7 +863,7 @@ class Data(Step[DataConfig]):
             max_phase = max(self.max_phase, max_phase)
         self.log.debug(f"{self.max_phase = }, {time.max() = }, {max_phase = }")
         data["time"] = (data["phase"] - min_phase) / (max_phase - min_phase)
-        data["time"][~spec_mask] = -np.inf
+        # data["time"][~spec_mask] = -np.inf
 
         # Scale observed uncertainty to account for fitting degrees of freedom, and an error floor
         data["sigma"] = 1.4 * data["sigma"] + 4e-10

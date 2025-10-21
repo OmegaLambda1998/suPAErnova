@@ -6,6 +6,7 @@ import importlib
 
 import numpy as np
 
+from supaernova.utils import pp
 from supaernova.analysis import Plotter
 from supaernova.steps.models import Model, ModelStep
 from supaernova.analysis.spectra import SpectraPlotter
@@ -539,6 +540,17 @@ class PAE(ModelStep[PAEConfig]):
                     wl_mask=input_wl_mask,
                 )
 
+                # l = latents.numpy()[:, 0, :]
+                # mean_l = l.mean(axis=0)
+                # diff_l = np.abs(l - mean_l).sum(axis=-1)
+                # sort_l = np.argsort(diff_l)
+                #
+                # print(
+                #     input_sn_name[:, 0, 0][sort_l],
+                #     l[sort_l, ...],
+                #     mean_l,
+                # )
+
                 loss = self.model.compute_loss(
                     latents,
                     input_amplitude,
@@ -857,8 +869,6 @@ class PAE(ModelStep[PAEConfig]):
                     statistics=o.reduce,
                     shade_alpha=0.0,
                     plot_cloud=True,
-                    smooth=0,
-                    bins=self.sn_dim,
                 )
 
     @override
@@ -1115,14 +1125,6 @@ class PAE(ModelStep[PAEConfig]):
             )
             # Mask out wavelengths outside the wavelength range
             wl_mask = wavelength_mask
-
-            print(
-                input_mask.shape,
-                sn_mask.shape,
-                spec_mask.shape,
-                wl_mask.shape,
-                mask_type,
-            )
 
             setattr(self, f"{mask_type}mask", input_mask)
             setattr(self, f"{mask_type}sn_mask", sn_mask)

@@ -37,3 +37,5 @@ IS_ROCM = any(
 )
 TF_CTX = tf.device("/CPU:0") if IS_ROCM else nullcontext()
 JIT_COMPILE = IS_GPU
+
+HUGE = tf.float16.max

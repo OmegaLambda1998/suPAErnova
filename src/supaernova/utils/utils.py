@@ -66,6 +66,8 @@ def max_central(
 ) -> tuple[float, float, float]:
     c = cc.ChainConsumer()
     chain = cc.Chain(samples=pd.DataFrame({"data": data}), name="data")
+    if np.min(data) == np.max(data):
+        return 0, np.min(data), 0
     max_central = c.analysis.get_parameter_summary_max_central(chain, "data")
     center = max_central.center
     lower = max_central.center - max_central.lower
