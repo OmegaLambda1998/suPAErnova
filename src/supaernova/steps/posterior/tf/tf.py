@@ -305,7 +305,7 @@ class TFPosteriorModel(ks.Model):
         log_prior = self.map.prior(input_position)
         # pp(log_prior, "log_prior")
 
-        log_prior = tf.where(mask_sn, log_prior, -np.inf * tf.ones_like(log_prior))
+        # log_prior = tf.where(mask_sn, log_prior, -np.inf * tf.ones_like(log_prior))
 
         log_prior = tf.where(
             tf.math.is_finite(log_prior), log_prior, -np.inf * tf.ones_like(log_prior)
@@ -403,7 +403,7 @@ class TFPosteriorModel(ks.Model):
             1,
         )
         log_likelihood /= log_likelihood_sum
-        log_likelihood *= posterior_mask.shape[-1]
+        # log_likelihood *= posterior_mask.shape[-1]
         # pp(log_likelihood, "log_likelihood")
 
         log_likelihood_num = tf.reduce_sum(
@@ -418,14 +418,14 @@ class TFPosteriorModel(ks.Model):
             tf.math.count_nonzero(mask_spec, axis=-1, dtype=log_likelihood.dtype), 1
         )
         log_likelihood = log_likelihood_num / log_likelihood_sum
-        log_likelihood *= posterior_mask.shape[-2]
+        # log_likelihood *= posterior_mask.shape[-2]
         # pp(log_likelihood, "log_likelihood")
 
-        log_likelihood = tf.where(
-            mask_sn,
-            log_likelihood,
-            -np.inf * tf.ones_like(log_likelihood),
-        )
+        # log_likelihood = tf.where(
+        #     mask_sn,
+        #     log_likelihood,
+        #     -np.inf * tf.ones_like(log_likelihood),
+        # )
         # pp(log_likelihood, "log_likelihood")
 
         log_likelihood = tf.where(
