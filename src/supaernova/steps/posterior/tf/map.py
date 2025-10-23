@@ -682,6 +682,6 @@ class PosteriorMap(tf.Module):
             num_params += tf.cast(tf.shape(u_latents)[-1], tf.float32)
         log_prior += u_latents_log_prior
 
-        log_prior /= num_params
+        # log_prior /= num_params
 
         return log_prior

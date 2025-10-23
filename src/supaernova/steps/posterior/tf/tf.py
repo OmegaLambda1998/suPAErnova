@@ -402,7 +402,8 @@ class TFPosteriorModel(ks.Model):
             tf.math.count_nonzero(posterior_mask, axis=-1, dtype=log_likelihood.dtype),
             1,
         )
-        log_likelihood = 100 * log_likelihood / log_likelihood_sum
+        log_likelihood /= log_likelihood_sum
+        log_likelihood *= posterior_mask.shape[-1]
         # pp(log_likelihood, "log_likelihood")
 
         log_likelihood_num = tf.reduce_sum(
@@ -417,6 +418,7 @@ class TFPosteriorModel(ks.Model):
             tf.math.count_nonzero(mask_spec, axis=-1, dtype=log_likelihood.dtype), 1
         )
         log_likelihood = log_likelihood_num / log_likelihood_sum
+        log_likelihood *= posterior_mask.shape[-2]
         # pp(log_likelihood, "log_likelihood")
 
         log_likelihood = tf.where(
