@@ -403,7 +403,7 @@ class TFPosteriorModel(ks.Model):
             1,
         )
         log_likelihood /= log_likelihood_sum
-        # log_likelihood *= posterior_mask.shape[-1]
+        log_likelihood *= posterior_mask.shape[-1]
         # pp(log_likelihood, "log_likelihood")
 
         log_likelihood_num = tf.reduce_sum(
