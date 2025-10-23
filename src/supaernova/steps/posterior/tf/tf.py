@@ -398,12 +398,16 @@ class TFPosteriorModel(ks.Model):
         log_likelihood = likelihood.log_prob(amp)
         # pp(log_like, "log_like")
 
-        log_likelihood_sum = tf.math.maximum(
-            tf.math.count_nonzero(posterior_mask, axis=-1, dtype=log_likelihood.dtype),
-            1,
+        log_likelihood_scale = (
+            tf.math.maximum(
+                tf.math.count_nonzero(
+                    posterior_mask, axis=-1, dtype=log_likelihood.dtype
+                ),
+                1,
+            )
+            / posterior_mask.shape[-1]
         )
-        log_likelihood /= log_likelihood_sum
-        log_likelihood *= posterior_mask.shape[-1]
+        log_likelihood *= log_likelihood_scale
         # pp(log_likelihood, "log_likelihood")
 
         log_likelihood_num = tf.reduce_sum(
