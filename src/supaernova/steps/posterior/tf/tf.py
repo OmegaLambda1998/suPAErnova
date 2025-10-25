@@ -402,7 +402,13 @@ class TFPosteriorModel(ks.Model):
         log_likelihood = likelihood.log_prob(amp)
 
         # The likelihood we would have gotten if *all* amplitudes were set to 0
-        null_likelihood = likelihood.log_prob(tf.zeros_like(amp))
+        null_likelihood = tfd.Independent(
+            tfd.MultivariateNormalDiag(
+                loc=tf.zeros_like(synth_amp),
+                scale_diag=synth_sigma,
+            ),
+            reinterpreted_batch_ndims=0,
+        ).log_prob(tf.zeros_like(amp))
 
         # What fraction of amplitudes were unmasked
         log_likelihood_unmasked = (
