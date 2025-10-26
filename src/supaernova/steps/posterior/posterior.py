@@ -2060,6 +2060,8 @@ class Posterior(ModelStep[PosteriorConfig]):
         input_sn_mask: "npt.NDArray[bool]",
         input_spec_mask: "npt.NDArray[bool]",
         input_wl_mask: "npt.NDArray[bool]",
+        *,
+        force: bool = False,
     ) -> None:
         if self.analysis.plot_dispersion is not None:
             if not isinstance(self.analysis.plot_dispersion, list):
@@ -2077,7 +2079,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                         self.paths.plots / str(self.seeds[0]) / subset / str(seed)
                     )
                 o.savepath.mkdir(parents=True, exist_ok=True)
-                if (o.savepath / f"{o.name}.{o.ext}").exists():
+                if (o.savepath / f"{o.name}.{o.ext}").exists() and not force:
                     continue
                 self.log.debug(f"Plotting {o.name}")
 
@@ -2119,6 +2121,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     sn_mask=input_sn_mask,
                     spec_mask=input_spec_mask,
                     wl_mask=input_wl_mask,
+                    force=force,
                 )
 
     @override

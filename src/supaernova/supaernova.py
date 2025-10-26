@@ -110,7 +110,7 @@ def main(
     result_path: Path | None = None,
     plot_path: Path | None = None,
     log_path: Path | None = None,
-) -> None:
+) -> RunConfig:
     log = setup_logging(__name__, verbose=verbose)
     log.info("Started SuPAErnova")
     try:
@@ -140,6 +140,7 @@ def main(
                 exec_time /= t
                 unit = "h"
             log.info(f"SuPAErnovae took {exec_time:.2f}{unit}")
+            return config
     except ValidationError as e:
         log.error(e)  # noqa: TRY400
         sys.exit(1)

@@ -479,9 +479,7 @@ class TFPAEDecoder(ks.layers.Layer):
             colourlaw = self.colourlaw_layer(delta_av_latent, training=training)
             amplitude *= tf.pow(10.0, -0.4 * (colourlaw + delta_m_latent))
 
-        # If training, zero out masked elements
-        # Otherwise only zero out non-physical elements (negatives, nans, and infs)
-        if not training or testing:
+        if not (training or testing):
             amplitude = tf.nn.relu(amplitude)
 
         masked_spectra = tf.math.reduce_any(input_mask, axis=-1, keepdims=True)
