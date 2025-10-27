@@ -366,6 +366,16 @@ class Posterior(ModelStep[PosteriorConfig]):
             zs = z_latents[..., :-2] if pae.model.physical_latents else z_latents
             u_latents = self.nflow.z_to_u(zs, permute=True)
 
+            subset_data = getattr(self, f"{subset}_data")
+            time = subset_data.time
+            amplitude = subset_data.amplitude
+            sigma = subset_data.sigma
+            subset_data.clear()
+            mask = getattr(self, f"{subset}_mask")
+            sn_mask = getattr(self, f"{subset}_sn_mask")
+            spec_mask = getattr(self, f"{subset}_spec_mask")
+            wl_mask = getattr(self, f"{subset}_wl_mask")
+
             step_sizes = []
             if self.train_delta_m:
                 if pae.model.physical_latents:
@@ -390,23 +400,15 @@ class Posterior(ModelStep[PosteriorConfig]):
             self.step_sizes[subset] = np.concatenate(step_sizes, axis=-1)
 
             recon_error, _, recon_error_centers = pae.model.recon_error((
-                self.data.time,
-                self.data.amplitude,
-                self.data.sigma,
-                self.mask,
-                self.sn_mask,
-                self.spec_mask,
-                self.wl_mask,
+                time,
+                amplitude,
+                sigma,
+                mask,
+                sn_mask,
+                spec_mask,
+                wl_mask,
             ))
-            # recon_error, _, recon_error_centers = pae.model.recon_error((
-            #     stage.input_phase,
-            #     stage.input_amp,
-            #     stage.input_d_amp,
-            #     stage.input_mask,
-            #     stage.input_sn_mask,
-            #     stage.input_spec_mask,
-            #     stage.input_wl_mask,
-            # ))
+
             self.recon_error[subset] = recon_error
             self.recon_error_centers[subset] = recon_error_centers
 
