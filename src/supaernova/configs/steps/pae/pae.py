@@ -230,7 +230,7 @@ class PAEConfig(BackendConfig):
     loss_delta_av_penalty: NonNegativeFloat = 0
     loss_delta_m_penalty: NonNegativeFloat = 0
     loss_delta_p_penalty: NonNegativeFloat = 0
-    loss_covariance_penalty: NonNegativeFloat = 50000
+    loss_covariance_penalty: NonNegativeFloat = 100000
     loss_decorrelate_all: bool = True
     loss_decorrelate_dust: bool = True
     loss_clip_delta: PositiveFloat = 25
