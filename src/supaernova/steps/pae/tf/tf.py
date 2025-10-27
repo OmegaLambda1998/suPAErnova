@@ -198,7 +198,6 @@ class TFPAEEncoder(ks.layers.Layer):
         n_unmasked_spec = tf.math.count_nonzero(
             mask_spec[..., 0], axis=-1, keepdims=True, dtype=tf.float32
         )
-        valid_spec = n_unmasked_spec > 0
         n_unmasked_spec = tf.math.maximum(n_unmasked_spec, 1)
 
         # Determine which latents to keep
@@ -1500,15 +1499,9 @@ class TFPAEModel(ks.Model):
 
             mask &= sn_mask & spec_mask & wl_mask
 
-            # ~(~mask & wl_mask)
-            # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
-            valid_wl_mask = tf.logical_not(
-                tf.logical_and(tf.logical_not(mask), wl_mask)
-            )
-
             # Determine which spectra to keep
             # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-            mask_spec = tf.math.reduce_any(valid_wl_mask, axis=-1, keepdims=True)
+            mask_spec = tf.math.reduce_any(mask, axis=-1, keepdims=True)
 
             # The number of unmasked spectra
             n_unmasked_spec = tf.math.maximum(
@@ -1722,15 +1715,9 @@ class TFPAEModel(ks.Model):
         # Apply sn and spec masks
         recon_mask = mask & sn_mask & spec_mask & wl_mask
 
-        # ~(~input_mask & input_wl_mask)
-        # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
-        valid_wl_mask = tf.logical_not(
-            tf.logical_and(tf.logical_not(recon_mask), wl_mask)
-        )
-
         # Determine which spectra to keep
         # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-        mask_spec = tf.math.reduce_any(valid_wl_mask, axis=-1, keepdims=True)
+        mask_spec = tf.math.reduce_any(recon_mask, axis=-1, keepdims=True)
 
         # Determine which SNe to keep
         # Will mask out any SN with *no* unmasked spectra

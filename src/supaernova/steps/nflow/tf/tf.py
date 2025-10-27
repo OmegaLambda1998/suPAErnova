@@ -56,10 +56,7 @@ class TFNFlowModel(ks.Model):
         self.spec_mask: npt.NDArray[bool] = config.spec_mask
         self.wl_mask: npt.NDArray[bool] = config.wl_mask
         input_mask = self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask
-        valid_wl_mask = tf.logical_not(
-            tf.logical_and(tf.logical_not(input_mask), self.wl_mask)
-        )
-        mask_spec = tf.math.reduce_any(valid_wl_mask, axis=-1)
+        mask_spec = tf.math.reduce_any(input_mask, axis=-1)
         mask_sn = tf.math.reduce_any(mask_spec, axis=-1, keepdims=True)
         self.mask = mask_sn
 
@@ -75,10 +72,7 @@ class TFNFlowModel(ks.Model):
             & self.train_spec_mask
             & self.train_wl_mask
         )
-        valid_wl_train_mask = tf.logical_not(
-            tf.logical_and(tf.logical_not(input_train_mask), self.train_wl_mask)
-        )
-        train_mask_spec = tf.math.reduce_any(valid_wl_train_mask, axis=-1)
+        train_mask_spec = tf.math.reduce_any(input_train_mask, axis=-1)
         train_mask_sn = tf.math.reduce_any(train_mask_spec, axis=-1, keepdims=True)
         self.train_mask = train_mask_sn
 
@@ -94,10 +88,7 @@ class TFNFlowModel(ks.Model):
             & self.test_spec_mask
             & self.test_wl_mask
         )
-        valid_wl_test_mask = tf.logical_not(
-            tf.logical_and(tf.logical_not(input_test_mask), self.test_wl_mask)
-        )
-        test_mask_spec = tf.math.reduce_any(valid_wl_test_mask, axis=-1)
+        test_mask_spec = tf.math.reduce_any(input_test_mask, axis=-1)
         test_mask_sn = tf.reduce_any(test_mask_spec, axis=-1, keepdims=True)
         self.test_mask = test_mask_sn
 
@@ -113,10 +104,7 @@ class TFNFlowModel(ks.Model):
             & self.val_spec_mask
             & self.val_wl_mask
         )
-        valid_wl_val_mask = tf.logical_not(
-            tf.logical_and(tf.logical_not(input_val_mask), self.val_wl_mask)
-        )
-        val_mask_spec = tf.math.reduce_any(valid_wl_val_mask, axis=-1)
+        val_mask_spec = tf.math.reduce_any(input_val_mask, axis=-1)
         val_mask_sn = tf.math.reduce_any(val_mask_spec, axis=-1, keepdims=True)
         self.val_mask = val_mask_sn
 

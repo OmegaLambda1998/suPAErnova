@@ -292,11 +292,7 @@ class TFPosteriorModel(ks.Model):
 
         # Determine which spectra to keep
         # Will mask out any spectrum with *no* unmasked wavelengths in the valid wavelength range
-        mask_spec = tf.math.reduce_all(posterior_mask, axis=-1)
-
-        # Determine which SNe to keep
-        # Will mask out any SN with *no* unmasked spectra
-        mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
+        mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
 
         # Unconstrained -> Constrained
         input_position = self.map.constrain(input_position, full=True)

@@ -840,7 +840,7 @@ class PAE(ModelStep[PAEConfig]):
                     mask,
                     _sn_mask,
                     _spec_mask,
-                    wl_mask,
+                    _wl_mask,
                 ) = SpectraPlotter.prep(
                     data,
                     o,
@@ -850,15 +850,9 @@ class PAE(ModelStep[PAEConfig]):
                     wl_mask=input_wl_mask,
                 )
 
-                # ~(~input_mask & input_wl_mask)
-                # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
-                valid_wl_mask = np.logical_not(
-                    np.logical_and(np.logical_not(mask), wl_mask)
-                )
-
                 # Determine which spectra to keep
                 # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-                mask_spec = np.any(valid_wl_mask, axis=-1, keepdims=True)
+                mask_spec = np.any(mask, axis=-1, keepdims=True)
 
                 # Determine which SNe to keep
                 # Will mask out any SN with *no* unmasked spectra
