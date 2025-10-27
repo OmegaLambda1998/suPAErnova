@@ -292,7 +292,7 @@ class TFPosteriorModel(ks.Model):
 
         # Determine which spectra to keep
         # Will mask out any spectrum with *no* unmasked wavelengths in the valid wavelength range
-        mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
+        mask_spec = tf.math.reduce_all(posterior_mask, axis=-1)
 
         # Determine which SNe to keep
         # Will mask out any SN with *no* unmasked spectra
@@ -1762,16 +1762,6 @@ class TFPosteriorModel(ks.Model):
             self.update_sample_progress(log_prior, log_like, log_prob)
         if pkr is not None:
             self.update_run_progress(log_prior, log_like, log_prob, pkr)
-
-        # log_prob = tf.where(
-        #     tf.math.is_finite(log_prob), log_prob, -HUGE * tf.ones_like(log_prob)
-        # )
-        # log_like = tf.where(
-        #     tf.math.is_finite(log_like), log_like, -HUGE * tf.ones_like(log_like)
-        # )
-        # log_prior = tf.where(
-        #     tf.math.is_finite(log_prior), log_prior, -HUGE * tf.ones_like(log_prior)
-        # )
 
         if additional_outputs:
             return log_prior, log_like, log_prob
