@@ -291,14 +291,20 @@ class TFPosteriorModel(ks.Model):
         posterior_mask = input_mask & input_sn_mask & input_spec_mask & input_wl_mask
 
         # Determine which spectra to keep
-        # Will mask out any spectrum with *no* unmasked wavelengths in the valid wavelength range
         mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
+
+        # Determine which sn to keep
+        mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
 
         # Unconstrained -> Constrained
         input_position = self.map.constrain(input_position, full=True)
         # pp(input_position, "input_position")
 
         log_prior = self.map.prior(input_position)
+
+        # Ignore prior of fully masked SN
+        # Important to avoid them affecting accept ratio / step size calculations
+        log_prior = tf.where(mask_sn, log_prior, -np.inf * tf.ones_like(log_prior))
 
         log_prior = tf.where(
             tf.math.is_finite(log_prior), log_prior, -np.inf * tf.ones_like(log_prior)
@@ -433,6 +439,12 @@ class TFPosteriorModel(ks.Model):
 
         log_likelihood = log_likelihood_num / log_likelihood_sum
 
+        # Ignore likelihood of fully masked SN
+        # Important to avoid them affecting accept ratio / step size calculations
+        log_likelihood = tf.where(
+            mask_sn, log_likelihood, -np.inf * tf.ones_like(log_likelihood)
+        )
+
         log_likelihood = tf.where(
             tf.math.is_finite(log_likelihood),
             log_likelihood,
@@ -440,6 +452,12 @@ class TFPosteriorModel(ks.Model):
         )
 
         log_probability = log_likelihood + log_prior
+
+        # Ignore probability of fully masked SN
+        # Important to avoid them affecting accept ratio / step size calculations
+        log_probability = tf.where(
+            mask_sn, log_probability, -np.inf * tf.ones_like(log_probability)
+        )
 
         log_probability = tf.where(
             tf.math.is_finite(log_probability),
@@ -1883,7 +1901,9 @@ class TFPosteriorModel(ks.Model):
         pp(step_size_init, name="step_size_init")
 
         initial_position = self.map.unconstrain(self.map.position.best)
-        step_size_std = tf.math.reduce_std(initial_position, axis=0)
+        step_size_std = tf.math.reduce_std(
+            tf.boolean_mask(initial_position, self.map.converged), axis=0
+        )
         pp(step_size_std, name="step_size_std")
 
         step_size_std = tf.where(
@@ -1892,7 +1912,7 @@ class TFPosteriorModel(ks.Model):
         step_size_init = tf.where(
             tf.math.is_finite(step_size_init), step_size_init, step_size_std
         )
-        step_size_inner = 0.5 * (step_size_init + step_size_std)
+        step_size_inner = tf.math.minimum(step_size_init, step_size_std)
         pp(step_size_inner, name="step_size_inner")
 
         step_size = tf.repeat(

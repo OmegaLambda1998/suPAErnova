@@ -376,25 +376,29 @@ class Posterior(ModelStep[PosteriorConfig]):
             spec_mask = getattr(self, f"{subset}_spec_mask")
             wl_mask = getattr(self, f"{subset}_wl_mask")
 
+            mask_sn = np.any(
+                np.any(mask & wl_mask & spec_mask & sn_mask, axis=-1), axis=-1
+            )
+
             step_sizes = []
             if self.train_delta_m:
                 if pae.model.physical_latents:
                     delta_m = z_latents[..., -2:-1]
-                    delta_m_step_size = np.std(delta_m, axis=0)
+                    delta_m_step_size = np.std(delta_m[mask_sn], axis=0)
                 else:
                     delta_m_step_size = np.array(self.delta_m_std)
                 step_sizes.append(delta_m_step_size)
             if self.train_delta_p:
                 if pae.model.physical_latents:
                     delta_p = z_latents[..., -1:]
-                    delta_p_step_size = np.std(delta_p, axis=0)
+                    delta_p_step_size = np.std(delta_p[mask_sn], axis=0)
                 else:
                     delta_p_step_size = np.array(self.delta_p_std)
                 step_sizes.append(delta_p_step_size)
             if self.train_bias:
                 bias_step_size = np.array(self.bias_std)
                 step_sizes.append(bias_step_size)
-            u_latent_step_size = np.std(u_latents, axis=0)
+            u_latent_step_size = np.std(u_latents[mask_sn], axis=0)
             step_sizes.append(u_latent_step_size)
 
             self.step_sizes[subset] = np.concatenate(step_sizes, axis=-1)
