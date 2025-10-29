@@ -298,7 +298,6 @@ class TFPosteriorModel(ks.Model):
 
         # Unconstrained -> Constrained
         input_position = self.map.constrain(input_position, full=True)
-        # pp(input_position, "input_position")
 
         log_prior = self.map.prior(input_position)
 
