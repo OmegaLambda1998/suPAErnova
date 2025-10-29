@@ -128,7 +128,7 @@ class TFNFlowModel(ks.Model):
         self.patience: int = self.options.patience
 
         # TODO: Softcode
-        self.lr: list[float] = [5e-4, 2.5e-4, 1e-4, 5e-5, 2.5e-5, 1e-5]
+        self.lr: list[float] = [1e-3, 5e-4, 2.5e-4, 1e-4, 5e-5, 2.5e-5]
         self.steps: list[int] = [50, 100, 250, 500, 1000]
 
         self.ema_steps: int = self.options.ema_steps
