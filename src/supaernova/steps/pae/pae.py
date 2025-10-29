@@ -534,30 +534,17 @@ class PAE(ModelStep[PAEConfig]):
 
                 latents, output_amplitude = self.model(
                     (input_phase, input_amplitude),
-                    training=False,
                     mask=input_mask,
                     sn_mask=input_sn_mask,
                     spec_mask=input_spec_mask,
                     wl_mask=input_wl_mask,
                 )
 
-                # l = latents.numpy()[:, 0, :]
-                # mean_l = l.mean(axis=0)
-                # diff_l = np.abs(l - mean_l).sum(axis=-1)
-                # sort_l = np.argsort(diff_l)
-                #
-                # print(
-                #     input_sn_name[:, 0, 0][sort_l],
-                #     l[sort_l, ...],
-                #     mean_l,
-                # )
-
                 loss = self.model.compute_loss(
                     latents,
                     input_amplitude,
                     output_amplitude,
                     sample_weight=input_d_amplitude,
-                    training=False,
                     mask=input_mask,
                     sn_mask=input_sn_mask,
                     spec_mask=input_spec_mask,
@@ -852,11 +839,11 @@ class PAE(ModelStep[PAEConfig]):
 
                 # Determine which spectra to keep
                 # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-                mask_spec = np.any(mask, axis=-1, keepdims=True)
+                mask_spec = np.any(mask, axis=-1)
 
                 # Determine which SNe to keep
                 # Will mask out any SN with *no* unmasked spectra
-                mask_sn = np.any(mask_spec, axis=-2)[:, 0]
+                mask_sn = np.any(mask_spec, axis=-1)
 
                 DistributionPlotter.plot_corner(
                     chains(mask_sn),
