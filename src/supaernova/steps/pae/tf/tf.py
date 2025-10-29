@@ -260,6 +260,9 @@ class TFPAEEncoder(ks.layers.Layer):
             tf.zeros_like(latents_mean),
         )
 
+        # Zero out latents of masked SNe
+        latents = tf.where(mask_sn, latents, tf.zeros_like(latents))
+
         # Repeat latent layers across spec_dim
         return self.repeat_latent_layer(latents)
 
@@ -481,9 +484,7 @@ class TFPAEDecoder(ks.layers.Layer):
         if not (training or testing):
             amplitude = tf.nn.relu(amplitude)
 
-        masked_spectra = tf.math.reduce_any(input_mask, axis=-1, keepdims=True)
-
-        return tf.where(masked_spectra, amplitude, tf.zeros_like(amplitude))
+        return tf.where(input_mask, amplitude, tf.zeros_like(amplitude))
 
     @override
     def __call__(
