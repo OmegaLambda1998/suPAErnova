@@ -5,7 +5,7 @@ import importlib
 import numpy as np
 import pandas as pd
 
-from supaernova.utils import max_central
+from supaernova.utils import pp, max_central
 from supaernova.analysis import Plotter
 from supaernova.steps.models import Model, ModelStep
 from supaernova.analysis.spectra import SpectraPlotter
@@ -573,6 +573,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                 input_spectra_id = data.spectra_id
                 data.clear()
 
+                pp(model.pae.encoder.moving_means)
+
                 map_results = {
                     "chain_min": model.map.chain_min.numpy(),
                     "converged": model.map.converged.numpy(),
@@ -606,6 +608,9 @@ class Posterior(ModelStep[PosteriorConfig]):
                     "z_latents": model.hmc.z_latents.numpy(),
                     "delta_m": model.hmc.delta_m.numpy(),
                     "delta_p": model.hmc.delta_p.numpy(),
+                    "log_prior": model.hmc.log_prior.numpy(),
+                    "log_like": model.hmc.log_like.numpy(),
+                    "log_prob": model.hmc.log_prob.numpy(),
                 }
 
                 model_results = {
@@ -1098,12 +1103,13 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # --- NFlow ---
                 # --- Posterior ---
                 samples = model.hmc.samples.numpy()
+                log_prob = model.hmc.log_prob.numpy()
                 if o.reduce == "mean":
                     reduce_samples = samples.mean(axis=0)
                 else:
                     reduce_samples = np.array([
                         np.array([
-                            max_central(samples[:, sn, pos])[1]
+                            max_central(samples[:, sn, pos], weight=log_prob[:, sn])[1]
                             for pos in range(samples.shape[-1])
                         ])
                         for sn in range(samples.shape[-2])
@@ -1523,12 +1529,13 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # --- NFlow ---
                 # --- Posterior ---
                 samples = model.hmc.samples.numpy()
+                log_prob = model.hmc.log_prob.numpy()
                 if o.reduce == "mean":
                     reduce_samples = samples.mean(axis=0)
                 else:
                     reduce_samples = np.array([
                         np.array([
-                            max_central(samples[:, sn, pos])[1]
+                            max_central(samples[:, sn, pos], weight=log_prob[:, sn])[1]
                             for pos in range(samples.shape[-1])
                         ])
                         for sn in range(samples.shape[-2])
@@ -1760,7 +1767,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                         mean_delta_m = np.mean(delta_m, axis=0)
                     else:
                         mean_delta_m = np.array([
-                            max_central(delta_m[:, sn])[1]
+                            max_central(delta_m[:, sn], weight=log_prob[:, sn])[1]
                             for sn in range(delta_m.shape[-1])
                         ])
                     delta_p = model.hmc.delta_p.numpy()[..., 0]
@@ -1768,7 +1775,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                         mean_delta_p = np.mean(delta_p, axis=0)
                     else:
                         mean_delta_p = np.array([
-                            max_central(delta_p[:, sn])[1]
+                            max_central(delta_p[:, sn], weight=log_prob[:, sn])[1]
                             for sn in range(delta_p.shape[-1])
                         ])
                     names = data.sn_name

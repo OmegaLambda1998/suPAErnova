@@ -62,7 +62,7 @@ def jackknife_resample(arr: "npt.NDArray", func: "Callable") -> "npt.NDArray":
 
 
 def max_central(
-    data: "npt.NDArray",
+    data: "npt.NDArray", *, weight: "npt.NDArray | None" = None
 ) -> tuple[float, float, float]:
     c = cc.ChainConsumer()
     chain = cc.Chain(samples=pd.DataFrame({"data": data}), name="data")
@@ -70,6 +70,8 @@ def max_central(
         return 0, np.min(data), 0
     max_central = c.analysis.get_parameter_summary_max_central(chain, "data")
     center = max_central.center
+    if weight is not None:
+        center = data[np.argmax(weight)]
     lower = max_central.center - max_central.lower
     upper = max_central.upper - max_central.center
     return (lower, center, upper)

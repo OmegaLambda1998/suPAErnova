@@ -124,6 +124,9 @@ class PosteriorStepHMCResult(StepResult):
     z_latents: npt.NDArray[float]
     delta_m: npt.NDArray[float]
     delta_p: npt.NDArray[float]
+    log_prior: npt.NDArray[float]
+    log_like: npt.NDArray[float]
+    log_prob: npt.NDArray[float]
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---

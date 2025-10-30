@@ -381,59 +381,47 @@ class TFPosteriorModel(ks.Model):
         synth_amp = tf.where(posterior_mask, synth_amp, tf.zeros_like(synth_amp))
 
         # Create likelihood distribution
-        likelihood = tfd.Independent(
-            tfd.MultivariateNormalDiag(
-                loc=synth_amp,
-                scale_diag=synth_sigma,
-            ),
-            reinterpreted_batch_ndims=0,
-        )
+        # likelihood = tfd.Independent(
+        #     tfd.MultivariateNormalDiag(
+        #         loc=synth_amp,
+        #         scale_diag=synth_sigma,
+        #     ),
+        #     reinterpreted_batch_ndims=0,
+        # )
+
+        likelihood = tfd.Normal(loc=synth_amp, scale=synth_sigma)
 
         # Set missing values to 0 for all times
         amp = tf.where(posterior_mask, input_amp, tf.zeros_like(input_amp))
 
-        # We want our log_likelihood to be:
-        #   log_like = sum(log_prob(wl_unmasked))
-        # However what we calculate is actually:
-        #   log_like* = sum(log_prob(wl_unmasked)) + sum(log_prob(0 * wl_masked))
-        # As such, we correct our log_likelihood to:
-        #   log_like = log_like* - n_masked * sum(log_prob(0)))
-
-        # Original log_likelihood, including masked amplitudes which had been set to 0
-        log_likelihood = likelihood.log_prob(amp)
-
-        # The likelihood we would have gotten if *all* amplitudes were set to 0
-        null_likelihood = tfd.Independent(
-            tfd.MultivariateNormalDiag(
-                loc=tf.zeros_like(synth_amp),
-                scale_diag=synth_sigma,
-            ),
-            reinterpreted_batch_ndims=0,
-        ).log_prob(tf.zeros_like(amp))
-
-        # What fraction of amplitudes were unmasked
-        log_likelihood_unmasked = (
-            tf.math.count_nonzero(posterior_mask, axis=-1, dtype=log_likelihood.dtype)
-            / posterior_mask.shape[-1]
-        )
-        # What fraction of amplitudes were masked
-        log_likelihood_masked = 1 - log_likelihood_unmasked
-
-        # Corrected log_likelihood
-        log_likelihood -= null_likelihood * log_likelihood_masked
-
-        # Once again we are trying to add up only the unmasked log_likelihoods of each SN
-        log_likelihood_num = tf.reduce_sum(
+        log_likelihood_wl = likelihood.log_prob(amp)
+        log_likelihood_spec_num = tf.reduce_sum(
             tf.where(
-                mask_spec,
-                log_likelihood,
-                tf.zeros_like(log_likelihood),
+                posterior_mask,
+                log_likelihood_wl,
+                tf.zeros_like(log_likelihood_wl),
             ),
             axis=-1,
         )
+        log_likelihood_spec_sum = tf.math.maximum(
+            tf.math.count_nonzero(
+                posterior_mask, axis=-1, dtype=log_likelihood_wl.dtype
+            ),
+            1,
+        )
 
+        log_likelihood_spec = log_likelihood_spec_num / log_likelihood_spec_sum
+        log_likelihood_num = tf.reduce_sum(
+            tf.where(
+                mask_spec,
+                log_likelihood_spec,
+                tf.zeros_like(log_likelihood_spec),
+            ),
+            axis=-1,
+        )
         log_likelihood_sum = tf.math.maximum(
-            tf.math.count_nonzero(mask_spec, axis=-1, dtype=log_likelihood.dtype), 1
+            tf.math.count_nonzero(mask_spec, axis=-1, dtype=log_likelihood_spec.dtype),
+            1,
         )
 
         log_likelihood = log_likelihood_num / log_likelihood_sum

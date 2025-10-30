@@ -218,7 +218,8 @@ class DispersionPlotter(Plotter):
             for sn in range(hmc.hmc.delta_m.shape[1]):
                 name = f"{i}_{sn}"
                 delta_m = hmc.hmc.delta_m[:, sn, 0]
-                lower, center, upper = max_central(delta_m)
+                log_prob = hmc.hmc.log_prob[:, sn]
+                lower, center, upper = max_central(delta_m, weight=log_prob)
                 amplitudes.append(center)
                 amplitude_errs_lower.append(lower)
                 amplitude_stds.append(np.sqrt(np.abs(lower * upper)))
