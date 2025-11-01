@@ -1,6 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import Any, Self, Literal, ClassVar, Annotated
+from typing import Any, Literal, ClassVar, Annotated
 from pathlib import Path
 import importlib
 from collections.abc import Callable
@@ -57,7 +57,7 @@ class PosteriorMAPStage(BaseConfig):
     # --- Before ---
     @model_validator(mode="before")
     @classmethod
-    def init_values(cls: type[Self], data: Any) -> Any:
+    def init_values(cls, data: Any) -> Any:
         if isinstance(data, dict) and data.get("init", False):
             init_all = "initial"
             data["init_u_delta_av"] = init_all
@@ -312,7 +312,7 @@ class PosteriorConfig(BackendConfig):
     # --- Before ---
     @classmethod
     @model_validator(mode="before")
-    def _validate_bounds(cls: type[Self], data: Any) -> Any:
+    def _validate_bounds(cls, data: Any) -> Any:
         if isinstance(data, dict):
             for var in ["redshift", "phase", "wavelength"]:
                 min_bound = data.get(f"min_{var}")

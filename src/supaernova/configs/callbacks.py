@@ -1,4 +1,4 @@
-from typing import Any, Self, Literal, TypeVar, Protocol, ParamSpec
+from typing import Any, Literal, TypeVar, Protocol, ParamSpec
 from collections.abc import Callable
 
 from pydantic import BaseModel, model_validator
@@ -13,7 +13,7 @@ RetType = TypeVar("RetType")
 
 class Callbackable(Protocol):
     def __call__(
-        _self: Self, self: "CallbackConfig", *args: Param.args, **kwargs: Param.kwargs
+        _self, self: "CallbackConfig", *args: Param.args, **kwargs: Param.kwargs
     ) -> RetType: ...
 
     __name__: str
@@ -77,7 +77,7 @@ class CallbackConfig(InputConfig):
     # --- Before ---
     # --- After ---
     @model_validator(mode="after")
-    def _set_callbacks(self: Self) -> Self:
+    def _set_callbacks(self):
         if not isinstance(self.callbacks, dict):
             return self
         for fn, callbacks_spec in self.callbacks.items():

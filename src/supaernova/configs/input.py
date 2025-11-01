@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Self, Literal, cast
+from typing import Literal, cast
 from logging import Logger
 from pathlib import Path
 
@@ -19,7 +19,7 @@ class InputConfig(BaseConfig):
     # === Class Variables ===
     # === Class Methods ===
     @classmethod
-    def _default_config(cls: type[Self], **input_config: T) -> Config[T]:
+    def _default_config(cls, **input_config: T) -> Config[T]:
         paths = input_config.get("paths")
         if paths is None:
             cls._raise(f'Input Config: {input_config} missing "paths"')
@@ -40,7 +40,7 @@ class InputConfig(BaseConfig):
 
     @classmethod
     def _extend_config(
-        cls: type[Self],
+        cls,
         input_config: Config[T],
         base_path: Path | None = None,
         key: str | None = None,
@@ -103,12 +103,12 @@ class InputConfig(BaseConfig):
     # --- After ---
 
     # === Instance Methods ===
-    def __init__(self: Self, **input_config: T) -> None:
+    def __init__(self, **input_config: T) -> None:
         config = self._extend_config(input_config)
         super().__init__(**config)
         self.save()
 
-    def save(self: Self) -> None:
+    def save(self) -> None:
         save_file = self.paths.log / f"{self.name}.toml"
         with save_file.open(
             "w",

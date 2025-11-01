@@ -1,6 +1,5 @@
 # Copyright 2025 Patrick Armstrong
 from time import time
-from typing import Self
 from functools import cached_property
 
 from pydantic import computed_field, model_validator
@@ -33,7 +32,7 @@ class RunConfig(InputConfig):
 
     @computed_field
     @cached_property
-    def step_configs(self: Self) -> list[StepConfig]:
+    def step_configs(self) -> list[StepConfig]:
         return [
             step_config
             for step_config in [
@@ -53,14 +52,14 @@ class RunConfig(InputConfig):
 
     @computed_field
     @cached_property
-    def steps(self: Self) -> list[Step]:
+    def steps(self) -> list[Step]:
         return [Step.steps[step.id](step) for step in self.step_configs]
 
     # === Model Validators ===
     # --- Before ---
     # --- After ---
     @model_validator(mode="after")
-    def _validate_steps(self: Self) -> Self:
+    def _validate_steps(self):
         if len(self.step_configs) == 0:
             err = f"No steps have been defined! Please specify at least one of {list(Step.steps.keys())}"
             self._raise(err)
@@ -91,14 +90,14 @@ class RunConfig(InputConfig):
     # --- Before ---
     # --- After ---
     # === Instance Methods ===
-    def require(self: Self, step_name: str) -> Step:
+    def require(self, step_name: str) -> Step:
         step = getattr(self, step_name + "_step")
         if step is None:
             err = f"{step_name} has not yet run"
             self._raise(err)
         return step
 
-    def run(self: Self) -> None:
+    def run(self) -> None:
         for step in self.steps:
             if not step.skip:
                 self.log.info(f"Executing {step.name}")

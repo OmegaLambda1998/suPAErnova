@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Self, ClassVar, cast, override
+from typing import TYPE_CHECKING, ClassVar, cast, override
 from collections import UserDict
 
 from supaernova.configs.callbacks import callback
@@ -18,17 +18,17 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     # === Class Methods ===
     @classmethod
-    def register_step(cls: type[Self], variant_cls: type[S]) -> None:
+    def register_step(cls, variant_cls: type[S]) -> None:
         cls.variant_steps[cls.id] = variant_cls
         super().register_step()
 
     class VariantResult(UserDict):
-        def __init__(self: Self, instance: "Variant[C, S]") -> None:
+        def __init__(self, instance: "Variant[C, S]") -> None:
             self.instance: Variant[C, S] = instance
             super().__init__()
 
         @override
-        def __getitem__(self: Self, key: str) -> "Any":
+        def __getitem__(self, key: str) -> "Any":
             if key in self.instance.variants:
                 variant = self.instance.variants[key]
                 variant_kwargs: dict[str, StepResult] = {}
@@ -40,7 +40,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             return super().__getitem__(key)
 
     # === Instance Methods ===
-    def __init__(self: Self, config: C) -> None:
+    def __init__(self, config: C) -> None:
         super().__init__(config)
 
         self.variant_step: type[S] = self.variant_steps[self.id]
@@ -57,7 +57,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _is_setup(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -73,7 +73,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _setup(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Variant[VariantConfig, Step]",
@@ -99,7 +99,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     @callback
-    def setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def setup(self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_setup(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()
@@ -111,7 +111,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _has_run(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -127,7 +127,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _run(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -142,7 +142,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     @callback
-    def run(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def run(self, *args: "Any", **kwargs: "Any") -> None:
         if not self.has_run(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()
@@ -154,7 +154,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _is_saved(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -170,7 +170,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _save(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -185,7 +185,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     @callback
-    def save(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def save(self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_saved(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()
@@ -197,7 +197,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _is_loaded(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -213,7 +213,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _load(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -228,7 +228,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     @callback
-    def load(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def load(self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_loaded(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()
@@ -245,7 +245,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _has_results(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -261,7 +261,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _result(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -277,7 +277,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     @callback
-    def result(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def result(self, *args: "Any", **kwargs: "Any") -> None:
         if not self.has_results(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()
@@ -289,7 +289,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _was_analysed(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -305,7 +305,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _analyse(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -321,7 +321,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     @callback
-    def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
         if self.force or not self.was_analysed(*args, **kwargs):
             variants = kwargs.get("variants", self.variants)
             self.set_seed()
@@ -336,7 +336,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
 
     @override
     def _clear(
-        self: Self,
+        self,
         *args: "Any",
         setup: bool = False,
         run: bool = False,
@@ -377,7 +377,7 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
     @override
     @callback
     def clear(
-        self: Self,
+        self,
         *args: "Any",
         setup: bool = False,
         run: bool = False,

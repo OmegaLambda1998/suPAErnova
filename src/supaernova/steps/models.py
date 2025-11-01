@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Self, ClassVar, get_args, override
+from typing import TYPE_CHECKING, Any, ClassVar, get_args, override
 
 from supaernova.configs.steps.models import BACKENDS, ModelConfig, BackendConfig
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 class ModelStep[C: BackendConfig](Step[C]):
-    def __init__(self: Self, config: C) -> None:
+    def __init__(self, config: C) -> None:
         super().__init__(config)
         self.model: Any
 
@@ -22,12 +22,12 @@ class Model[C: ModelConfig, S: ModelStep](Variant[C, S]):
     model_backend: ClassVar[dict[str, "Callable[[], type[Any]]"]]
 
     class ModelResult(Variant.VariantResult):
-        def __init__(self: Self, instance: "Model") -> None:
+        def __init__(self, instance: "Model") -> None:
             self.instance: Model[C, S] = instance
             super().__init__(instance)
 
         @override
-        def __getitem__(self: Self, key: str) -> "Any":
+        def __getitem__(self, key: str) -> "Any":
             if key in self.instance.variants:
                 variant = self.instance.variants[key]
                 kwargs: dict[str, StepResult] = {}
@@ -40,7 +40,7 @@ class Model[C: ModelConfig, S: ModelStep](Variant[C, S]):
                 return variant.results
             return super(Variant.VariantResult, self).__getitem__(key)
 
-    def __init__(self: Self, config: C) -> None:
+    def __init__(self, config: C) -> None:
         super().__init__(config)
 
         self.models_cls: dict[str, type[Any]] = {}
@@ -53,12 +53,12 @@ class Model[C: ModelConfig, S: ModelStep](Variant[C, S]):
                     self.models_cls[name] = self.model_backend[backend_name]()
 
     @override
-    def _setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _setup(self, *args: "Any", **kwargs: "Any") -> None:
         super()._setup(*args, **kwargs)
         self._model(*args, **kwargs)
 
     def _model(
-        self: Self,
+        self,
         *args: Any,
         force: bool = False,
         variants: str | list[str] | None = None,

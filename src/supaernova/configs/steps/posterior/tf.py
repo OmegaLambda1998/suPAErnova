@@ -1,4 +1,4 @@
-from typing import Self, override
+from typing import override
 from functools import cached_property
 from collections.abc import Callable
 
@@ -33,7 +33,7 @@ def get_loss(
     @ks.utils.register_keras_serializable("SuPAErnova")
     class CustomLoss(Loss):
         @override
-        def call(self: Self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
             self.reduction = "none"
             return loss_fn(y_true, y_pred, model=self.model)
 
@@ -50,7 +50,7 @@ class TFPosteriorConfig(PosteriorConfig):
 
     @computed_field
     @cached_property
-    def loss_cls(self: Self) -> type[Loss] | None:
+    def loss_cls(self) -> type[Loss] | None:
         if self.loss is None:
             return self.loss
         loss = validate_loss(self.loss)

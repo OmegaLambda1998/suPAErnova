@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import TYPE_CHECKING, Any, Self, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from pathlib import Path
 import pkgutil
 import importlib
@@ -26,7 +26,7 @@ class Step[C: StepConfig]:
 
     # === Class Methods ===
     @classmethod
-    def register_step(cls: type[Self]) -> None:
+    def register_step(cls) -> None:
         cls.steps[cls.id] = cls
 
     @staticmethod
@@ -39,7 +39,7 @@ class Step[C: StepConfig]:
                 importlib.import_module(f"{base_name}.{module}")
 
     # === Instance Methods ===
-    def __init__(self: Self, config: C) -> None:
+    def __init__(self, config: C) -> None:
         self.__class__.id = config.__class__.id
         self.name: str = (
             config.name
@@ -67,42 +67,42 @@ class Step[C: StepConfig]:
         self.results: StepResult
         self.analysis: StepAnalysis
 
-    def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _is_setup(self, *args: "Any", **kwargs: "Any") -> bool:
         return False
 
     @callback
-    def is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def is_setup(self, *args: "Any", **kwargs: "Any") -> bool:
         self.log.debug(f"Checking if {self.name} is setup")
         is_setup = self._is_setup(*args, **kwargs)
         self.log.debug(f"{self.name} is {'' if is_setup else 'not '}setup")
         return is_setup
 
-    def _setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _setup(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def setup(self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_setup(*args, **kwargs):
             self.set_seed()
             self.log.info(f"Setting up {self.name}")
             self._setup(*args, **kwargs)
             self.log.info(f"Finished setting up {self.name}")
 
-    def _has_run(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _has_run(self, *args: "Any", **kwargs: "Any") -> bool:
         return False
 
     @callback
-    def has_run(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def has_run(self, *args: "Any", **kwargs: "Any") -> bool:
         self.log.debug(f"Checking if {self.name} has run")
         has_run = self._has_run(*args, **kwargs)
         self.log.debug(f"{self.name} has {'' if has_run else 'not '}run")
         return has_run
 
-    def _run(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _run(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def run(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def run(self, *args: "Any", **kwargs: "Any") -> None:
         if not self.has_run(*args, **kwargs):
             self.set_seed()
             self.log.info(f"Running {self.name}")
@@ -110,21 +110,21 @@ class Step[C: StepConfig]:
             self._run(*args, **kwargs)
             self.log.info(f"Finished running {self.name}")
 
-    def _is_saved(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _is_saved(self, *args: "Any", **kwargs: "Any") -> bool:
         return False
 
     @callback
-    def is_saved(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def is_saved(self, *args: "Any", **kwargs: "Any") -> bool:
         self.log.debug(f"Checking if {self.name} is saved")
         is_saved = self._is_saved(*args, **kwargs)
         self.log.debug(f"{self.name} is {'' if is_saved else 'not '}saved")
         return is_saved
 
-    def _save(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _save(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def save(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def save(self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_saved(*args, **kwargs):
             self.set_seed()
             self.run(*args, **kwargs)
@@ -132,21 +132,21 @@ class Step[C: StepConfig]:
             self._save(*args, **kwargs)
             self.log.info(f"Finished saving {self.name}")
 
-    def _is_loaded(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _is_loaded(self, *args: "Any", **kwargs: "Any") -> bool:
         return self._has_run(*args, **kwargs)
 
     @callback
-    def is_loaded(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def is_loaded(self, *args: "Any", **kwargs: "Any") -> bool:
         self.log.debug(f"Checking if {self.name} is loaded")
         is_loaded = self._is_loaded(*args, **kwargs)
         self.log.debug(f"{self.name} is {'' if is_loaded else 'not '}loaded")
         return is_loaded
 
-    def _load(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _load(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def load(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def load(self, *args: "Any", **kwargs: "Any") -> None:
         if not self.is_loaded(*args, **kwargs):
             self.set_seed()
             if self.is_saved(*args, **kwargs):
@@ -157,21 +157,21 @@ class Step[C: StepConfig]:
             else:
                 self.save(*args, **kwargs)
 
-    def _has_results(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _has_results(self, *args: "Any", **kwargs: "Any") -> bool:
         return False
 
     @callback
-    def has_results(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def has_results(self, *args: "Any", **kwargs: "Any") -> bool:
         self.log.debug(f"Checking if {self.name} has all results")
         has_results = self._has_results(*args, **kwargs)
         self.log.debug(f"{self.name} is {'not ' if has_results else ''}missing results")
         return has_results
 
-    def _result(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _result(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def result(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def result(self, *args: "Any", **kwargs: "Any") -> None:
         if not self.has_results(*args, **kwargs):
             self.set_seed()
             self.log.info(f"Gathering {self.name} results")
@@ -179,11 +179,11 @@ class Step[C: StepConfig]:
             self._result(*args, **kwargs)
             self.log.info(f"Finished gathering {self.name} results")
 
-    def _was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _was_analysed(self, *args: "Any", **kwargs: "Any") -> bool:
         return False
 
     @callback
-    def was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def was_analysed(self, *args: "Any", **kwargs: "Any") -> bool:
         self.log.debug(f"Checking if {self.name} has all analyses")
         was_analysed = self._was_analysed(*args, **kwargs)
         self.log.debug(
@@ -191,11 +191,11 @@ class Step[C: StepConfig]:
         )
         return was_analysed
 
-    def _analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _analyse(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
         if self.force or not self.was_analysed(*args, **kwargs):
             self.set_seed()
             self.log.info(f"Analysing {self.name}")
@@ -203,32 +203,32 @@ class Step[C: StepConfig]:
             self._analyse(*args, **kwargs)
             self.log.info(f"Finished analysing {self.name}")
 
-    def _is_cleaned(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _is_cleaned(self, *args: "Any", **kwargs: "Any") -> bool:
         return False
 
     @callback
-    def is_cleaned(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def is_cleaned(self, *args: "Any", **kwargs: "Any") -> bool:
         self.log.debug(f"Checking if {self.name} is cleaned")
         is_cleaned = self._is_cleaned(*args, **kwargs)
         self.log.debug(f"{self.name} is {'' if is_cleaned else 'not '}cleaned")
         return is_cleaned
 
-    def _clean(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _clean(self, *args: "Any", **kwargs: "Any") -> None:
         pass
 
     @callback
-    def clean(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def clean(self, *args: "Any", **kwargs: "Any") -> None:
         if self.cleanup and not self.is_cleaned(*args, **kwargs):
             self.log.info(f"Cleaning {self.name}")
             self._clean(*args, **kwargs)
             self.log.info(f"Finished cleaning {self.name}")
 
-    def has_attributes(self: Self, attributes: str | Iterable[str]) -> bool:
+    def has_attributes(self, attributes: str | Iterable[str]) -> bool:
         if not isinstance(attributes, Iterable):
             attributes = [attributes]
         return all(hasattr(self, attr) for attr in attributes)
 
-    def clear_attributes(self: Self, attributes: str | Iterable[str]) -> None:
+    def clear_attributes(self, attributes: str | Iterable[str]) -> None:
         if not isinstance(attributes, Iterable):
             attributes = [attributes]
         for attr in attributes:
@@ -236,7 +236,7 @@ class Step[C: StepConfig]:
                 delattr(self, attr)
 
     def _clear(
-        self: Self,
+        self,
         *args: "Any",
         setup: bool = False,
         run: bool = False,
@@ -250,7 +250,7 @@ class Step[C: StepConfig]:
 
     @callback
     def clear(
-        self: Self,
+        self,
         *args: "Any",
         setup: bool = False,
         run: bool = False,
@@ -283,7 +283,7 @@ class Step[C: StepConfig]:
         )
         self.log.info(f"Finished clearing {self.name}")
 
-    def set_seed(self: Self, seed: int = 0) -> None:
+    def set_seed(self, seed: int = 0) -> None:
         seed = self.seed + seed
         self.rng.bit_generator.state = type(self.rng.bit_generator)(seed).state
 

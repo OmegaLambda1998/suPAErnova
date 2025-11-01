@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, Self, ClassVar, Annotated
+from typing import Any, ClassVar, Annotated
 import importlib
 from collections.abc import Callable
 
@@ -89,11 +89,17 @@ class NFlowConfig(BackendConfig):
     save_best: bool = False
     repeats: PositiveInt = 1
 
+    epochs: PositiveInt = 10000
+    patience: PositiveFloat | PositiveInt = 0.125  # Run for 25%
+    lr: PositiveFloat = 0.005
+    lr_decay_steps: PositiveInt | PositiveFloat = 0.25
+    lr_decay_rate: PositiveFloat = 0.1
+
+    latent_offset_scale: PositiveFloat = 0.1
+
     ema_steps: NonNegativeInt = 0
     ema_momentum: PositiveFloat = 0.999
 
-    epochs: PositiveInt = 50000
-    patience: PositiveFloat = 500
     batch_normalisation: bool = False
 
     min_redshift: float | None = None
@@ -125,7 +131,7 @@ class NFlowConfig(BackendConfig):
     # --- Before ---
     @classmethod
     @model_validator(mode="before")
-    def _validate_bounds(cls: type[Self], data: Any) -> Any:
+    def _validate_bounds(cls, data: Any) -> Any:
         if isinstance(data, dict):
             for var in ["redshift", "phase", "wavelength"]:
                 min_bound = data.get(f"min_{var}")

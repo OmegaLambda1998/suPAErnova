@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import TYPE_CHECKING, Any, Self, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
@@ -19,13 +19,13 @@ if TYPE_CHECKING:
 class PosteriorMapValue(tf.Module):
     map_keys: ClassVar[set[str]] = {"original", "initial", "current", "best"}
 
-    def __init__(self: Self, initial: tf.Tensor) -> None:
+    def __init__(self, initial: tf.Tensor) -> None:
         self.original: tf.Variable = tf.Variable(tf.identity(initial))
         self.initial: tf.Variable = tf.Variable(tf.identity(initial))
         self.current: tf.Variable = tf.Variable(tf.identity(initial))
         self.best: tf.Variable = tf.Variable(tf.identity(initial))
 
-    def __setattr__(self: Self, key: str, val: Any) -> None:
+    def __setattr__(self, key: str, val: Any) -> None:
         if key in self.map_keys:
             val = tf.identity(val)
             if hasattr(self, key):
@@ -37,7 +37,7 @@ class PosteriorMapValue(tf.Module):
 
 class PosteriorMap(tf.Module):
     def __init__(
-        self: Self,
+        self,
         config: "TFPosteriorModel",
     ) -> None:
         self.random_initial_positions: bool = config.options.random_initial_positions
@@ -221,7 +221,7 @@ class PosteriorMap(tf.Module):
             self.labels.append(f"μ{i}")
 
     def setup(
-        self: Self,
+        self,
         stage: "PosteriorMAPStage",
         chain: int,
     ) -> None:
@@ -552,7 +552,7 @@ class PosteriorMap(tf.Module):
             self.position.initial = self.position.current
             self.position.best = self.position.current
 
-    def get_position(self: Self, position: tf.Tensor, best: bool = False) -> tf.Tensor:
+    def get_position(self, position: tf.Tensor, best: bool = False) -> tf.Tensor:
         u_delta_av = self.u_delta_av.best if best else self.u_delta_av.current
         delta_m = self.delta_m.best if best else self.delta_m.current
         delta_p = self.delta_p.best if best else self.delta_p.current
@@ -575,7 +575,7 @@ class PosteriorMap(tf.Module):
 
         return tf.concat((delta_m, delta_p, bias, u_delta_av, u_latents), axis=-1)
 
-    def constrain(self: Self, position: tf.Tensor, *, full: bool = False) -> tf.Tensor:
+    def constrain(self, position: tf.Tensor, *, full: bool = False) -> tf.Tensor:
         constrained = []
         i = 0
         if self.train_delta_m or full:
@@ -604,9 +604,7 @@ class PosteriorMap(tf.Module):
 
         return tf.concat(constrained, axis=-1)
 
-    def unconstrain(
-        self: Self, position: tf.Tensor, *, full: bool = False
-    ) -> tf.Tensor:
+    def unconstrain(self, position: tf.Tensor, *, full: bool = False) -> tf.Tensor:
         unconstrained = []
         i = 0
         if self.train_delta_m or full:
@@ -635,7 +633,7 @@ class PosteriorMap(tf.Module):
 
         return tf.concat(unconstrained, axis=-1)
 
-    def prior(self: Self, position: tf.Tensor) -> tf.Tensor:
+    def prior(self, position: tf.Tensor) -> tf.Tensor:
         zero_prior = tf.zeros((position.shape[0],))
         log_prior = zero_prior
 

@@ -1,6 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 import shutil
-from typing import TYPE_CHECKING, Any, Self, override
+from typing import TYPE_CHECKING, Any, override
 from pathlib import Path
 import importlib
 
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 
 class PAE(ModelStep[PAEConfig]):
-    def __init__(self: Self, config: PAEConfig) -> None:
+    def __init__(self, config: PAEConfig) -> None:
         super().__init__(config)
 
         # === Config Variables ===
@@ -219,7 +219,7 @@ class PAE(ModelStep[PAEConfig]):
         self.analysis: PAEStepAnalysis = self.options.analysis or PAEStepAnalysis()
 
     @override
-    def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _is_setup(self, *args: "Any", **kwargs: "Any") -> bool:
         for attr in self.setup_attributes:
             if not self.has_attributes([attr]):
                 self.log.debug(f"{self.name} is not setup because {attr} is missing")
@@ -227,7 +227,7 @@ class PAE(ModelStep[PAEConfig]):
         return True
 
     @override
-    def _setup(self: Self, *args: Any, data: "DataStepResult", **kwargs: Any) -> None:
+    def _setup(self, *args: Any, data: "DataStepResult", **kwargs: Any) -> None:
         super()._setup()
         # --- Previous Step Variables ---
         self.data = data.data
@@ -425,11 +425,11 @@ class PAE(ModelStep[PAEConfig]):
             self.run_stages = [self.stage_final]
 
     @override
-    def _has_run(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _has_run(self, *args: "Any", **kwargs: "Any") -> bool:
         return self.has_attributes(self.run_attributes)
 
     @override
-    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _run(self, *args: Any, **kwargs: Any) -> None:
         savepath: Path | None = None
         for i, stage in enumerate(self.run_stages):
             self.model = self.model.__class__(self)
@@ -450,7 +450,7 @@ class PAE(ModelStep[PAEConfig]):
         self._run_flag = True
 
     @override
-    def _is_saved(self: Self, *args: Any, **kwargs: Any) -> bool:
+    def _is_saved(self, *args: Any, **kwargs: Any) -> bool:
         final_savepath = self.paths.results / self.model_name / self.ckpt_path
         if not (final_savepath.exists() and any(final_savepath.iterdir())):
             self.log.debug(
@@ -460,7 +460,7 @@ class PAE(ModelStep[PAEConfig]):
         return True
 
     @override
-    def _save(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _save(self, *args: "Any", **kwargs: "Any") -> None:
         self.model = self.model.__class__(self)
         final_savepath = self.paths.results / self.model_name / self.ckpt_path
         final_stage = self.run_stages[-1]
@@ -477,7 +477,7 @@ class PAE(ModelStep[PAEConfig]):
             final_savepath.symlink_to(savepath / self.ckpt_path)
 
     @override
-    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _load(self, *args: Any, **kwargs: Any) -> None:
         self.model = self.model.__class__(self)
         final_stage = self.run_stages[-1]
         final_stage.prev_stage = None
@@ -488,11 +488,11 @@ class PAE(ModelStep[PAEConfig]):
         self._run_flag = True
 
     @override
-    def _has_results(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _has_results(self, *args: "Any", **kwargs: "Any") -> bool:
         return self.has_attributes(["results"])
 
     @override
-    def _result(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _result(self, *args: Any, **kwargs: Any) -> None:
         pae_results = {}
         pae_results["min_redshift"] = self.min_redshift
         pae_results["max_redshift"] = self.max_redshift
@@ -601,7 +601,7 @@ class PAE(ModelStep[PAEConfig]):
                 stage_result.clear()
 
     @override
-    def _was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _was_analysed(self, *args: "Any", **kwargs: "Any") -> bool:
         for dt in ["train_", "test_"]:
             for stage in self.stage_nums:
                 if self.analysis.plot_comparison is not None:
@@ -685,7 +685,7 @@ class PAE(ModelStep[PAEConfig]):
         return not self.analysis.force
 
     def _plot_comparison(
-        self: Self,
+        self,
         dt: str,
         stage: PAEStage,
         input_mask: "npt.NDArray[bool]",
@@ -779,7 +779,7 @@ class PAE(ModelStep[PAEConfig]):
         return rtn
 
     def _plot_latents(
-        self: Self,
+        self,
         dt: str,
         stage: PAEStage,
         input_mask: "npt.NDArray[bool]",
@@ -854,7 +854,7 @@ class PAE(ModelStep[PAEConfig]):
                 )
 
     @override
-    def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _analyse(self, *args: Any, **kwargs: Any) -> None:
         labels = {}
         ind = 0
         if self.physical_latents:
@@ -1016,7 +1016,7 @@ class PAE(ModelStep[PAEConfig]):
                     Plotter.close(fig, ax)
 
     @override
-    def _is_cleaned(self: Self, *args: Any, **kwargs: Any) -> bool:
+    def _is_cleaned(self, *args: Any, **kwargs: Any) -> bool:
         base_path = self.paths.results / self.model_name
         profile_path = base_path / "latest_logs"
         if profile_path.exists():
@@ -1025,7 +1025,7 @@ class PAE(ModelStep[PAEConfig]):
         return True
 
     @override
-    def _clean(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _clean(self, *args: Any, **kwargs: Any) -> None:
         base_path = self.paths.results / self.model_name
         profile_path = base_path / "latest_logs"
         if profile_path.exists():
@@ -1034,7 +1034,7 @@ class PAE(ModelStep[PAEConfig]):
 
     @override
     def _clear(
-        self: Self,
+        self,
         *args: "Any",
         setup: bool = False,
         run: bool = False,
@@ -1075,7 +1075,7 @@ class PAE(ModelStep[PAEConfig]):
 
     # === Instance Methods ===
 
-    def setup_data_masks(self: Self) -> None:
+    def setup_data_masks(self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
             data: LazySNPAEData = getattr(self, f"{mask_type}data")
             input_redshift = data.redshift
@@ -1120,14 +1120,14 @@ class PAEStep(Model[PAEStepConfig, PAE]):
         "TensorFlow": lambda: importlib.import_module(".tf", __package__).TFPAEModel,
     }
 
-    def __init__(self: Self, config: "PAEStepConfig") -> None:
+    def __init__(self, config: "PAEStepConfig") -> None:
         super().__init__(config)
 
         self.bases: dict[str, dict[str, Any]] = {}
         self.plots: dict[str, dict[str, Any]] = {}
 
     def _plot_comparison(
-        self: Self,
+        self,
         variant: PAE,
         dt: str,
         stage: PAEStage,
@@ -1203,7 +1203,7 @@ class PAEStep(Model[PAEStepConfig, PAE]):
 
     @override
     def _analyse(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -1255,7 +1255,7 @@ class PAEStep(Model[PAEStepConfig, PAE]):
 
     @override
     @callback
-    def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
         super().analyse(*args, **kwargs)
         if len(self.variants) > 1:
             for name, opts in self.plots.items():

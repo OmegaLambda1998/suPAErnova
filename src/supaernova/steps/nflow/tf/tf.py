@@ -1,13 +1,14 @@
 # Copyright 2025 Patrick Armstrong
-from typing import TYPE_CHECKING, Self, cast, override
+from typing import TYPE_CHECKING, cast, override
 
+import numpy as np
 from tqdm.keras import TqdmCallback
 
 from supaernova._tf import JIT_COMPILE, ks, tf, tfb, tfd
 from supaernova.utils.tf import db, pp
 
 if TYPE_CHECKING:
-    from typing import Any, Self
+    from typing import Any
     from logging import Logger
     from pathlib import Path
     from collections.abc import Callable
@@ -26,7 +27,7 @@ NFLOWMODELSTEP: "NFlow"
 @ks.utils.register_keras_serializable("SuPAErnova")
 class TFNFlowModel(ks.Model):
     def __init__(
-        self: "Self",
+        self,
         config: "NFlow",
         *args: "Any",
         **kwargs: "Any",
@@ -125,14 +126,23 @@ class TFNFlowModel(ks.Model):
             f"{'best' if self.save_best else 'latest'}.model.checkpoint/"
         )
         self.log_path: str = f"{'best' if self.save_best else 'latest'}_logs/"
-        self.patience: int = self.options.patience
+        self.patience: int | float = self.options.patience
+
+        self.epochs: int = self.options.epochs
+        self._epoch: int = 0
 
         # TODO: Softcode
-        self.lr: list[float] = [1e-3, 5e-4, 2.5e-4, 1e-4, 5e-5, 2.5e-5]
-        self.steps: list[int] = [50, 100, 250, 500, 1000]
+        self.lr: float = self.options.lr
+        lr_decay_steps = self.options.lr_decay_steps
+        if isinstance(lr_decay_steps, float):
+            lr_decay_steps = int(self.epochs * lr_decay_steps)
+        self.lr_decay_steps: int = lr_decay_steps
+        self.lr_decay_rate: float = self.options.lr_decay_rate
 
         self.ema_steps: int = self.options.ema_steps
         self.ema_momentum: float = self.options.ema_momentum
+
+        self.latent_offset_scale = self.options.latent_offset_scale
 
         self.activation: Callable[[tf.Tensor], tf.Tensor] | None = (
             self.options.activation_fn
@@ -159,9 +169,6 @@ class TFNFlowModel(ks.Model):
                 "Can't include physical latents (ΔAᵥ) in NFlow model as it wasn't included in the PAE model."
             )
 
-        self.epochs: int = self.options.epochs
-        self._epoch: int = 0
-
         # --- Latent Dimensions ---
         self.n_u_latents: int = self.pae.n_z_latents
         self.n_physical_latents = 1 if self.physical_latents else 0
@@ -174,7 +181,7 @@ class TFNFlowModel(ks.Model):
         self._get_latents()
 
     @override
-    def build(self: "Self", input_shape: tf.TensorShape) -> None:
+    def build(self, input_shape: tf.TensorShape) -> None:
         gaussian = tfd.MultivariateNormalDiag(
             loc=tf.zeros(self.n_flow_latents),
             scale_diag=tf.ones(self.n_flow_latents),
@@ -248,7 +255,7 @@ class TFNFlowModel(ks.Model):
 
     @override
     def call(
-        self: "Self",
+        self,
         inputs: tf.Tensor,
         training: bool | None = None,
     ) -> tf.Tensor:
@@ -256,25 +263,35 @@ class TFNFlowModel(ks.Model):
 
         # === Unpack Inputs ===
         latents = inputs[..., :-1]
-
         mask = tf.cast(inputs[..., -1:][..., 0], tf.bool)
+
+        if training:
+            latents_std = tf.math.reduce_std(latents, axis=0)
+            latents_offset = (
+                tf.random.normal(tf.shape(latents))
+                * latents_std
+                * self.latent_offset_scale
+            )
+            latents += latents_offset
 
         # === Calculate Log Probability ===
         log_prob = self.flow.log_prob(latents)
 
+        zero_log_prob = self.flow.distribution.log_prob(tf.zeros_like(latents))
+
         return tf.where(
             mask,
-            log_prob,
-            tf.zeros_like(log_prob),
+            log_prob - zero_log_prob,
+            np.inf * tf.ones_like(log_prob),
         )
 
-    def u_to_z(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
+    def u_to_z(self, inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         # If permute is True, then the incoming u_latents need to be permuted correctly
         if permute:
             inputs = self.permute.inverse(inputs)
         return self.flow.bijector.forward(inputs)
 
-    def z_to_u(self: "Self", inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
+    def z_to_u(self, inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         u_latents = self.flow.bijector.inverse(inputs)
         # If permute is True, then the outgoing u_latents need to be un-permuted correctly
         if permute:
@@ -282,7 +299,7 @@ class TFNFlowModel(ks.Model):
         return u_latents
 
     def z_to_u_steps(
-        self: "Self", inputs: tf.Tensor, step: int, *, permute: bool = False
+        self, inputs: tf.Tensor, step: int, *, permute: bool = False
     ) -> tuple[tf.Tensor, bool]:
         if step <= 0:
             return tf.convert_to_tensor(inputs, dtype=tf.float32), False
@@ -309,7 +326,7 @@ class TFNFlowModel(ks.Model):
         return u_latents, isinstance(bijectors[:step][-1], tfb.Permute)
 
     def train_model(
-        self: "Self",
+        self,
         *,
         savepath: "Path | None" = None,
     ) -> ks.callbacks.History:
@@ -412,7 +429,7 @@ class TFNFlowModel(ks.Model):
             shuffle=True,
         )
 
-    def _get_latents(self: "Self") -> None:
+    def _get_latents(self) -> None:
         for dt in ["train_", "test_", "val_", ""]:
             data: LazySNPAEData = getattr(self, f"{dt}data")
             phase = tf.convert_to_tensor(data.time, dtype=tf.float32)
@@ -441,12 +458,12 @@ class TFNFlowModel(ks.Model):
                 latents = latents[:, 1:]
             setattr(self, f"{dt}latents", latents)
 
-    def build_model(self: "Self") -> None:
+    def build_model(self) -> None:
         if not self.built:
             self.build(self.train_latents.shape)
 
-            schedule = ks.optimizers.schedules.PiecewiseConstantDecay(
-                self.steps, self.lr
+            schedule = ks.optimizers.schedules.ExponentialDecay(
+                self.lr, self.lr_decay_steps, self.lr_decay_rate
             )
             optimiser = self._optimiser(
                 learning_rate=schedule,
@@ -482,13 +499,13 @@ class TFNFlowModel(ks.Model):
                 print_fn=self.log.debug, show_trainable=True
             )  # Will show number of parameters
 
-    def save_checkpoint(self: "Self", savepath: "Path") -> None:
+    def save_checkpoint(self, savepath: "Path") -> None:
         (savepath / self.ckpt_path).mkdir(parents=True, exist_ok=True)
         tf.train.Checkpoint(
             self,
         ).save(f"{savepath / self.ckpt_path}/")
 
-    def load_checkpoint(self: "Self", loadpath: "Path") -> None:
+    def load_checkpoint(self, loadpath: "Path") -> None:
         self.build_model()
 
         tf.train.Checkpoint(
@@ -498,19 +515,19 @@ class TFNFlowModel(ks.Model):
         ).assert_existing_objects_matched()
 
     @override
-    def get_config(self: "Self") -> dict[str, "Any"]:
+    def get_config(self) -> dict[str, "Any"]:
         return {**super().get_config()}
 
     @override
     @classmethod
-    def from_config(cls: type["Self"], config: dict[str, "Any"]) -> "Self":
+    def from_config(cls, config: dict[str, "Any"]):
         global NFLOWMODELSTEP
         return cls(NFLOWMODELSTEP)
 
-    def build_from_config(self: "Self", _config: dict[str, "Any"]) -> None:
+    def build_from_config(self, _config: dict[str, "Any"]) -> None:
         self.build_model()
 
     @override
-    def set_seed(self: "Self", seed: int = 0) -> None:
+    def set_seed(self, seed: int = 0) -> None:
         seed = self.seed + seed
         tf.random.set_seed(seed)

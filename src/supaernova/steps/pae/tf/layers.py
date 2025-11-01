@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 from supaernova._tf import TF_CTX, IS_ROCM, ks, tf
 
 if TYPE_CHECKING:
-    from typing import Any, Self
+    from typing import Any
     from collections.abc import Callable
 
     type Dense = ks.layers.Dense | ROCMDense
@@ -20,7 +20,7 @@ def ROCMLambda(fn):
 @ks.utils.register_keras_serializable("SuPAErnova")
 class ROCMDense(ks.layers.Layer):
     def __init__(
-        self: "Self",
+        self,
         units: int,
         *args,
         trainable: bool = True,
@@ -66,7 +66,7 @@ class ROCMDense(ks.layers.Layer):
         self.kernel: tf.Variable
         self.bias: tf.Variable | None
 
-    def build(self: "Self", input_shape: tuple[int, ...]) -> None:
+    def build(self, input_shape: tuple[int, ...]) -> None:
         input_dim = int(input_shape[-1])
         with TF_CTX:
             self.kernel = self.add_weight(
@@ -90,7 +90,7 @@ class ROCMDense(ks.layers.Layer):
             self.bias = None
         super().build(input_shape)
 
-    def call(self: "Self", inputs: tf.Tensor):
+    def call(self, inputs: tf.Tensor):
         # Standard matmul
         output = tf.matmul(inputs, self.kernel)
         # Safe bias addition using broadcasting
@@ -101,7 +101,7 @@ class ROCMDense(ks.layers.Layer):
             output = self.activation(output)
         return output
 
-    def get_config(self: "Self"):
+    def get_config(self):
         config = super().get_config()
         config.update({
             "units": self.units,

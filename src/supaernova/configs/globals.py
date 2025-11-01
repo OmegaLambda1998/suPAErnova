@@ -1,7 +1,5 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import Self
-
 from pydantic import StrictBool
 
 from supaernova.typing import T, Config
@@ -14,7 +12,7 @@ class GlobalConfig(BaseConfig):
     # === Class Methods ===
     @classmethod
     def _default_config(
-        cls: type[Self],
+        cls,
         **input_config: T,
     ) -> Config[T]:
         return {

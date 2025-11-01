@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Self, Protocol
+from typing import TYPE_CHECKING, Protocol
 from collections.abc import Iterable
 
 from numpy import typing as npt
@@ -16,13 +16,13 @@ class Loss(ks.losses.Loss):
 
 class LossFunc(Protocol):
     def __call__(
-        self: Self, y_true: "tf.Tensor", y_pred: "tf.Tensor", *, model: "ks.Model"
+        self, y_true: "tf.Tensor", y_pred: "tf.Tensor", *, model: "ks.Model"
     ) -> "tf.Tensor": ...
 
 
 class LearningRateSchedule(ks.optimizers.schedules.LearningRateSchedule):
     def __init__(
-        self: Self,
+        self,
         initial_learning_rate: float | tf.Tensor,
         decay_steps: int,
         decay_rate: float,

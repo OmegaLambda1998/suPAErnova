@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, Self, Literal, ClassVar, Annotated
+from typing import Any, Literal, ClassVar, Annotated
 from pathlib import Path
 import importlib
 import itertools
@@ -230,7 +230,7 @@ class PAEConfig(BackendConfig):
     loss_delta_av_penalty: NonNegativeFloat = 0
     loss_delta_m_penalty: NonNegativeFloat = 0
     loss_delta_p_penalty: NonNegativeFloat = 0
-    loss_covariance_penalty: NonNegativeFloat = 50000
+    loss_covariance_penalty: NonNegativeFloat = 5000000
     loss_decorrelate_all: bool = True
     loss_decorrelate_dust: bool = True
     loss_clip_delta: PositiveFloat = 25
@@ -242,8 +242,8 @@ class PAEConfig(BackendConfig):
     delta_av_lr_decay_rate: PositiveFloat = 0.95
     delta_av_lr_weight_decay_rate: PositiveFloat = 0.0001
 
-    zs_epochs: PositiveInt = 1000
-    zs_patience: PositiveFloat | PositiveInt = 0.5  # Run for 100%
+    zs_epochs: PositiveInt = 2000
+    zs_patience: PositiveFloat | PositiveInt = 0.25  # Run for 50%
     zs_lr: PositiveFloat = 0.005
     zs_lr_decay_steps: PositiveInt | PositiveFloat = 300
     zs_lr_decay_rate: PositiveFloat = 0.95
@@ -274,7 +274,7 @@ class PAEConfig(BackendConfig):
     # --- Before ---
     @classmethod
     @model_validator(mode="before")
-    def _validate_bounds(cls: type[Self], data: Any) -> Any:
+    def _validate_bounds(cls, data: Any) -> Any:
         if isinstance(data, dict):
             for var in ["redshift", "phase", "wavelength"]:
                 min_bound = data.get(f"min_{var}")
@@ -300,7 +300,7 @@ class PAEConfig(BackendConfig):
 
     # --- After ---
     @model_validator(mode="after")
-    def _validate_decode_dims(self: Self) -> Self:
+    def _validate_decode_dims(self):
         if len(self.decode_dims) == 0:
             self.decode_dims = tuple(reversed(self.encode_dims))
         if not all(x < y for x, y in itertools.pairwise(self.decode_dims)):
@@ -309,7 +309,7 @@ class PAEConfig(BackendConfig):
         return self
 
     @model_validator(mode="after")
-    def _validate_n_latents(self: Self) -> Self:
+    def _validate_n_latents(self):
         if not self.physical_latents and self.n_z_latents == 0:
             err = "You must specify either non-zero `n_z_latents`, or `physical_latents=True`. With both `physical_latents=False` and `n_z_latents=0, there will be no latents to train at all!"
             self._raise(err)
@@ -320,7 +320,7 @@ class PAEConfig(BackendConfig):
     @field_validator("encode_dims", mode="before")
     @classmethod
     def _validate_encode_dims(
-        cls: type[Self], value: tuple[PositiveInt, ...]
+        cls, value: tuple[PositiveInt, ...]
     ) -> tuple[PositiveInt, ...]:
         if len(value) == 0:
             err = "`encode_dims` can not be empty"

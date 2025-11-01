@@ -1,12 +1,10 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Self
-
 from supaernova._tf import tf
 
 
 class PosteriorHMCValue(tf.Module):
     def __init__(
-        self: Self,
+        self,
         samples: tf.Variable,
         step_sizes_final: tf.Variable,
         is_accepted: tf.Variable,

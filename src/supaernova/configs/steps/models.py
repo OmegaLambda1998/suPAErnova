@@ -1,4 +1,4 @@
-from typing import Any, Self, Literal, ClassVar, get_args
+from typing import Any, Literal, ClassVar, get_args
 from collections.abc import Callable
 
 from pydantic import model_validator
@@ -44,7 +44,7 @@ class ModelConfig(VariantConfig):
     # --- Before ---
     @model_validator(mode="before")
     @classmethod
-    def _prepare_configs(cls: type[Self], data: Any, *, validate: bool = True) -> Any:
+    def _prepare_configs(cls, data: Any, *, validate: bool = True) -> Any:
         data = super()._prepare_configs(data, validate=False)
         if isinstance(data, dict):
             variant_configs = []

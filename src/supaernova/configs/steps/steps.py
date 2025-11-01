@@ -1,6 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 from copy import deepcopy
-from typing import Self, ClassVar, cast
+from typing import ClassVar, cast
 from pathlib import Path
 
 from pydantic import ConfigDict, PositiveInt
@@ -55,7 +55,7 @@ class StepConfig(CallbackConfig):
 
     # === Class Methods ===
     @classmethod
-    def register_step(cls: type[Self]) -> None:
+    def register_step(cls) -> None:
         cls.steps[cls.id] = cls
 
     # === Field Variables ===
@@ -72,7 +72,7 @@ class StepConfig(CallbackConfig):
     # --- Before ---
     # --- After ---
     # === Instance Methods ===
-    def __init__(self: Self, **input_config: T) -> None:
+    def __init__(self, **input_config: T) -> None:
         input_config = deepcopy(input_config)
         paths = input_config.get("paths")
         if paths is None:

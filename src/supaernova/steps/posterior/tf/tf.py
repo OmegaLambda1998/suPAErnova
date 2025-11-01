@@ -1,7 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 import os
-from typing import TYPE_CHECKING, Self, override
-from collections.abc import Iterable
+from typing import TYPE_CHECKING, override
 
 from tqdm import tqdm
 import numpy as np
@@ -13,7 +12,7 @@ from .hmc import PosteriorHMCValue
 from .map import PosteriorMap
 
 if TYPE_CHECKING:
-    from typing import Any, Self, Literal
+    from typing import Any, Literal
     from logging import Logger
     from pathlib import Path
     from collections.abc import Sequence
@@ -40,7 +39,7 @@ POSTERIORMODELSTEP: "Posterior"
 @ks.utils.register_keras_serializable("SuPAErnova")
 class TFPosteriorModel(ks.Model):
     def __init__(
-        self: "Self",
+        self,
         config: "Posterior",
         subset: "Literal['train', 'test']",
         seed: int,
@@ -242,7 +241,7 @@ class TFPosteriorModel(ks.Model):
 
     @override
     def call(
-        self: "Self",
+        self,
         input_position: tf.Tensor,
         *,
         training: bool | None = None,
@@ -380,15 +379,6 @@ class TFPosteriorModel(ks.Model):
         # Set missing values to 0 for all times
         synth_amp = tf.where(posterior_mask, synth_amp, tf.zeros_like(synth_amp))
 
-        # Create likelihood distribution
-        # likelihood = tfd.Independent(
-        #     tfd.MultivariateNormalDiag(
-        #         loc=synth_amp,
-        #         scale_diag=synth_sigma,
-        #     ),
-        #     reinterpreted_batch_ndims=0,
-        # )
-
         likelihood = tfd.Normal(loc=synth_amp, scale=synth_sigma)
 
         # Set missing values to 0 for all times
@@ -458,7 +448,7 @@ class TFPosteriorModel(ks.Model):
 
     @override
     def __call__(
-        self: "Self",
+        self,
         inputs: "TensorLike",
         *,
         training: bool | None = None,
@@ -504,7 +494,7 @@ class TFPosteriorModel(ks.Model):
         )
 
     def save_checkpoint(
-        self: "Self",
+        self,
         savepath: "Path",
         *,
         save_map: bool = False,
@@ -524,7 +514,7 @@ class TFPosteriorModel(ks.Model):
         ckpt.save(f"{savepath / self.ckpt_path}/")
 
     def load_checkpoint(
-        self: "Self",
+        self,
         loadpath: "Path",
         *,
         load_map: bool = False,
@@ -544,22 +534,22 @@ class TFPosteriorModel(ks.Model):
         ).assert_existing_objects_matched()
 
     @override
-    def get_config(self: "Self") -> dict[str, "Any"]:
+    def get_config(self) -> dict[str, "Any"]:
         return {**super().get_config()}
 
     @override
     @classmethod
-    def from_config(cls: type["Self"], config: dict[str, "Any"]) -> "Self":
+    def from_config(cls, config: dict[str, "Any"]):
         global POSTERIORMODELSTEP
         return cls(POSTERIORMODELSTEP)
 
     @override
-    def set_seed(self: "Self", seed: int = 0) -> None:
+    def set_seed(self, seed: int = 0) -> None:
         seed = self.seed + seed
         tf.random.set_seed(seed)
 
     def train_model(
-        self: "Self",
+        self,
         stages: "Sequence[PosteriorMAPStage]",
         *,
         savepath: "Path | None" = None,
@@ -892,7 +882,7 @@ class TFPosteriorModel(ks.Model):
         if savepath is not None:
             self.save_checkpoint(savepath, save_map=True, save_hmc=True)
 
-    def update_map_progress(self: "Self", log_prob: tf.Tensor) -> None:
+    def update_map_progress(self, log_prob: tf.Tensor) -> None:
         if self.map_progress.n % 10 != 0:
             self.map_progress.n += 1
             return
@@ -946,7 +936,7 @@ class TFPosteriorModel(ks.Model):
         _update(min_log_prob, mean_log_prob, max_log_prob)
 
     @tf.function
-    def vals_and_grads(self: "Self", position: tf.Tensor) -> tf.Tensor:
+    def vals_and_grads(self, position: tf.Tensor) -> tf.Tensor:
         input_position = self.map.get_position(position)
         log_prob = self(
             input_position,
@@ -965,7 +955,7 @@ class TFPosteriorModel(ks.Model):
         return self._loss(self.norm_prob, log_prob)
 
     def lbfgs(
-        self: "Self",
+        self,
         position: tf.Tensor,
     ) -> "LBfgsOptimizerResults":
         return tfp.optimizer.lbfgs_minimize(
@@ -987,7 +977,7 @@ class TFPosteriorModel(ks.Model):
         )
 
     def train_map(
-        self: "Self",
+        self,
         stage: "PosteriorMAPStage",
         chain: int,
         chain_total: int,
@@ -1328,7 +1318,7 @@ class TFPosteriorModel(ks.Model):
 
     # === HMC Functions ===
     def update_sample_progress(
-        self: "Self",
+        self,
         log_prior: tf.Tensor,
         log_like: tf.Tensor,
         log_prob: tf.Tensor,
@@ -1511,7 +1501,7 @@ class TFPosteriorModel(ks.Model):
         )
 
     def update_run_progress(
-        self: "Self",
+        self,
         log_prior: tf.Tensor,
         log_like: tf.Tensor,
         log_prob: tf.Tensor,
@@ -1716,7 +1706,7 @@ class TFPosteriorModel(ks.Model):
         )
 
     def unnormalized_posterior_log_prob(
-        self: "Self",
+        self,
         *pos: tf.Tensor,
         sample: bool | None = None,
         pkr: "DualAveragingStepSizeAdaptationResults | None" = None,
@@ -1769,7 +1759,7 @@ class TFPosteriorModel(ks.Model):
         return log_prob
 
     def trace_fn(
-        self: "Self", state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
+        self, state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
     ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         log_prior, log_like, log_prob = self.unnormalized_posterior_log_prob(
             state, pkr=pkr, additional_outputs=True
@@ -1781,7 +1771,7 @@ class TFPosteriorModel(ks.Model):
 
     @tf.function
     def sample_chain(
-        self: "Self",
+        self,
         position: tf.Tensor,
         kernel: tfp.mcmc.TransitionKernel,
     ) -> tuple[
@@ -1821,7 +1811,7 @@ class TFPosteriorModel(ks.Model):
         )
 
     def hmc_train(
-        self: "Self",
+        self,
         *,
         savepath: "Path | None" = None,
     ) -> None:

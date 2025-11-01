@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Self, ClassVar, cast, override
+from typing import TYPE_CHECKING, ClassVar, cast, override
 from pathlib import Path
 
 import numpy as np
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 
 class Data(Step[DataConfig]):
-    def __init__(self: Self, config: DataConfig) -> None:
+    def __init__(self, config: DataConfig) -> None:
         super().__init__(config)
 
         # === Config Variables ===
@@ -115,7 +115,7 @@ class Data(Step[DataConfig]):
         self.analysis: DataStepAnalysis = self.options.analysis or DataStepAnalysis()
 
     @override
-    def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _is_setup(self, *args: "Any", **kwargs: "Any") -> bool:
         for attr in self.setup_attributes:
             if not self.has_attributes([attr]):
                 self.log.debug(f"{self.name} is not setup because {attr} is missing")
@@ -123,7 +123,7 @@ class Data(Step[DataConfig]):
         return True
 
     @override
-    def _setup(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _setup(self, *args: "Any", **kwargs: "Any") -> None:
         super()._setup()
         colourlaw = self.options.colourlaw
         if colourlaw is not None:
@@ -163,11 +163,11 @@ class Data(Step[DataConfig]):
         )
 
     @override
-    def _has_run(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _has_run(self, *args: "Any", **kwargs: "Any") -> bool:
         return self.has_attributes(self.run_attributes)
 
     @override
-    def _run(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _run(self, *args: "Any", **kwargs: "Any") -> None:
         self.load_sne()
         self.calculate_salt_flux()
         self.get_dims()
@@ -175,7 +175,7 @@ class Data(Step[DataConfig]):
         self.split_train_test()
 
     @override
-    def _is_saved(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _is_saved(self, *args: "Any", **kwargs: "Any") -> bool:
         if not self.out_data.exists():
             self.log.debug(
                 f"{self.name} is not saved as {self.out_data} does not exist"
@@ -207,7 +207,7 @@ class Data(Step[DataConfig]):
         return True
 
     @override
-    def _save(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _save(self, *args: "Any", **kwargs: "Any") -> None:
         if self.force or not self.out_sne.exists():
             self.log.debug(f"Saving SNe DataFrame to {self.out_sne}")
             self.sne.to_pickle(self.out_sne)
@@ -242,7 +242,7 @@ class Data(Step[DataConfig]):
                 test_data.clear()
 
     @override
-    def _load(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _load(self, *args: "Any", **kwargs: "Any") -> None:
         # Load SNe DataFrames
         self.log.debug(f"Loading SNe dataframe from {self.out_sne}")
         self.sne = pd.read_pickle(self.out_sne)
@@ -251,11 +251,11 @@ class Data(Step[DataConfig]):
         self.get_dims()
 
     @override
-    def _has_results(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _has_results(self, *args: "Any", **kwargs: "Any") -> bool:
         return self.has_attributes(["results"])
 
     @override
-    def _result(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _result(self, *args: "Any", **kwargs: "Any") -> None:
         results = {}
         results["data"] = self.data
         results["dir"] = self.data_dir
@@ -278,7 +278,7 @@ class Data(Step[DataConfig]):
         self.test_data.clear()
 
     @override
-    def _was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _was_analysed(self, *args: "Any", **kwargs: "Any") -> bool:
         if self.analysis.plot_spectra is not None:
             if not isinstance(self.analysis.plot_spectra, list):
                 self.analysis.plot_spectra = [self.analysis.plot_spectra]
@@ -329,7 +329,7 @@ class Data(Step[DataConfig]):
 
         return not self.analysis.force
 
-    def _plot_spectra(self: Self) -> None:
+    def _plot_spectra(self) -> None:
         if self.analysis.plot_spectra is not None:
             if not isinstance(self.analysis.plot_spectra, list):
                 self.analysis.plot_spectra = [self.analysis.plot_spectra]
@@ -349,7 +349,7 @@ class Data(Step[DataConfig]):
                     self.results.data, o, mask=self.results.data.mask
                 )
 
-    def _plot_summary(self: Self) -> None:
+    def _plot_summary(self) -> None:
         if self.analysis.plot_summary is not None:
             if not isinstance(self.analysis.plot_summary, list):
                 self.analysis.plot_summary = [self.analysis.plot_summary]
@@ -369,7 +369,7 @@ class Data(Step[DataConfig]):
                     self.results.data, o, mask=self.results.data.mask
                 )
 
-    def _plot_comparison(self: Self) -> None:
+    def _plot_comparison(self) -> None:
         if self.analysis.plot_comparison is not None:
             if not isinstance(self.analysis.plot_comparison, list):
                 self.analysis.plot_comparison = [self.analysis.plot_comparison]
@@ -390,18 +390,18 @@ class Data(Step[DataConfig]):
                 )
 
     @override
-    def _analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _analyse(self, *args: "Any", **kwargs: "Any") -> None:
         self._plot_spectra()
         self._plot_summary()
         self._plot_comparison()
 
     @override
-    def _is_cleaned(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _is_cleaned(self, *args: "Any", **kwargs: "Any") -> bool:
         return True
 
     @override
     def _clear(
-        self: Self,
+        self,
         *args: "Any",
         setup: bool = False,
         run: bool = False,
@@ -444,7 +444,7 @@ class Data(Step[DataConfig]):
     # === Instance Methods ===
     #
 
-    def load_sne(self: Self) -> None:
+    def load_sne(self) -> None:
         self.log.debug(f"Loading data from `meta` file: {self.meta}")
         sne_dtypes = {
             "id": str,
@@ -566,7 +566,7 @@ class Data(Step[DataConfig]):
 
         self.sne = sne
 
-    def calculate_salt_flux(self: Self) -> None:
+    def calculate_salt_flux(self) -> None:
         self.log.debug("Calculating SALT fluxes")
 
         def get_salt_flux(
@@ -603,7 +603,7 @@ class Data(Step[DataConfig]):
                     c=sn["c"],
                 )
 
-    def get_dims(self: Self) -> None:
+    def get_dims(self) -> None:
         self.log.debug("Calculating data dimensions")
         self.sn_dim = len(self.sne)
         self.log.debug(f"Number of SNe: {self.sn_dim}")
@@ -624,7 +624,7 @@ class Data(Step[DataConfig]):
         self.wl_dim = len(self.wavelength)
         self.log.debug(f"Length of wavelength grid: {self.wl_dim}")
 
-    def prepare_data_arrays(self: Self) -> None:
+    def prepare_data_arrays(self) -> None:
         self.log.debug("Preparing data arrays")
         # Each element of data is a 3D Array of shape (SNDim x SpecDim x DataDim) where:
         #   SNDim = Number of SNe
@@ -873,7 +873,7 @@ class Data(Step[DataConfig]):
         self.data.model_validate(data)
 
     def get_unmasked_dims(
-        self: Self, mask: "npt.NDArray[np.int32] | None" = None
+        self, mask: "npt.NDArray[np.int32] | None" = None
     ) -> tuple[int, int, int]:
         self.log.debug("Calculating unmasked data dimensions")
         if mask is None:
@@ -901,7 +901,7 @@ class Data(Step[DataConfig]):
 
         return unmasked_sn_dim, unmasked_spec_dim, unmasked_wl_dim
 
-    def split_train_test(self: Self) -> None:
+    def split_train_test(self) -> None:
         # Train test split
         ind_split = int(self.sn_dim * self.train_frac)
 
@@ -937,14 +937,14 @@ class Data(Step[DataConfig]):
 class DataStep(Variant[DataStepConfig, Data]):
     id: ClassVar[str] = "data"
 
-    def __init__(self: Self, config: "DataStepConfig") -> None:
+    def __init__(self, config: "DataStepConfig") -> None:
         super().__init__(config)
 
         self.bases: dict[str, dict[str, Any]] = {}
         self.plots: dict[str, dict[str, Any]] = {}
 
     def _plot_comparison_pre(
-        self: Self, variant: Data, *args: "Any", **kwargs: "Any"
+        self, variant: Data, *args: "Any", **kwargs: "Any"
     ) -> None:
         if variant.analysis.plot_comparison is not None:
             if not isinstance(variant.analysis.plot_comparison, list):
@@ -991,7 +991,7 @@ class DataStep(Variant[DataStepConfig, Data]):
                 opts.base_mask = base_mask
                 opts.plot_base = True
 
-    def _plot_summary(self: Self, variant: Data) -> None:
+    def _plot_summary(self, variant: Data) -> None:
         if variant.analysis.plot_summary is not None:
             for opts in variant.analysis.plot_summary:
                 o = opts.model_copy(deep=True)
@@ -1015,7 +1015,7 @@ class DataStep(Variant[DataStepConfig, Data]):
                 self.plots[name]["fig"] = fig
                 self.plots[name]["ax"] = ax
 
-    def _plot_comparison_post(self: Self, variant: Data) -> None:
+    def _plot_comparison_post(self, variant: Data) -> None:
         if variant.analysis.plot_comparison is not None:
             for opts in variant.analysis.plot_comparison:
                 o = opts.model_copy(deep=True)
@@ -1050,7 +1050,7 @@ class DataStep(Variant[DataStepConfig, Data]):
 
     @override
     def _analyse(
-        self: Self,
+        self,
         *args: "Any",
         variants: str | list[str] | None = None,
         **kwargs: "Any",
@@ -1078,7 +1078,7 @@ class DataStep(Variant[DataStepConfig, Data]):
 
     @override
     @callback
-    def analyse(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
         super().analyse(*args, **kwargs)
         if len(self.variants) > 1:
             for name, opts in self.plots.items():

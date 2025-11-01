@@ -1,5 +1,5 @@
 import shutil
-from typing import TYPE_CHECKING, Any, Self, Literal, ClassVar, override
+from typing import TYPE_CHECKING, Any, Literal, ClassVar, override
 import importlib
 
 import numpy as np
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 
 class Posterior(ModelStep[PosteriorConfig]):
-    def __init__(self: Self, config: "PosteriorConfig") -> None:
+    def __init__(self, config: "PosteriorConfig") -> None:
         super().__init__(config)
 
         # === Config Variables ===
@@ -259,7 +259,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         )
 
     @override
-    def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _is_setup(self, *args: "Any", **kwargs: "Any") -> bool:
         for attr in self.setup_attributes:
             if not self.has_attributes([attr]):
                 self.log.debug(f"{self.name} is not setup because {attr} is missing")
@@ -268,7 +268,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
     @override
     def _setup(
-        self: Self,
+        self,
         *args: Any,
         data: "DataStepResult",
         pae: "PAEStepResult",
@@ -491,11 +491,11 @@ class Posterior(ModelStep[PosteriorConfig]):
         ]
 
     @override
-    def _has_run(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _has_run(self, *args: "Any", **kwargs: "Any") -> bool:
         return self.has_attributes(self.run_attributes)
 
     @override
-    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _run(self, *args: Any, **kwargs: Any) -> None:
         models = {}
         for subset in self.subsets:
             models[subset] = {}
@@ -516,7 +516,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.models = models
 
     @override
-    def _is_saved(self: Self, *args: Any, **kwargs: Any) -> bool:
+    def _is_saved(self, *args: Any, **kwargs: Any) -> bool:
         for subset in self.subsets:
             for seed in self.seeds:
                 self.model = self.model.__class__(self, subset, seed)
@@ -530,7 +530,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         return True
 
     @override
-    def _save(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _save(self, *args: "Any", **kwargs: "Any") -> None:
         for subset in self.subsets:
             for seed in self.seeds:
                 self.model = self.models[subset][str(seed)]
@@ -542,7 +542,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 self.model.save_checkpoint(savepath, save_map=True, save_hmc=True)
 
     @override
-    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _load(self, *args: Any, **kwargs: Any) -> None:
         models = {}
         for subset in self.subsets:
             models[subset] = {}
@@ -557,11 +557,11 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.models = models
 
     @override
-    def _has_results(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _has_results(self, *args: "Any", **kwargs: "Any") -> bool:
         return self.has_attributes(["results"])
 
     @override
-    def _result(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _result(self, *args: Any, **kwargs: Any) -> None:
         results = {}
         for subset in self.subsets:
             results[subset] = {}
@@ -627,7 +627,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.results = results
 
     @override
-    def _was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _was_analysed(self, *args: "Any", **kwargs: "Any") -> bool:
         for subset in self.subsets:
             for seed in self.seeds:
                 if self.analysis.plot_comparison is not None:
@@ -799,7 +799,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         return not self.analysis.force
 
     def _plot_comparison(
-        self: Self,
+        self,
         subset: str,
         seed: int,
         model: "TFPosteriorModel",
@@ -1215,7 +1215,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         return rtn
 
     def _plot_comparison_spectra(
-        self: Self,
+        self,
         subset: str,
         seed: int,
         model: "TFPosteriorModel",
@@ -1642,7 +1642,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         return rtn
 
     def _plot_comparison_array(
-        self: Self,
+        self,
         subset: str,
         seed: int,
         model: "TFPosteriorModel",
@@ -1867,7 +1867,7 @@ class Posterior(ModelStep[PosteriorConfig]):
             self.analysis.plot_comparison = plot_comparison
 
     def _plot_map(
-        self: Self,
+        self,
         subset: str,
         seed: int,
         data: "LazySNPAEData",
@@ -1955,7 +1955,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 DistributionPlotter.plot_corner(chain_data, o, statistics=o.reduce)
 
     def _plot_hmc(
-        self: Self,
+        self,
         subset: str,
         seed: int,
         data: "LazySNPAEData",
@@ -2065,7 +2065,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 DistributionPlotter.plot_corner(chain_data, o, statistics=o.reduce)
 
     def _plot_dispersion(
-        self: Self,
+        self,
         subset: str,
         seed: int,
         data: "LazySNPAEData",
@@ -2138,7 +2138,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 )
 
     @override
-    def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _analyse(self, *args: Any, **kwargs: Any) -> None:
         for subset in self.subsets:
             for seed in self.seeds:
                 model = self.models[subset][str(seed)]
@@ -2258,7 +2258,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 )
 
     @override
-    def _is_cleaned(self: Self, *args: Any, **kwargs: Any) -> bool:
+    def _is_cleaned(self, *args: Any, **kwargs: Any) -> bool:
         base_path = self.paths.results / self.model_name
         profile_path = base_path / "latest_logs"
         if profile_path.exists():
@@ -2278,7 +2278,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         return True
 
     @override
-    def _clean(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _clean(self, *args: Any, **kwargs: Any) -> None:
         base_path = self.paths.results / self.model_name
         profile_path = base_path / "latest_logs"
         if profile_path.exists():
@@ -2298,7 +2298,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
     @override
     def _clear(
-        self: Self,
+        self,
         *args: "Any",
         setup: bool = False,
         run: bool = False,
@@ -2339,7 +2339,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
     # === Instance Methods ===
 
-    def setup_data_masks(self: Self) -> None:
+    def setup_data_masks(self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
             data: LazySNPAEData = getattr(self, f"{mask_type}data")
             input_redshift = data.redshift
@@ -2388,7 +2388,7 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
 
     @override
     def _model(
-        self: Self,
+        self,
         *args: Any,
         force: bool = False,
         variants: str | list[str] | None = None,

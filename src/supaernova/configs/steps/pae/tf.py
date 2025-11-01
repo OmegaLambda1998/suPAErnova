@@ -1,4 +1,4 @@
-from typing import Any, Self, Concatenate, cast, override
+from typing import Any, Concatenate, cast, override
 from functools import cached_property
 from collections.abc import Callable
 
@@ -83,7 +83,7 @@ def get_loss(
     class CustomLoss(Loss):
         @override
         def call(
-            self: Self, y_true: tf.Tensor, y_pred: tf.Tensor, **kwargs: Any
+            self, y_true: tf.Tensor, y_pred: tf.Tensor, **kwargs: Any
         ) -> tf.Tensor:
             return loss_fn(y_true, y_pred, model=self.model, **kwargs)
 
@@ -99,14 +99,14 @@ class TFPAEConfig(PAEConfig):
 
     @computed_field
     @cached_property
-    def activation_fn(self: Self) -> ActivationObject:
+    def activation_fn(self) -> ActivationObject:
         return validate_activation(self.activation)
 
     scheduler: ConfigInputObject[SchedulerObject]
 
     @computed_field
     @cached_property
-    def scheduler_cls(self: Self) -> type[ks.optimizers.schedules.LearningRateSchedule]:
+    def scheduler_cls(self) -> type[ks.optimizers.schedules.LearningRateSchedule]:
         scheduler = validate_scheduler(self.scheduler)
         if isinstance(scheduler, type):
             return scheduler
@@ -114,7 +114,7 @@ class TFPAEConfig(PAEConfig):
         class CustomScheduler(ks.optimizers.schedules.LearningRateSchedule):
             @override
             def __init__(
-                self: Self,
+                self,
                 *,
                 initial_learning_rate: float,
                 decay_steps: int,
@@ -125,7 +125,7 @@ class TFPAEConfig(PAEConfig):
                 self.decay_rate: float = decay_rate
 
             @override
-            def __call__(self: Self, step: int | tf.Tensor) -> tf.Tensor:
+            def __call__(self, step: int | tf.Tensor) -> tf.Tensor:
                 return scheduler(
                     step,
                     initial_learning_rate=self.initial_learning_rate,
@@ -139,7 +139,7 @@ class TFPAEConfig(PAEConfig):
 
     @computed_field
     @cached_property
-    def optimiser_cls(self: Self) -> type[ks.optimizers.Optimizer]:
+    def optimiser_cls(self) -> type[ks.optimizers.Optimizer]:
         return cast(
             "type[ks.optimizers.Optimizer]",
             cast("object", validate_optimiser(self.optimiser)),
@@ -149,7 +149,7 @@ class TFPAEConfig(PAEConfig):
 
     @computed_field
     @cached_property
-    def loss_cls(self: Self) -> type[Loss]:
+    def loss_cls(self) -> type[Loss]:
         loss = validate_loss(self.loss)
 
         if isinstance(loss, type):
@@ -163,7 +163,7 @@ class TFPAEConfig(PAEConfig):
 
     @computed_field
     @cached_property
-    def kernel_regulariser_cls(self: Self) -> type[ks.regularizers.Regularizer] | None:
+    def kernel_regulariser_cls(self) -> type[ks.regularizers.Regularizer] | None:
         if self.kernel_regulariser is None:
             return None
         regulariser = validate_kernel_regulariser(self.kernel_regulariser)
@@ -172,11 +172,11 @@ class TFPAEConfig(PAEConfig):
 
         class CustomRegulariser(ks.regularizers.Regularizer):
             @override
-            def __init__(self: Self, *args: Any, **kwargs: Any) -> None:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
                 super().__init__(*args, **kwargs)
 
             @override
-            def __call__(self: Self, x: tf.Tensor) -> tf.Tensor:
+            def __call__(self, x: tf.Tensor) -> tf.Tensor:
                 return regulariser(x)
 
         return CustomRegulariser

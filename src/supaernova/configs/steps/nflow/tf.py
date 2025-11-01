@@ -1,4 +1,4 @@
-from typing import Self, Concatenate, cast, override
+from typing import Concatenate, cast, override
 from functools import cached_property
 from collections.abc import Callable
 
@@ -71,7 +71,7 @@ def get_loss(
     @ks.utils.register_keras_serializable("SuPAErnova")
     class CustomLoss(Loss):
         @override
-        def call(self: Self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        def call(self, y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
             self.reduction = "none"
             return loss_fn(y_true, y_pred, model=self.model)
 
@@ -87,7 +87,7 @@ class TFNFlowConfig(NFlowConfig):
 
     @computed_field
     @cached_property
-    def activation_fn(self: Self) -> ActivationObject | None:
+    def activation_fn(self) -> ActivationObject | None:
         if self.activation is not None:
             return validate_activation(self.activation)
         return None
@@ -96,7 +96,7 @@ class TFNFlowConfig(NFlowConfig):
 
     @computed_field
     @cached_property
-    def optimiser_cls(self: Self) -> type[ks.optimizers.Optimizer]:
+    def optimiser_cls(self) -> type[ks.optimizers.Optimizer]:
         return cast(
             "type[ks.optimizers.Optimizer]",
             cast("object", validate_optimiser(self.optimiser)),
@@ -107,7 +107,7 @@ class TFNFlowConfig(NFlowConfig):
     @computed_field
     @cached_property
     def scheduler_cls(
-        self: Self,
+        self,
     ) -> type[ks.optimizers.schedules.LearningRateSchedule] | None:
         if self.scheduler is None:
             return None
@@ -118,7 +118,7 @@ class TFNFlowConfig(NFlowConfig):
         class CustomScheduler(ks.optimizers.schedules.LearningRateSchedule):
             @override
             def __init__(
-                self: Self,
+                self,
                 *,
                 initial_learning_rate: float,
                 decay_steps: int,
@@ -129,7 +129,7 @@ class TFNFlowConfig(NFlowConfig):
                 self.decay_rate: float = decay_rate
 
             @override
-            def __call__(self: Self, step: int | tf.Tensor) -> tf.Tensor:
+            def __call__(self, step: int | tf.Tensor) -> tf.Tensor:
                 return scheduler(
                     step,
                     initial_learning_rate=self.initial_learning_rate,
@@ -144,7 +144,7 @@ class TFNFlowConfig(NFlowConfig):
 
     @computed_field
     @cached_property
-    def loss_cls(self: Self) -> type[Loss] | None:
+    def loss_cls(self) -> type[Loss] | None:
         if self.loss is None:
             return self.loss
         loss = validate_loss(self.loss)

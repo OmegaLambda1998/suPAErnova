@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, Self, ClassVar, Annotated
+from typing import Any, ClassVar, Annotated
 from pathlib import Path
 
 import numpy as np
@@ -154,7 +154,7 @@ class DataConfig(StepConfig):
     # --- Before ---
     @classmethod
     @model_validator(mode="before")
-    def _validate_bounds(cls: type[Self], data: Any) -> Any:
+    def _validate_bounds(cls, data: Any) -> Any:
         if isinstance(data, dict):
             for var in ["redshift", "phase", "wavelength"]:
                 min_bound = data.get(f"min_{var}")
@@ -176,7 +176,7 @@ class DataConfig(StepConfig):
 
     # --- After ---
     @model_validator(mode="after")
-    def _validate_paths(self: Self) -> Self:
+    def _validate_paths(self):
         self.data_dir = resolve_path(self.data_dir, relative_path=self.paths.base)
         if not self.data_dir.exists():
             err = f"`data_dir` resolved to {self.data_dir}, which does not exist."
@@ -207,7 +207,7 @@ class DataConfig(StepConfig):
         return self
 
     @model_validator(mode="after")
-    def _validate_salt_model_path(self: Self) -> Self:
+    def _validate_salt_model_path(self):
         salt_path = resolve_path(Path(self.salt_model), relative_path=self.paths.base)
         if salt_path.exists():
             self.salt_model = salt_path
@@ -218,7 +218,7 @@ class DataConfig(StepConfig):
     # --- After ---
     @field_validator("cosmological_model", mode="after")
     @classmethod
-    def _validate_cosmological_model(cls: type[Self], value: str) -> str:
+    def _validate_cosmological_model(cls, value: str) -> str:
         if value not in cosmo.realizations.available:
             err = f"`cosmological_model` is {value} but must be one of {cosmo.realizations.available}"
             cls._raise(err)
@@ -226,7 +226,7 @@ class DataConfig(StepConfig):
 
     @field_validator("salt_model", mode="after")
     @classmethod
-    def _validate_salt_model(cls: type[Self], value: str) -> str:
+    def _validate_salt_model(cls, value: str) -> str:
         if ("salt2" not in value) and ("salt3" not in value):
             err = f'`salt_model` is {value} but does not appear to be a salt2 or salt3 model, as it does not contain the string `"salt2"` or `"salt3"'
             cls._raise(err)

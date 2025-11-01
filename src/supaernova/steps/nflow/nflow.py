@@ -1,5 +1,5 @@
 import shutil
-from typing import TYPE_CHECKING, Any, Self, ClassVar, override
+from typing import TYPE_CHECKING, Any, ClassVar, override
 import importlib
 
 import numpy as np
@@ -34,7 +34,7 @@ class NFlow(ModelStep[NFlowConfig]):
     # Class Variables
     id: ClassVar[str] = "nflow"
 
-    def __init__(self: Self, config: "NFlowConfig") -> None:
+    def __init__(self, config: "NFlowConfig") -> None:
         super().__init__(config)
 
         # === Config Variables ===
@@ -187,7 +187,7 @@ class NFlow(ModelStep[NFlowConfig]):
         self.analysis: NFlowStepAnalysis = self.options.analysis or NFlowStepAnalysis()
 
     @override
-    def _is_setup(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _is_setup(self, *args: "Any", **kwargs: "Any") -> bool:
         for attr in self.setup_attributes:
             if not self.has_attributes([attr]):
                 self.log.debug(f"{self.name} is not setup because {attr} is missing")
@@ -196,7 +196,7 @@ class NFlow(ModelStep[NFlowConfig]):
 
     @override
     def _setup(
-        self: Self,
+        self,
         *args: Any,
         data: "DataStepResult",
         pae: "PAEStepResult",
@@ -273,11 +273,12 @@ class NFlow(ModelStep[NFlowConfig]):
         self.wl_dim = data.wl_dim
 
     @override
-    def _has_run(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _has_run(self, *args: "Any", **kwargs: "Any") -> bool:
         return self.has_attributes(self.run_attributes)
 
     @override
-    def _run(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _run(self, *args: Any, **kwargs: Any) -> None:
+        # TODO: Save intermediate and clean up afterwards
         savepath = self.paths.results / self.model.name
         self.model = self.model.__class__(self)
         best_model = self.model
@@ -295,7 +296,7 @@ class NFlow(ModelStep[NFlowConfig]):
         self._run_flag = True
 
     @override
-    def _is_saved(self: Self, *args: Any, **kwargs: Any) -> bool:
+    def _is_saved(self, *args: Any, **kwargs: Any) -> bool:
         savepath = self.paths.results / self.model.name / self.model.ckpt_path
         if not (savepath.exists() and any(savepath.iterdir())):
             self.log.debug(f"{self.name} is not saved as {savepath} does not exist")
@@ -303,7 +304,7 @@ class NFlow(ModelStep[NFlowConfig]):
         return True
 
     @override
-    def _save(self: Self, *args: "Any", **kwargs: "Any") -> None:
+    def _save(self, *args: "Any", **kwargs: "Any") -> None:
         savepath = self.paths.results / self.model.name
         self.model = self.model.__class__(self)
         self.model.load_checkpoint(savepath)
@@ -311,7 +312,7 @@ class NFlow(ModelStep[NFlowConfig]):
         self.model.save_checkpoint(savepath)
 
     @override
-    def _load(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _load(self, *args: Any, **kwargs: Any) -> None:
         savepath = self.paths.results / self.model.name
         self.model = self.model.__class__(self)
         self.log.debug(f"Loading final NFlow model weights from {savepath}")
@@ -319,11 +320,11 @@ class NFlow(ModelStep[NFlowConfig]):
         self._run_flag = True
 
     @override
-    def _has_results(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _has_results(self, *args: "Any", **kwargs: "Any") -> bool:
         return self.has_attributes(["results"])
 
     @override
-    def _result(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _result(self, *args: Any, **kwargs: Any) -> None:
         nflow_results = {}
         nflow_results["min_redshift"] = self.min_redshift
         nflow_results["max_redshift"] = self.max_redshift
@@ -369,7 +370,7 @@ class NFlow(ModelStep[NFlowConfig]):
         self.results = NFlowStepResult.model_validate(nflow_results)
 
     @override
-    def _was_analysed(self: Self, *args: "Any", **kwargs: "Any") -> bool:
+    def _was_analysed(self, *args: "Any", **kwargs: "Any") -> bool:
         for dt in ["train_", "test_"]:
             if self.analysis.plot_u_latents is not None:
                 if not isinstance(self.analysis.plot_u_latents, list):
@@ -458,7 +459,7 @@ class NFlow(ModelStep[NFlowConfig]):
         return not self.analysis.force
 
     def _plot_u_latents(
-        self: Self, gaussian, z_to_u, dt, u_labels, n_latents, n_bins
+        self, gaussian, z_to_u, dt, u_labels, n_latents, n_bins
     ) -> None:
         if self.analysis.plot_u_latents is not None:
             if not isinstance(self.analysis.plot_u_latents, list):
@@ -503,7 +504,7 @@ class NFlow(ModelStep[NFlowConfig]):
                     },
                 )
 
-    def _plot_z_latents(self: Self, z, u_to_z, dt, z_labels, n_latents, n_bins) -> None:
+    def _plot_z_latents(self, z, u_to_z, dt, z_labels, n_latents, n_bins) -> None:
         if self.analysis.plot_z_latents is not None:
             if not isinstance(self.analysis.plot_z_latents, list):
                 self.analysis.plot_z_latents = [self.analysis.plot_z_latents]
@@ -534,9 +535,7 @@ class NFlow(ModelStep[NFlowConfig]):
                     },
                 )
 
-    def _plot_latents(
-        self: Self, z_to_u, u_to_z, dt, labels, n_latents, n_bins
-    ) -> None:
+    def _plot_latents(self, z_to_u, u_to_z, dt, labels, n_latents, n_bins) -> None:
         if self.analysis.plot_latents is not None:
             if not isinstance(self.analysis.plot_latents, list):
                 self.analysis.plot_latents = [self.analysis.plot_latents]
@@ -586,7 +585,7 @@ class NFlow(ModelStep[NFlowConfig]):
                 )
 
     def _plot_latent_steps(
-        self: Self, gaussian, results, mask, labels, dt, n_latents, n_bins
+        self, gaussian, results, mask, labels, dt, n_latents, n_bins
     ) -> None:
         if self.analysis.plot_latent_steps is not None:
             if not isinstance(self.analysis.plot_latent_steps, list):
@@ -650,7 +649,7 @@ class NFlow(ModelStep[NFlowConfig]):
                     )
 
     @override
-    def _analyse(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _analyse(self, *args: Any, **kwargs: Any) -> None:
         z_labels = {}
         u_labels = {}
         labels = {}
@@ -697,7 +696,7 @@ class NFlow(ModelStep[NFlowConfig]):
             )
 
     @override
-    def _is_cleaned(self: Self, *args: Any, **kwargs: Any) -> bool:
+    def _is_cleaned(self, *args: Any, **kwargs: Any) -> bool:
         base_path = self.paths.results / self.model_name
         profile_path = base_path / "latest_logs"
         if profile_path.exists():
@@ -710,7 +709,7 @@ class NFlow(ModelStep[NFlowConfig]):
         return True
 
     @override
-    def _clean(self: Self, *args: Any, **kwargs: Any) -> None:
+    def _clean(self, *args: Any, **kwargs: Any) -> None:
         base_path = self.paths.results / self.model_name
         profile_path = base_path / "latest_logs"
         if profile_path.exists():
@@ -723,7 +722,7 @@ class NFlow(ModelStep[NFlowConfig]):
 
     @override
     def _clear(
-        self: Self,
+        self,
         *args: "Any",
         setup: bool = False,
         run: bool = False,
@@ -764,7 +763,7 @@ class NFlow(ModelStep[NFlowConfig]):
 
     # === Instance Methods ===
 
-    def setup_data_masks(self: Self) -> None:
+    def setup_data_masks(self) -> None:
         for mask_type in ["train_", "test_", "val_", ""]:
             data: LazySNPAEData = getattr(self, f"{mask_type}data")
             input_redshift = data.redshift
