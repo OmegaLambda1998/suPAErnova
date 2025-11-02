@@ -91,7 +91,7 @@ class NFlowConfig(BackendConfig):
 
     epochs: PositiveInt = 10000
     patience: PositiveFloat | PositiveInt = 0.125  # Run for 25%
-    lr: PositiveFloat = 0.005
+    lr: PositiveFloat = 0.0001
     lr_decay_steps: PositiveInt | PositiveFloat = 0.25
     lr_decay_rate: PositiveFloat = 0.1
 
