@@ -1719,6 +1719,10 @@ class TFPAEModel(ks.Model):
         scale = tf.where(
             amp_true == 0, ks.backend.epsilon() * tf.ones_like(amp_true), amp_true
         )
+        diff = amp_true - amp_pred
+        scale = tf.where(
+            amp_pred == 0, ks.backend.epsilon() * tf.ones_like(amp_pred), amp_pred
+        )
         error = tf.abs(diff / scale)
 
         bin_indices = tf.reshape(
