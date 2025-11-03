@@ -1724,6 +1724,7 @@ class TFPAEModel(ks.Model):
             amp_pred == 0, ks.backend.epsilon() * tf.ones_like(amp_pred), amp_pred
         )
         error = tf.abs(diff / scale)
+        error = tf.where(recon_mask, error, tf.zeros_like(error))
 
         bin_indices = tf.reshape(
             (
@@ -1750,7 +1751,9 @@ class TFPAEModel(ks.Model):
                 tf.where(bin_mask, bin_error * bin_error, tf.zeros_like(bin_error)),
                 axis=0,
             )
-            denominator = tf.math.count_nonzero(bin_mask, axis=0, dtype=tf.float32)
+            denominator = tf.math.maximum(
+                tf.math.count_nonzero(bin_mask, axis=0, dtype=tf.float32), 1
+            )
             rms_error = tf.sqrt(numerator / denominator)
             binned_error = binned_error.write(bin_id, rms_error)
 
