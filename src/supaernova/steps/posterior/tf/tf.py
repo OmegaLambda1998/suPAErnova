@@ -1890,7 +1890,7 @@ class TFPosteriorModel(ks.Model):
         step_size_init = tf.where(
             tf.math.is_finite(step_size_init), step_size_init, step_size_std
         )
-        step_size_inner = tf.math.minimum(step_size_init, step_size_std)
+        step_size_inner = tf.math.maximum(step_size_init, step_size_std)
         pp(step_size_inner, name="step_size_inner")
 
         step_size = tf.repeat(
