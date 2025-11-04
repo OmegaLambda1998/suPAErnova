@@ -251,7 +251,7 @@ class PosteriorConfig(BackendConfig):
     max_line_search_iterations: PositiveInt | None = None
     num_correction_pairs: PositiveInt | None = None
     # See [Betancourt et al (2014)](https://arxiv.org/abs/1411.6669) for why 0.75 is optimal for the NUTS Sampler
-    target_acceptance_rate: PositiveFloat = 0.75
+    target_acceptance_rate: PositiveFloat = 0.651
 
     # u_delta_av_min: float | None = -10
     # u_delta_av_max: float | None = 10
