@@ -32,8 +32,8 @@ class DispersionPlotter(Plotter):
         hmcs: "list[PosteriorStepResult]",
         config: "DispersionPlot",
         *,
-        fig: "tuple[Figure, Figure | None] | None" = None,
-        ax: "tuple[Axis, Axis, Axis, Axis, Axis | None, Axis | None, Axis | None, Axis | None] | None" = None,
+        fig: "Figure | None" = None,
+        ax: "tuple[tuple[Axis | None, Axis | None, Axis | None, Axis | None], tuple[Axis | None, Axis | None, Axis | None, Axis | None], tuple[Axis, Axis, Axis, Axis]] | None" = None,
         twins: "pd.DataFrame | None" = None,
         legacy: "dict[str, npt.NDArray[Any]] | None" = None,
         force: bool = False,
@@ -42,131 +42,252 @@ class DispersionPlotter(Plotter):
         spec_mask: "npt.NDArray[float] | None" = None,
         wl_mask: "npt.NDArray[float] | None" = None,
     ) -> None:
+        do_twins = twins is not None
+        do_legacy = legacy is not None
+
+        n_rows = 2
+        n_cols = 2 * (1 + (1 if do_twins else 0) + (1 if do_legacy else 0))
+
+        handles = []
+
         if fig is None:
-            fig_1 = Plotter.figure()
-            fig_2 = None if legacy is None else Plotter.figure()
-            fig = (fig_1, fig_2)
-        else:
-            fig_1, fig_2 = fig
+            fig = Plotter.figure()
         if ax is None:
-            n_rows = 2
-            n_cols = 2
-            spectra_ax = Plotter.axis(fig_1, n_rows, n_cols, 1)
-            spectra_ax.tick_params("x", labelbottom=False, bottom=False)
-            spectra_hist_ax = Plotter.axis(
-                fig_1,
+            ind = 1
+
+            if do_twins:
+                twins_spectra_ax = Plotter.axis(fig, n_rows, n_cols, ind)
+                twins_spectra_ax.tick_params("x", labelbottom=False, bottom=False)
+                ind += 1
+
+                twins_spectra_hist_ax = Plotter.axis(
+                    fig,
+                    n_rows,
+                    n_cols,
+                    ind,
+                    sharey=twins_spectra_ax,
+                )
+                twins_spectra_hist_ax.tick_params("x", labelbottom=False, bottom=False)
+                twins_spectra_hist_ax.tick_params("y", labelleft=False, left=False)
+                ind += 1
+            else:
+                twins_spectra_ax = None
+                twins_spectra_hist_ax = None
+
+            if do_legacy:
+                legacy_spectra_ax = Plotter.axis(
+                    fig,
+                    n_rows,
+                    n_cols,
+                    ind,
+                    sharey=twins_spectra_hist_ax if do_twins else None,
+                )
+                legacy_spectra_ax.tick_params(
+                    "x",
+                    labelbottom=False,
+                    bottom=False,
+                )
+                legacy_spectra_ax.tick_params(
+                    "y",
+                    labelleft=not do_twins,
+                    left=not do_twins,
+                )
+                ind += 1
+
+                legacy_spectra_hist_ax = Plotter.axis(
+                    fig,
+                    n_rows,
+                    n_cols,
+                    ind,
+                    sharey=legacy_spectra_ax,
+                )
+                legacy_spectra_hist_ax.tick_params("x", labelbottom=False, bottom=False)
+                legacy_spectra_hist_ax.tick_params("y", labelleft=False, left=False)
+                ind += 1
+            else:
+                legacy_spectra_ax = None
+                legacy_spectra_hist_ax = None
+
+            spectra_ax = Plotter.axis(
+                fig,
                 n_rows,
                 n_cols,
-                2,
+                ind,
+                sharey=legacy_spectra_hist_ax
+                if do_legacy
+                else twins_spectra_hist_ax
+                if do_twins
+                else None,
+            )
+            spectra_ax.tick_params(
+                "x",
+                labelbottom=False,
+                bottom=False,
+            )
+            spectra_ax.tick_params(
+                "y",
+                labelleft=not (do_twins or do_legacy),
+                left=not (do_twins or do_legacy),
+            )
+            ind += 1
+
+            spectra_hist_ax = Plotter.axis(
+                fig,
+                n_rows,
+                n_cols,
+                ind,
                 sharey=spectra_ax,
             )
             spectra_hist_ax.tick_params("x", labelbottom=False, bottom=False)
             spectra_hist_ax.tick_params("y", labelleft=False, left=False)
+            ind += 1
+
+            if do_twins:
+                twins_pull_ax = Plotter.axis(
+                    fig,
+                    n_rows,
+                    n_cols,
+                    ind,
+                    sharex=twins_spectra_ax,
+                )
+                ind += 1
+
+                twins_pull_hist_ax = Plotter.axis(
+                    fig,
+                    n_rows,
+                    n_cols,
+                    ind,
+                    sharey=twins_pull_ax,
+                    sharex=spectra_hist_ax,
+                )
+                twins_pull_hist_ax.tick_params("y", labelleft=False, left=False)
+                ind += 1
+            else:
+                twins_pull_ax = None
+                twins_pull_hist_ax = None
+
+            if do_legacy:
+                legacy_pull_ax = Plotter.axis(
+                    fig,
+                    n_rows,
+                    n_cols,
+                    ind,
+                    sharex=legacy_spectra_ax,
+                    sharey=twins_pull_hist_ax if do_twins else None,
+                )
+                legacy_pull_ax.tick_params(
+                    "y", labelleft=not do_twins, left=not do_twins
+                )
+                ind += 1
+
+                legacy_pull_hist_ax = Plotter.axis(
+                    fig,
+                    n_rows,
+                    n_cols,
+                    ind,
+                    sharey=legacy_pull_ax,
+                    sharex=spectra_hist_ax,
+                )
+                legacy_pull_hist_ax.tick_params("y", labelleft=False, left=False)
+                ind += 1
+            else:
+                legacy_pull_ax = None
+                legacy_pull_hist_ax = None
+
             pull_ax = Plotter.axis(
-                fig_1,
+                fig,
                 n_rows,
                 n_cols,
-                3,
+                ind,
                 sharex=spectra_ax,
+                sharey=legacy_pull_hist_ax
+                if do_legacy
+                else twins_pull_hist_ax
+                if do_twins
+                else None,
             )
+            pull_ax.tick_params(
+                "y",
+                labelleft=not (do_twins or do_legacy),
+                left=not (do_twins or do_legacy),
+            )
+            ind += 1
+
             pull_hist_ax = Plotter.axis(
-                fig_1,
+                fig,
                 n_rows,
                 n_cols,
-                4,
+                ind,
                 sharey=pull_ax,
                 sharex=spectra_hist_ax,
             )
             pull_hist_ax.tick_params("y", labelleft=False, left=False)
-            fig_1.get_layout_engine().set(
-                wspace=0, hspace=0, w_pad=0 / 72, h_pad=0 / 72
-            )
+            ind += 1
 
-            if fig_2 is not None:
-                residual_ax = Plotter.axis(
-                    fig_2,
-                    n_rows,
-                    n_cols,
-                    1,
-                )
-                residual_ax.tick_params("x", labelbottom=False, bottom=False)
-                residual_hist_ax = Plotter.axis(
-                    fig_2,
-                    n_rows,
-                    n_cols,
-                    2,
-                    sharey=residual_ax,
-                )
-                residual_hist_ax.tick_params("x", labelbottom=False, bottom=False)
-                residual_hist_ax.tick_params("y", labelleft=False, left=False)
-                legacy_pull_ax = Plotter.axis(
-                    fig_2,
-                    n_rows,
-                    n_cols,
-                    3,
-                    sharex=residual_ax,
-                )
-                legacy_pull_hist_ax = Plotter.axis(
-                    fig_2,
-                    n_rows,
-                    n_cols,
-                    4,
-                    sharey=legacy_pull_ax,
-                    sharex=residual_hist_ax,
-                )
-                legacy_pull_hist_ax.tick_params("y", labelleft=False, left=False)
-                fig_2.get_layout_engine().set(
-                    wspace=0, hspace=0, w_pad=0 / 72, h_pad=0 / 72
-                )
-            else:
-                residual_ax = None
-                residual_hist_ax = None
-                legacy_pull_ax = None
-                legacy_pull_hist_ax = None
+            fig.get_layout_engine().set(wspace=0, hspace=0, w_pad=0 / 72, h_pad=0 / 72)
+
             ax = (
-                spectra_ax,
-                spectra_hist_ax,
-                pull_ax,
-                pull_hist_ax,
-                residual_ax,
-                residual_hist_ax,
-                legacy_pull_ax,
-                legacy_pull_hist_ax,
+                (
+                    twins_spectra_ax,
+                    twins_spectra_hist_ax,
+                    twins_pull_ax,
+                    twins_pull_hist_ax,
+                ),
+                (
+                    legacy_spectra_ax,
+                    legacy_spectra_hist_ax,
+                    legacy_pull_ax,
+                    legacy_pull_hist_ax,
+                ),
+                (spectra_ax, spectra_hist_ax, pull_ax, pull_hist_ax),
             )
         else:
             (
-                spectra_ax,
-                spectra_hist_ax,
-                pull_ax,
-                pull_hist_ax,
-                residual_ax,
-                residual_hist_ax,
-                legacy_pull_ax,
-                legacy_pull_hist_ax,
+                (
+                    twins_spectra_ax,
+                    twins_spectra_hist_ax,
+                    twins_pull_ax,
+                    twins_pull_hist_ax,
+                ),
+                (
+                    legacy_spectra_ax,
+                    legacy_spectra_hist_ax,
+                    legacy_pull_ax,
+                    legacy_pull_hist_ax,
+                ),
+                (spectra_ax, spectra_hist_ax, pull_ax, pull_hist_ax),
             ) = ax
 
-        fig_1, spectra_ax, _hline = Plotter.axhline(
-            0, fig=fig_1, ax=spectra_ax, color="black"
-        )
-        fig_1, spectra_hist_ax, _hline = Plotter.axhline(
-            0, fig=fig_1, ax=spectra_hist_ax, color="black"
-        )
+        twins_ax = ax[0]
+        legacy_ax = ax[1]
+        pae_ax = ax[2]
 
-        if legacy is not None:
-            fig_2, residual_ax, _hline = Plotter.axhline(
-                0, fig=fig_2, ax=residual_ax, color="black"
+        if do_twins:
+            fig, twins_spectra_ax, _hline = Plotter.axhline(
+                0, fig=fig, ax=twins_spectra_ax, color="black"
             )
-            fig_2, residual_hist_ax, _hline = Plotter.axhline(
-                0, fig=fig_2, ax=residual_hist_ax, color="black"
+            fig, twins_spectra_hist_ax, _hline = Plotter.axhline(
+                0, fig=fig, ax=twins_spectra_hist_ax, color="black"
             )
+
+        if do_legacy:
+            fig, legacy_spectra_ax, _hline = Plotter.axhline(
+                0, fig=fig, ax=legacy_spectra_ax, color="black"
+            )
+            fig, legacy_spectra_hist_ax, _hline = Plotter.axhline(
+                0, fig=fig, ax=legacy_spectra_hist_ax, color="black"
+            )
+
+        fig, spectra_ax, _hline = Plotter.axhline(
+            0, fig=fig, ax=spectra_ax, color="black"
+        )
+        fig, spectra_hist_ax, _hline = Plotter.axhline(
+            0, fig=fig, ax=spectra_hist_ax, color="black"
+        )
 
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
             return
-        if legacy:
-            legacy_savepath = (
-                config.savepath or Path()
-            ) / f"{config.name}_residual.{config.ext}"
 
         pae_redshift = data.redshift[:, 0, 0]
 
@@ -295,43 +416,31 @@ class DispersionPlotter(Plotter):
             y: "npt.NDArray[Any]",
             yerr: "npt.NDArray[Any]",
             mask: "npt.NDArray[Any] | None",
-            fig: "tuple(Figure, Figure | None)",
-            ax: "tuple[Axis, Axis, Axis, Axis, Axis | None, Axis | None, Axis | None, Axis | None]",
+            fig: "Figure",
+            ax: "tuple[Axis, Axis, Axis, Axis]",
             color: str,
-            marker: str,
             alpha: float,
             title: str,
             residual_bins: "npt.NDArray[float]",
             pull_bins: "npt.NDArray[float]",
-            hist: bool = True,
-            y_prime: "npt.NDArray[Any] | None" = None,
-            yerr_prime: "npt.NDArray[Any] | None" = None,
             yerr_lower: "npt.NDArray[Any] | None" = None,
             yerr_upper: "npt.NDArray[Any] | None" = None,
+            names: "npt.NDArray[Any] | None" = None,
             tmp: bool = False,
         ) -> tuple[
-            tuple["Figure", "Figure | None"],
+            "Figure",
             tuple[
                 "Axis",
                 "Axis",
                 "Axis",
                 "Axis",
-                "Axis | None",
-                "Axis | None",
-                "Axis | None",
-                "Axis | None",
             ],
         ]:
-            fig_1, fig_2 = fig
             (
                 s_ax,
                 s_h_ax,
                 p_ax,
                 p_h_ax,
-                r_ax,
-                r_h_ax,
-                l_p_ax,
-                l_p_h_ax,
             ) = ax
 
             if mask is not None:
@@ -342,8 +451,6 @@ class DispersionPlotter(Plotter):
                 if yerr_lower is not None and yerr_upper is not None:
                     yerr_lower = yerr_lower[mask]
                     yerr_upper = yerr_upper[mask]
-                y_prime = y_prime[mask] if y_prime is not None else None
-                yerr_prime = yerr_prime[mask] if yerr_prime is not None else None
 
             pull_y = np.abs(y)
             pull_yerr = yerr
@@ -351,7 +458,10 @@ class DispersionPlotter(Plotter):
                 pull_yerr = np.abs(np.where(y > 0, yerr_lower, yerr_upper))
                 yerr = (yerr_lower, yerr_upper)
 
-            names = pae_names[mask]
+            if names is None:
+                names = pae_names
+            names = names[mask]
+
             w_rms_jackknife = jackknife_resample(y, np.std)
             if tmp:
                 rms_sort = np.argsort(w_rms_jackknife)
@@ -381,123 +491,54 @@ class DispersionPlotter(Plotter):
             w_nmad = np.mean(w_nmad_jackknife)
             w_nmad_std = np.std(w_nmad_jackknife)
 
-            fig_1, s_ax, _ebar = Plotter.errorbar(
+            fig, s_ax, ebar = Plotter.errorbar(
                 x,
                 y,
                 yerr=yerr,
-                fig=fig_1,
+                fig=fig,
                 ax=s_ax,
                 color=color,
-                marker=marker,
                 alpha=alpha,
                 label=f"{title}\n{np.size(y)} SN\nRMS: {w_rms:.3f}±{w_rms_std:.3f}\nNMAD: {w_nmad:.3f}±{w_nmad_std:.3f}",
             )
-            if hist:
-                fig_1, s_h_ax, _hist = Plotter.hist(
-                    y,
-                    bins=residual_bins,
-                    norm=True,
-                    orientation="horizontal",
-                    fig=fig_1,
-                    ax=s_h_ax,
-                    color=color,
-                    alpha=alpha,
-                )
-
-            fig_1, p_ax, _hline = Plotter.axhline(1, color="black", fig=fig_1, ax=p_ax)
-            fig_1, p_h_ax, _hline = Plotter.axhline(
-                1, color="black", fig=fig_1, ax=p_h_ax
-            )
-            fig_1, p_ax, _ebar = Plotter.errorbar(
-                x,
-                pull_y / pull_yerr,
-                fig=fig_1,
-                ax=p_ax,
+            handles.append(ebar)
+            fig, s_h_ax, _hist = Plotter.hist(
+                y,
+                bins=residual_bins,
+                norm=True,
+                orientation="horizontal",
+                fig=fig,
+                ax=s_h_ax,
                 color=color,
-                marker=marker,
                 alpha=alpha,
             )
-            if hist:
-                fig_1, p_h_ax, _hist = Plotter.hist(
-                    pull_y / pull_yerr,
-                    bins=pull_bins,
-                    norm=True,
-                    orientation="horizontal",
-                    fig=fig_1,
-                    ax=p_h_ax,
-                    color=color,
-                    alpha=alpha,
-                )
 
-            if (y_prime is not None) and (yerr_prime is not None):
-                y_residual = y - y_prime
-                if isinstance(yerr, tuple):
-                    err = (
-                        np.sqrt(yerr[0] * yerr[0] + yerr_prime * yerr_prime),
-                        np.sqrt(yerr[1] * yerr[1] + yerr_prime * yerr_prime),
-                    )
-                else:
-                    err = np.sqrt(yerr * yerr + yerr_prime * yerr_prime)
-                pull_err = np.sqrt(pull_yerr * pull_yerr + yerr_prime * yerr_prime)
-                y_pull = np.abs(y_residual) / pull_err
+            fig, p_ax, _hline = Plotter.axhline(1, color="black", fig=fig, ax=p_ax)
+            fig, p_h_ax, _hline = Plotter.axhline(1, color="black", fig=fig, ax=p_h_ax)
+            fig, p_ax, _ebar = Plotter.errorbar(
+                x,
+                pull_y / pull_yerr,
+                fig=fig,
+                ax=p_ax,
+                color=color,
+                alpha=alpha,
+            )
+            fig, p_h_ax, _hist = Plotter.hist(
+                pull_y / pull_yerr,
+                bins=pull_bins,
+                norm=True,
+                orientation="horizontal",
+                fig=fig,
+                ax=p_h_ax,
+                color=color,
+                alpha=alpha,
+            )
 
-                fig_2, r_ax, _ebar = Plotter.errorbar(
-                    x,
-                    y_residual,
-                    yerr=err,
-                    fig=fig_2,
-                    ax=r_ax,
-                    color=color,
-                    marker=marker,
-                    alpha=alpha,
-                )
-                fig_2, r_h_ax, _hist = Plotter.hist(
-                    y_residual,
-                    # xerr=err,
-                    bins=residual_bins,
-                    norm=True,
-                    orientation="horizontal",
-                    fig=fig_2,
-                    ax=r_h_ax,
-                    color=color,
-                    alpha=alpha,
-                )
-
-                fig_2, l_p_ax, _hline = Plotter.axhline(
-                    1, color="black", fig=fig_2, ax=l_p_ax
-                )
-                fig_2, l_p_h_ax, _hline = Plotter.axhline(
-                    1, color="black", fig=fig_2, ax=l_p_h_ax
-                )
-                fig_2, l_p_ax, _ebar = Plotter.errorbar(
-                    x,
-                    y_pull,
-                    fig=fig_2,
-                    ax=l_p_ax,
-                    color=color,
-                    marker=marker,
-                    alpha=alpha,
-                )
-                fig_2, l_p_h_ax, _hist = Plotter.hist(
-                    y_pull,
-                    bins=pull_bins,
-                    norm=True,
-                    orientation="horizontal",
-                    fig=fig_2,
-                    ax=l_p_h_ax,
-                    color=color,
-                    alpha=alpha,
-                )
-
-            return (fig_1, fig_2), (
+            return fig, (
                 s_ax,
                 s_h_ax,
                 p_ax,
                 p_h_ax,
-                r_ax,
-                r_h_ax,
-                l_p_ax,
-                l_p_h_ax,
             )
 
         pae_x = pae_redshift
@@ -585,13 +626,133 @@ class DispersionPlotter(Plotter):
             0 - 0.5 * pull_step, 5 * pull_scale + 1.5 * pull_step, pull_step
         )
 
-        legacy_y = None
-        legacy_yerr = None
+        if twins is not None:
+            twins_names = twins.name
+            twins_intersection = set(pae_names) & set(twins_names)
+            twins_mask = np.zeros_like(twins_names, dtype=np.int32)
+            for name in twins_intersection:
+                ind = np.argwhere(twins_names == name)[0]
+                twins_mask[ind] = 1
+            twins_mask = twins_mask.astype(bool)
+
+            pae_twins = np.array([
+                np.argwhere(pae_names == n)[0] for n in twins_intersection
+            ])
+
+            twins_redshift = pae_redshift[pae_twins][..., 0]
+            twins_order = np.argsort(twins_redshift)
+            twins_redshift = twins_redshift[twins_order]
+            twins_redshift_error = (twins_redshift * 3e5 + 300.0) / 3e5
+            twins_magshift_error = abs(
+                -5 * np.log10(twins_redshift / twins_redshift_error)
+            )
+
+            pae_twins = pae_twins[twins_order]
+
+            twins_names = twins.name.to_numpy()[twins_mask][twins_order]
+            twins_amplitudes = twins.rbtl_dm.to_numpy()[twins_mask][None, ...][
+                ..., twins_order
+            ]
+            twins_amplitude_stds = twins.rbtl_dm_err.to_numpy()[twins_mask][None, ...][
+                ..., twins_order
+            ]
+
+            twins_weights = 1 / (twins_amplitude_stds * twins_amplitude_stds)
+            twins_weighted_sum = twins_weights.sum(axis=0)
+            twins_weighted_amplitudes = (twins_weights * twins_amplitudes).sum(
+                axis=0
+            ) / twins_weighted_sum
+
+            twins_n_eff = 1
+
+            twins_weighted_variance = (
+                (twins_weights * twins_amplitudes * twins_amplitudes).sum(axis=0)
+                / twins_weighted_sum
+            ) - (twins_weighted_amplitudes * twins_weighted_amplitudes)
+
+            twins_weighted_deviations = np.sqrt(
+                twins_n_eff * np.abs(twins_weighted_variance)
+            )
+
+            twins_weighted_stds = np.sqrt(
+                twins_weighted_deviations * twins_weighted_deviations
+                + twins_magshift_error * twins_magshift_error
+            )
+
+            # === No Mask ===
+            twins_x = twins_redshift
+            twins_y = twins_weighted_amplitudes
+            twins_yerr = twins_weighted_stds
+            fig, twins_ax = _plot(
+                twins_x,
+                twins_y,
+                twins_yerr,
+                no_plot_mask,
+                fig,
+                twins_ax,
+                "black",
+                0.25,
+                "Twins No Mask",
+                residual_bins=residual_bins,
+                pull_bins=pull_bins,
+                names=twins_names,
+            )
+
+            if twins is not None:
+                # === SN Mask ===
+                fig, twins_ax = _plot(
+                    twins_x,
+                    twins_y,
+                    twins_yerr,
+                    sn_plot_mask[pae_twins][..., 0],
+                    fig,
+                    twins_ax,
+                    "brown",
+                    0.25,
+                    "Twins SN Mask",
+                    residual_bins=residual_bins,
+                    pull_bins=pull_bins,
+                    names=twins_names,
+                )
+
+                # === Twins Mask ===
+                fig, twins_ax = _plot(
+                    twins_x,
+                    twins_y,
+                    twins_yerr,
+                    twins_plot_mask[pae_twins][..., 0],
+                    fig,
+                    twins_ax,
+                    "blue",
+                    0.25,
+                    "Twins Twins Mask",
+                    residual_bins=residual_bins,
+                    pull_bins=pull_bins,
+                    names=twins_names,
+                )
+
+            # === Combined Mask ===
+            fig, twins_ax = _plot(
+                twins_x,
+                twins_y,
+                twins_yerr,
+                combined_plot_mask[pae_twins][..., 0],
+                fig,
+                twins_ax,
+                "green",
+                1,
+                "Twins Final",
+                residual_bins=residual_bins,
+                pull_bins=pull_bins,
+                names=twins_names,
+            )
+            twins_pull_ax.set_xlabel("z")
+            twins_pull_hist_ax.set_xlabel("PDF")
 
         if legacy is not None:
             legacy_names = legacy["names"]
             legacy_intersection = set(pae_names) & set(legacy_names)
-            legacy_mask = np.zeros(legacy_names.shape, dtype=np.int32)
+            legacy_mask = np.zeros_like(legacy_names, dtype=np.int32)
             for name in legacy_intersection:
                 ind = np.argwhere(legacy_names == name)[0]
                 legacy_mask[ind] = 1
@@ -634,222 +795,192 @@ class DispersionPlotter(Plotter):
                 legacy_weighted_deviations * legacy_weighted_deviations
                 + legacy_magshift_error * legacy_magshift_error
             )
-            # pae_mask *= np.isfinite(legacy_weighted_stds)
 
             # === No Mask ===
             legacy_x = legacy_redshift
             legacy_y = legacy_weighted_amplitudes
             legacy_yerr = legacy_weighted_stds
-            fig, ax = _plot(
+            fig, legacy_ax = _plot(
                 legacy_x,
                 legacy_y,
                 legacy_yerr,
                 no_plot_mask,
                 fig,
-                ax,
+                legacy_ax,
                 "black",
-                "s",
                 0.25,
                 "Legacy No Mask",
                 residual_bins=residual_bins,
                 pull_bins=pull_bins,
-                hist=False,
             )
 
             if twins is not None:
                 # === SN Mask ===
-                fig, ax = _plot(
+                fig, legacy_ax = _plot(
                     legacy_x,
                     legacy_y,
                     legacy_yerr,
                     sn_plot_mask,
                     fig,
-                    ax,
+                    legacy_ax,
                     "brown",
-                    "s",
                     0.25,
                     "Legacy SN Mask",
                     residual_bins=residual_bins,
                     pull_bins=pull_bins,
-                    hist=False,
                 )
 
                 # === Twins Mask ===
-                fig, ax = _plot(
+                fig, legacy_ax = _plot(
                     legacy_x,
                     legacy_y,
                     legacy_yerr,
                     twins_plot_mask,
                     fig,
-                    ax,
+                    legacy_ax,
                     "blue",
-                    "s",
                     0.25,
                     "Legacy Twins Mask",
                     residual_bins=residual_bins,
                     pull_bins=pull_bins,
-                    hist=False,
                 )
 
             # === Combined Mask ===
-            fig, ax = _plot(
+            fig, legacy_ax = _plot(
                 legacy_x,
                 legacy_y,
                 legacy_yerr,
                 combined_plot_mask,
                 fig,
-                ax,
+                legacy_ax,
                 "green",
-                "s",
                 1,
                 "Legacy Final",
                 residual_bins=residual_bins,
                 pull_bins=pull_bins,
-                hist=False,
             )
+            legacy_pull_ax.set_xlabel("z")
+            legacy_pull_hist_ax.set_xlabel("PDF")
 
         # === No Mask ===
-        fig, ax = _plot(
+        fig, pae_ax = _plot(
             pae_x,
             pae_y,
             pae_yerr,
             no_plot_mask,
             fig,
-            ax,
+            pae_ax,
             "black",
-            "o",
             0.25,
             "No Mask",
             residual_bins=residual_bins,
             pull_bins=pull_bins,
-            y_prime=legacy_y,
-            yerr_prime=legacy_yerr,
             yerr_lower=pae_yerr_lower,
             yerr_upper=pae_yerr_upper,
         )
 
         if twins is not None:
             # === SN Mask ===
-            fig, ax = _plot(
+            fig, pae_ax = _plot(
                 pae_x,
                 pae_y,
                 pae_yerr,
                 sn_plot_mask,
                 fig,
-                ax,
+                pae_ax,
                 "brown",
-                "o",
                 0.25,
                 "SN Mask",
                 residual_bins=residual_bins,
                 pull_bins=pull_bins,
-                y_prime=legacy_y,
-                yerr_prime=legacy_yerr,
                 yerr_lower=pae_yerr_lower,
                 yerr_upper=pae_yerr_upper,
             )
 
             # === Twins Mask ===
-            fig, ax = _plot(
+            fig, pae_ax = _plot(
                 pae_x,
                 pae_y,
                 pae_yerr,
                 twins_plot_mask,
                 fig,
-                ax,
+                pae_ax,
                 "blue",
-                "o",
                 0.25,
                 "Twins Mask",
                 residual_bins=residual_bins,
                 pull_bins=pull_bins,
-                y_prime=legacy_y,
-                yerr_prime=legacy_yerr,
                 yerr_lower=pae_yerr_lower,
                 yerr_upper=pae_yerr_upper,
             )
 
         # === Combined Mask ===
-        fig, ax = _plot(
+        fig, pae_ax = _plot(
             pae_x,
             pae_y,
             pae_yerr,
             combined_plot_mask,
             fig,
-            ax,
+            pae_ax,
             "green",
-            "o",
             1,
             "Final",
             residual_bins=residual_bins,
             pull_bins=pull_bins,
-            y_prime=legacy_y,
-            yerr_prime=legacy_yerr,
             yerr_lower=pae_yerr_lower,
             yerr_upper=pae_yerr_upper,
             tmp=True,
         )
-        spectra_ax.set_ylim(
-            -1.1 * np.abs((pae_y - yerr)[combined_plot_mask].min()),
-            1.1 * np.abs(pae_y + yerr)[combined_plot_mask].max(),
-        )
-        pull_ax.set_ylim(
-            0,
-            1.1 * np.abs(pae_y / yerr)[combined_plot_mask].max(),
-        )
 
-        fig_1.suptitle(
-            (config.plot_kwargs or {}).get("title", config.name.capitalize())
-        )
-        spectra_ax.set_ylabel("ΔM")
+        fig.suptitle((config.plot_kwargs or {}).get("title", config.name.capitalize()))
+        if do_twins:
+            twins_spectra_ax.set_ylim(
+                -1.1 * np.abs((pae_y - yerr)[combined_plot_mask].min()),
+                1.1 * np.abs(pae_y + yerr)[combined_plot_mask].max(),
+            )
+            twins_spectra_ax.set_ylabel("ΔM")
+            twins_pull_ax.set_ylim(
+                0,
+                1.1 * np.abs(pae_y / yerr)[combined_plot_mask].max(),
+            )
+            twins_pull_ax.set_ylabel("Pull")
+        elif do_legacy:
+            legacy_spectra_ax.set_ylim(
+                -1.1 * np.abs((pae_y - yerr)[combined_plot_mask].min()),
+                1.1 * np.abs(pae_y + yerr)[combined_plot_mask].max(),
+            )
+            legacy_spectra_ax.set_ylabel("ΔM")
+            legacy_pull_ax.set_ylim(
+                0,
+                1.1 * np.abs(pae_y / yerr)[combined_plot_mask].max(),
+            )
+            legacy_pull_ax.set_ylabel("Pull")
+        else:
+            spectra_ax.set_ylim(
+                -1.1 * np.abs((pae_y - yerr)[combined_plot_mask].min()),
+                1.1 * np.abs(pae_y + yerr)[combined_plot_mask].max(),
+            )
+            spectra_ax.set_ylabel("ΔM")
+            pull_ax.set_ylim(
+                0,
+                1.1 * np.abs(pae_y / yerr)[combined_plot_mask].max(),
+            )
+            pull_ax.set_ylabel("Pull")
 
-        pull_ax.set_ylabel("Pull")
         pull_ax.set_xlabel("z")
         pull_hist_ax.set_xlabel("PDF")
 
-        leg = spectra_ax.legend(
-            bbox_to_anchor=(2.0, 1.0), ncols=1 if legacy is None else 2
+        leg = spectra_hist_ax.legend(
+            handles=handles, bbox_to_anchor=(1.0, 1.0), ncols=n_cols / 2
         )
         leg.set_in_layout(False)
         # Trigger a draw so that constrained layout is executed once
         # before we turn it off when printing....
-        fig_1.canvas.draw()
+        fig.canvas.draw()
         # We want the legend included in the bbox_inches='tight' calcs.
         leg.set_in_layout(True)
         # We don't want the layout to change at this point.
-        fig_1.set_layout_engine("none")
+        fig.set_layout_engine("none")
 
-        fig_1 = Plotter.save(fig_1, savepath)
-        Plotter.close(fig_1, [spectra_ax, spectra_hist_ax, pull_ax, pull_hist_ax])
-
-        if (
-            fig_2 is not None
-            and residual_ax is not None
-            and legacy_pull_ax is not None
-            and legacy_pull_hist_ax is not None
-        ):
-            # fig_2.align_ylabels([residual_ax, legacy_pull_ax])
-            # fig_2.align_ylabels([residual_hist_ax, legacy_pull_hist_ax])
-            fig_2.suptitle(
-                (config.plot_kwargs or {}).get("title", config.name.capitalize())
-                + " vs Legacy"
-            )
-            residual_ax.set_ylabel("Residual")
-
-            residual_ax.set_ylim(
-                -1.1 * np.abs(((pae_y - legacy_y) - yerr)[combined_plot_mask].min()),
-                1.1 * np.abs((pae_y - legacy_y) + yerr)[combined_plot_mask].max(),
-            )
-            legacy_pull_ax.set_ylim(
-                0,
-                1.1 * np.abs((pae_y - legacy_y) / yerr)[combined_plot_mask].max(),
-            )
-
-            legacy_pull_ax.set_ylabel("Pull")
-            legacy_pull_ax.set_xlabel("z")
-            legacy_pull_hist_ax.set_xlabel("PDF")
-            fig_2 = Plotter.save(fig_2, legacy_savepath)
-            Plotter.close(
-                fig_2,
-                [residual_ax, residual_hist_ax, legacy_pull_ax, legacy_pull_hist_ax],
-            )
+        fig = Plotter.save(fig, savepath)
+        Plotter.close(fig, [*ax[0], *ax[1], *ax[2]])
