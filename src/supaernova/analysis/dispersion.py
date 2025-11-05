@@ -324,7 +324,6 @@ class DispersionPlotter(Plotter):
         pae_magshift_error = abs(-5 * np.log10(pae_redshift / pae_redshift_error))
 
         pae_mask = mask_sn[pae_order]
-
         pae_names = sn_name[:, 0, 0][pae_order]
 
         pae_amplitudes = []
@@ -627,19 +626,23 @@ class DispersionPlotter(Plotter):
         )
 
         if twins is not None:
+            sort = np.argsort(pae_names)
+
             twins_names = twins.name
             twins_intersection = set(pae_names) & set(twins_names)
             twins_mask = np.zeros_like(twins_names, dtype=np.int32)
+            twins_pae_mask = np.zeros_like(pae_names, dtype=np.int32)
             for name in twins_intersection:
                 ind = np.argwhere(twins_names == name)[0]
                 twins_mask[ind] = 1
+                ind = np.argwhere(pae_names == name)[0]
+                twins_pae_mask[ind] = 1
             twins_mask = twins_mask.astype(bool)
+            twins_pae_mask = twins_pae_mask.astype(bool)[sort]
 
-            pae_twins = np.array([
-                np.argwhere(pae_names == n)[0] for n in twins_intersection
-            ])
+            pae_twins = sort[twins_pae_mask]
 
-            twins_redshift = pae_redshift[pae_twins][..., 0]
+            twins_redshift = pae_redshift[pae_twins]
             twins_order = np.argsort(twins_redshift)
             twins_redshift = twins_redshift[twins_order]
             twins_redshift_error = (twins_redshift * 3e5 + 300.0) / 3e5
@@ -650,12 +653,13 @@ class DispersionPlotter(Plotter):
             pae_twins = pae_twins[twins_order]
 
             twins_names = twins.name.to_numpy()[twins_mask][twins_order]
-            twins_amplitudes = twins.rbtl_dm.to_numpy()[twins_mask][None, ...][
+
+            twins_amplitudes = twins.dm_residuals_twins.to_numpy()[twins_mask][
                 ..., twins_order
-            ]
-            twins_amplitude_stds = twins.rbtl_dm_err.to_numpy()[twins_mask][None, ...][
+            ][None, ...]
+            twins_amplitude_stds = twins.rbtl_dm_err.to_numpy()[twins_mask][
                 ..., twins_order
-            ]
+            ][None, ...]
 
             twins_weights = 1 / (twins_amplitude_stds * twins_amplitude_stds)
             twins_weighted_sum = twins_weights.sum(axis=0)
@@ -704,7 +708,7 @@ class DispersionPlotter(Plotter):
                     twins_x,
                     twins_y,
                     twins_yerr,
-                    sn_plot_mask[pae_twins][..., 0],
+                    sn_plot_mask[pae_twins],
                     fig,
                     twins_ax,
                     "brown",
@@ -720,7 +724,7 @@ class DispersionPlotter(Plotter):
                     twins_x,
                     twins_y,
                     twins_yerr,
-                    twins_plot_mask[pae_twins][..., 0],
+                    twins_plot_mask[pae_twins],
                     fig,
                     twins_ax,
                     "blue",
@@ -736,7 +740,7 @@ class DispersionPlotter(Plotter):
                 twins_x,
                 twins_y,
                 twins_yerr,
-                combined_plot_mask[pae_twins][..., 0],
+                combined_plot_mask[pae_twins],
                 fig,
                 twins_ax,
                 "green",

@@ -281,7 +281,7 @@ class TFNFlowModel(ks.Model):
 
         return tf.where(
             mask,
-            log_prob - zero_log_prob,
+            log_prob + zero_log_prob,
             np.inf * tf.ones_like(log_prob),
         )
 
