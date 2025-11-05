@@ -1938,6 +1938,7 @@ class TFPosteriorModel(ks.Model):
             inner_kernel=sampler,
             num_adaptation_steps=self.n_adaption_steps,
             target_accept_prob=self.target_acceptance_rate,
+            reduce_fn=tfp.math.reduce_log_harmonic_mean_exp
         )
 
         (
