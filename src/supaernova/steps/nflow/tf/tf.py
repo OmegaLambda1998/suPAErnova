@@ -466,7 +466,7 @@ class TFNFlowModel(ks.Model):
                 self.lr, self.lr_decay_steps, self.lr_decay_rate
             )
             optimiser = self._optimiser(
-                learning_rate=schedule,
+                learning_rate=self.lr,
                 beta_1=0.85,
                 beta_2=0.999,
                 amsgrad=True,

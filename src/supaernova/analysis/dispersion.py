@@ -755,6 +755,7 @@ class DispersionPlotter(Plotter):
 
         if legacy is not None:
             legacy_names = legacy["names"]
+
             legacy_intersection = set(pae_names) & set(legacy_names)
             legacy_mask = np.zeros_like(legacy_names, dtype=np.int32)
             for name in legacy_intersection:
