@@ -1893,7 +1893,7 @@ class TFPosteriorModel(ks.Model):
         pp(step_size_inner, name="step_size_inner")
 
         step_size = tf.repeat(
-            tf.expand_dims(step_size_inner, axis=0),
+            tf.expand_dims(tf.ones_like(step_size_inner), axis=0),
             repeats=initial_position.shape[0],
             axis=0,
         )
