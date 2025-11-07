@@ -402,7 +402,7 @@ class TFPosteriorModel(ks.Model):
 
         log_likelihood_spec = (
             log_likelihood_spec_num
-            * tf.reduce_max(log_likelihood_spec_sum, axis=-1)
+            * tf.reduce_max(log_likelihood_spec_sum, axis=-1, keepdims=True)
             / log_likelihood_spec_sum
         )
         log_likelihood_num = tf.reduce_sum(
