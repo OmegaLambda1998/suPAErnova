@@ -400,9 +400,7 @@ class TFPosteriorModel(ks.Model):
             1,
         )
 
-        log_likelihood_spec = (
-            posterior_mask.shape[-1] * log_likelihood_spec_num / log_likelihood_spec_sum
-        )
+        log_likelihood_spec = log_likelihood_spec_num / log_likelihood_spec_sum
         log_likelihood_num = tf.reduce_sum(
             tf.where(
                 mask_spec,
