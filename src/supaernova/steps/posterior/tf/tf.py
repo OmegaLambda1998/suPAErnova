@@ -1878,10 +1878,10 @@ class TFPosteriorModel(ks.Model):
                 )
                 return
         self.log.debug("Running HMC")
-        step_size_init = self.map.unconstrain(self.step_size)
+        step_size_init = self.step_size
         pp(step_size_init, name="step_size_init")
 
-        initial_position = self.map.unconstrain(self.map.position.best)
+        initial_position = self.map.position.best
         step_size_std = tf.math.reduce_std(
             tf.boolean_mask(initial_position, self.map.converged), axis=0
         )
@@ -1895,9 +1895,11 @@ class TFPosteriorModel(ks.Model):
         )
         step_size_inner = tf.math.maximum(step_size_init, step_size_std)
         pp(step_size_inner, name="step_size_inner")
+        step_size_inner = self.map.unconstrain(step_size_inner)
+        pp(step_size_inner, name="unconstrained step_size_inner")
 
         step_size = tf.repeat(
-            tf.expand_dims(tf.ones_like(step_size_inner), axis=0),
+            tf.expand_dims(step_size_inner, axis=0),
             repeats=initial_position.shape[0],
             axis=0,
         )
