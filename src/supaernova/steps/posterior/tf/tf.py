@@ -1904,6 +1904,8 @@ class TFPosteriorModel(ks.Model):
             axis=0,
         )
 
+        initial_position = self.map.unconstrain(initial_position)
+
         self.log.debug(
             f"With {self.n_burnin_steps} burn-in steps and {self.n_run_steps} run steps, a maximum of {self.max_samples} samples will be generated for a max leapfrog depth of {(2**self.n_leapfrog) - 1}"
         )
