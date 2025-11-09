@@ -1715,10 +1715,15 @@ class TFPAEModel(ks.Model):
         d_amp = tf.reshape(d_amp, [-1, wl_dim])
         recon_mask = tf.reshape(recon_mask, [-1, wl_dim])
 
-        diff = amp_pred - amp_true
-        scale = tf.where(
-            amp_true == 0, ks.backend.epsilon() * tf.ones_like(amp_true), amp_true
-        )
+        # diff = amp_pred - amp_true
+        # scale = tf.where(
+        #     amp_true == 0, ks.backend.epsilon() * tf.ones_like(amp_true), amp_true
+        # )
+        # error = tf.abs(diff / scale)
+        # error = tf.where(recon_mask, error, tf.ones_like(error))
+
+        diff = amp_true - amp_pred
+        scale = tf.where(amp_pred == 0, tf.ones_like(amp_pred), amp_pred)
         error = tf.abs(diff / scale)
         error = tf.where(recon_mask, error, tf.ones_like(error))
 
