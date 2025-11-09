@@ -1603,6 +1603,7 @@ class TFPosteriorModel(ks.Model):
         )
 
         log_accept_ratio = pkr.inner_results.log_accept_ratio
+
         accept_ratio = tf.math.exp(
             tfp.math.reduce_logmeanexp(tf.minimum(log_accept_ratio, 0.0))
         )
@@ -1907,7 +1908,7 @@ class TFPosteriorModel(ks.Model):
         initial_position = self.map.unconstrain(initial_position)
 
         self.log.debug(
-            f"With {self.n_burnin_steps} burn-in steps and {self.n_run_steps} run steps, a maximum of {self.max_samples} samples will be generated for a max leapfrog depth of {(2**self.n_leapfrog) - 1}"
+            f"With {self.n_burnin_steps} burn-in steps and {self.n_run_steps} run steps ({self.n_adaption_steps} of which will be used for step-size adaption), a maximum of {self.max_samples} samples will be generated for a max leapfrog depth of {(2**self.n_leapfrog) - 1}"
         )
 
         self.summary_writer = None
