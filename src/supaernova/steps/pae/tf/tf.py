@@ -1723,9 +1723,9 @@ class TFPAEModel(ks.Model):
         # error = tf.where(recon_mask, error, tf.ones_like(error))
 
         diff = amp_true - amp_pred
-        scale = tf.where(amp_pred == 0, tf.ones_like(amp_pred), amp_pred)
+        scale = tf.where(amp_pred == 0, 1e-3 * tf.ones_like(amp_pred), amp_pred)
         error = tf.abs(diff / scale)
-        error = tf.where(recon_mask, error, tf.ones_like(error))
+        error = tf.where(recon_mask, error, 1e-3 * tf.ones_like(error))
 
         bin_indices = tf.reshape(
             (
