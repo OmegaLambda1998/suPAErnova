@@ -371,7 +371,20 @@ class TFPosteriorModel(ks.Model):
             )
         )
 
-        synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (input_sigma**2))
+        synth_sigma = tf.sqrt(
+            (
+                (
+                    tf.where(
+                        synth_amp == 0,
+                        ks.backend.epsilon() * tf.ones_like(synth_amp),
+                        synth_amp,
+                    )
+                    * sigma_recon
+                )
+                ** 2
+            )
+            + (input_sigma**2)
+        )
 
         # Set missing values to 1 for all times
         synth_sigma = tf.where(posterior_mask, synth_sigma, tf.ones_like(synth_sigma))

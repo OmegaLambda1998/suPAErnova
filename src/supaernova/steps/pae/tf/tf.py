@@ -898,7 +898,7 @@ class TFPAEModel(ks.Model):
             loss_terms[self.delta_loss_tracker.name] = physical_latents_penalty
 
         if self.loss_covariance_penalty > 0:
-            eps = tf.constant(1e-3)
+            eps = ks.backend.epsilon()
             mask_latents = mask_sn
             n_unmasked_latents = tf.math.count_nonzero(
                 mask_latents[:, 0], dtype=tf.float32
@@ -1723,7 +1723,9 @@ class TFPAEModel(ks.Model):
         # error = tf.where(recon_mask, error, tf.ones_like(error))
 
         diff = amp_true - amp_pred
-        scale = tf.where(amp_pred == 0, tf.ones_like(amp_pred), amp_pred)
+        scale = tf.where(
+            amp_pred == 0, ks.backend.epsilon() * tf.ones_like(amp_pred), amp_pred
+        )
         error = tf.abs(diff / scale)
         error = tf.where(recon_mask, error, tf.ones_like(error))
 
