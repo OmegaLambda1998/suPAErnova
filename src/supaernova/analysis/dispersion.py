@@ -549,6 +549,8 @@ class DispersionPlotter(Plotter):
         sn_plot_mask = pae_mask
         twins_plot_mask = pae_twins_mask
         combined_plot_mask = pae_mask & pae_twins_mask
+        # combined_plot_mask = np.logical_and(combined_plot_mask, np.abs(pae_y) < 0.3)
+        # print("test")
 
         residual_max = np.log10(np.max(np.abs(pae_y[combined_plot_mask])))
         residual_scale_min = np.floor(residual_max)

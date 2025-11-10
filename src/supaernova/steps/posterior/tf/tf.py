@@ -291,12 +291,12 @@ class TFPosteriorModel(ks.Model):
 
         # ~(~input_mask & input_wl_mask)
         # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
-        valid_wl_mask = tf.logical_not(
-            tf.logical_and(tf.logical_not(posterior_mask), input_wl_mask)
-        )
-        mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1)
+        # valid_wl_mask = tf.logical_not(
+        #     tf.logical_and(tf.logical_not(posterior_mask), input_wl_mask)
+        # )
+        # mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1)
 
-        # mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
+        mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
 
         # Determine which sn to keep
         mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
