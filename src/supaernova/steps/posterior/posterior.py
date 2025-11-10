@@ -403,14 +403,9 @@ class Posterior(ModelStep[PosteriorConfig]):
 
             self.step_sizes[subset] = np.concatenate(step_sizes, axis=-1)
 
-            time = self.data.time
-            amplitude = self.data.amplitude
-            sigma = self.data.sigma
-            self.data.clear()
-            mask = self.mask
-            sn_mask = self.sn_mask
-            spec_mask = self.spec_mask
-            wl_mask = self.wl_mask
+            time = stage.input_phase
+            amplitude = stage.input_amp
+            sigma = stage.input_d_amp
 
             recon_error, _, recon_error_centers = pae.model.recon_error((
                 time,

@@ -1683,16 +1683,6 @@ class TFPAEModel(ks.Model):
         # Apply sn and spec masks
         recon_mask = mask & sn_mask & spec_mask & wl_mask
 
-        # Determine which spectra to keep
-        # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-        mask_spec = tf.math.reduce_any(recon_mask, axis=-1, keepdims=True)
-
-        # Determine which SNe to keep
-        # Will mask out any SN with *no* unmasked spectra
-        mask_sn = tf.math.reduce_any(mask_spec, axis=-2, keepdims=True)
-
-        recon_mask &= mask_spec & mask_sn
-
         has_valid_data = tf.math.reduce_any(recon_mask, axis=-1)
 
         # Bin edges and centers
@@ -1715,20 +1705,9 @@ class TFPAEModel(ks.Model):
         d_amp = tf.reshape(d_amp, [-1, wl_dim])
         recon_mask = tf.reshape(recon_mask, [-1, wl_dim])
 
-        # diff = amp_pred - amp_true
-        # scale = tf.where(
-        #     amp_true == 0, ks.backend.epsilon() * tf.ones_like(amp_true), amp_true
-        # )
-        # error = tf.abs(diff / scale)
-        # error = tf.where(recon_mask, error, tf.ones_like(error))
-
-        diff = amp_true - amp_pred
-        # scale = tf.where(
-        #     amp_pred == 0, ks.backend.epsilon() * tf.ones_like(amp_pred), amp_pred
-        # )
-        scale = tf.where(amp_pred == 0, amp_true, amp_pred)
+        diff = tf.abs(amp_true - amp_pred)
+        scale = amp_true
         error = tf.abs(diff / scale)
-        error = tf.where(recon_mask, error, tf.ones_like(error))
 
         bin_indices = tf.reshape(
             (

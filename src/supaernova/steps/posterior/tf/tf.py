@@ -291,12 +291,12 @@ class TFPosteriorModel(ks.Model):
 
         # ~(~input_mask & input_wl_mask)
         # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
-        valid_wl_mask = tf.logical_not(
-            tf.logical_and(tf.logical_not(posterior_mask), input_wl_mask)
-        )
+        # valid_wl_mask = tf.logical_not(
+        #     tf.logical_and(tf.logical_not(posterior_mask), input_wl_mask)
+        # )
+        # mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1)
 
-        # Determine which spectra to keep
-        mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1)
+        mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
 
         # Determine which sn to keep
         mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
@@ -377,7 +377,9 @@ class TFPosteriorModel(ks.Model):
             )
         )
 
-        synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (input_sigma**2))
+        synth_sigma = tf.sqrt(
+            ((synth_amp * sigma_recon) ** 2) + (input_sigma * input_sigma)
+        )
 
         # Set missing values to 1 for all times
         synth_sigma = tf.where(posterior_mask, synth_sigma, tf.ones_like(synth_sigma))
@@ -1900,7 +1902,9 @@ class TFPosteriorModel(ks.Model):
         step_size_init = tf.where(
             tf.math.is_finite(step_size_init), step_size_init, step_size_std
         )
-        step_size_inner = tf.math.maximum(step_size_init, step_size_std)
+        step_size_inner = tf.math.minimum(step_size_init, step_size_std) * (
+            1 - self.target_acceptance_rate
+        )
         pp(step_size_inner, name="step_size_inner")
         step_size_inner = self.map.unconstrain(step_size_inner)
         pp(step_size_inner, name="unconstrained step_size_inner")
