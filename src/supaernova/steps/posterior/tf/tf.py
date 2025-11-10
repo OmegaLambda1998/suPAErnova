@@ -289,8 +289,14 @@ class TFPosteriorModel(ks.Model):
 
         posterior_mask = input_mask & input_sn_mask & input_spec_mask & input_wl_mask
 
+        # ~(~input_mask & input_wl_mask)
+        # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
+        valid_wl_mask = tf.logical_not(
+            tf.logical_and(tf.logical_not(posterior_mask), input_wl_mask)
+        )
+
         # Determine which spectra to keep
-        mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
+        mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1)
 
         # Determine which sn to keep
         mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
@@ -371,20 +377,7 @@ class TFPosteriorModel(ks.Model):
             )
         )
 
-        synth_sigma = tf.sqrt(
-            (
-                (
-                    tf.where(
-                        synth_amp == 0,
-                        ks.backend.epsilon() * tf.ones_like(synth_amp),
-                        synth_amp,
-                    )
-                    * sigma_recon
-                )
-                ** 2
-            )
-            + (input_sigma**2)
-        )
+        synth_sigma = tf.sqrt(((synth_amp * sigma_recon) ** 2) + (input_sigma**2))
 
         # Set missing values to 1 for all times
         synth_sigma = tf.where(posterior_mask, synth_sigma, tf.ones_like(synth_sigma))

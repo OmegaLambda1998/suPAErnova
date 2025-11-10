@@ -1723,9 +1723,10 @@ class TFPAEModel(ks.Model):
         # error = tf.where(recon_mask, error, tf.ones_like(error))
 
         diff = amp_true - amp_pred
-        scale = tf.where(
-            amp_pred == 0, ks.backend.epsilon() * tf.ones_like(amp_pred), amp_pred
-        )
+        # scale = tf.where(
+        #     amp_pred == 0, ks.backend.epsilon() * tf.ones_like(amp_pred), amp_pred
+        # )
+        scale = tf.where(amp_pred == 0, amp_true, amp_pred)
         error = tf.abs(diff / scale)
         error = tf.where(recon_mask, error, tf.ones_like(error))
 
