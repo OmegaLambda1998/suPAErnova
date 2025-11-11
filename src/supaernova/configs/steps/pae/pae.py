@@ -230,7 +230,7 @@ class PAEConfig(BackendConfig):
     loss_delta_av_penalty: NonNegativeFloat = 0
     loss_delta_m_penalty: NonNegativeFloat = 0
     loss_delta_p_penalty: NonNegativeFloat = 0
-    loss_covariance_penalty: NonNegativeFloat = 50000
+    loss_covariance_penalty: NonNegativeFloat = 500000
     loss_decorrelate_all: bool = True
     loss_decorrelate_dust: bool = True
     loss_clip_delta: PositiveFloat = 25
@@ -242,14 +242,14 @@ class PAEConfig(BackendConfig):
     delta_av_lr_decay_rate: PositiveFloat = 0.95
     delta_av_lr_weight_decay_rate: PositiveFloat = 0.0001
 
-    zs_epochs: PositiveInt = 1000
+    zs_epochs: PositiveInt = 2000
     zs_patience: PositiveFloat | PositiveInt = 0.5  # Run for 100%
     zs_lr: PositiveFloat = 0.005
     zs_lr_decay_steps: PositiveInt | PositiveFloat = 300
     zs_lr_decay_rate: PositiveFloat = 0.95
     zs_lr_weight_decay_rate: PositiveFloat = 0.0001
 
-    delta_m_epochs: PositiveInt = 3000
+    delta_m_epochs: PositiveInt = 5000
     delta_m_patience: PositiveFloat | PositiveInt = 0.5  # Run for 100%
     delta_m_lr: PositiveFloat = 0.005
     delta_m_lr_decay_steps: PositiveInt | PositiveFloat = 300

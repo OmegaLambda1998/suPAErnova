@@ -729,45 +729,45 @@ class Data(Step[DataConfig]):
             if len(v.shape) == n_axes:
                 data[k] = v[..., np.newaxis]
 
-        def nearest_mask[T: np.number[Any]](
-            arr: "npt.NDArray[T]",
-            min_val: "T | npt.NDArray[T]",
-            max_val: "T | npt.NDArray[T]",
-        ) -> "npt.NDArray[bool]":
-            if not isinstance(min_val, np.ndarray):
-                min_val = cast("npt.NDArray[T]", np.array(min_val))
-            if not isinstance(max_val, np.ndarray):
-                max_val = cast("npt.NDArray[T]", np.array(max_val))
-            base_mask = (min_val <= arr) & (arr <= max_val)
-
-            # Pad left and right
-            pad_left = np.pad(
-                base_mask[:, :, :-1],
-                ((0, 0), (0, 0), (1, 0)),
-                mode="constant",
-                constant_values=False,
-            )
-            pad_right = np.pad(
-                base_mask[:, :, 1:],
-                ((0, 0), (0, 0), (0, 1)),
-                mode="constant",
-                constant_values=False,
-            )
-
-            # Compute distances to the boundaries
-            dist_to_min = np.abs(arr - min_val)
-            dist_to_max = np.abs(arr - max_val)
-
-            # Left edge logic
-            expand_left = (
-                (~base_mask) & pad_right & (dist_to_min < np.roll(dist_to_min, -1))
-            )
-            # Right edge logic
-            expand_right = (
-                (~base_mask) & pad_left & (dist_to_max < np.roll(dist_to_max, 1))
-            )
-            # Combine the masks
-            return base_mask | expand_left | expand_right
+        # def nearest_mask[T: np.number[Any]](
+        #     arr: "npt.NDArray[T]",
+        #     min_val: "T | npt.NDArray[T]",
+        #     max_val: "T | npt.NDArray[T]",
+        # ) -> "npt.NDArray[bool]":
+        #     if not isinstance(min_val, np.ndarray):
+        #         min_val = cast("npt.NDArray[T]", np.array(min_val))
+        #     if not isinstance(max_val, np.ndarray):
+        #         max_val = cast("npt.NDArray[T]", np.array(max_val))
+        #     base_mask = (min_val <= arr) & (arr <= max_val)
+        #
+        #     # Pad left and right
+        #     pad_left = np.pad(
+        #         base_mask[:, :, :-1],
+        #         ((0, 0), (0, 0), (1, 0)),
+        #         mode="constant",
+        #         constant_values=False,
+        #     )
+        #     pad_right = np.pad(
+        #         base_mask[:, :, 1:],
+        #         ((0, 0), (0, 0), (0, 1)),
+        #         mode="constant",
+        #         constant_values=False,
+        #     )
+        #
+        #     # Compute distances to the boundaries
+        #     dist_to_min = np.abs(arr - min_val)
+        #     dist_to_max = np.abs(arr - max_val)
+        #
+        #     # Left edge logic
+        #     expand_left = (
+        #         (~base_mask) & pad_right & (dist_to_min < np.roll(dist_to_min, -1))
+        #     )
+        #     # Right edge logic
+        #     expand_right = (
+        #         (~base_mask) & pad_left & (dist_to_max < np.roll(dist_to_max, 1))
+        #     )
+        #     # Combine the masks
+        #     return base_mask | expand_left | expand_right
 
         # Create a mask of wavelength outside of the wavelength limits
         data["mask"] = np.full(
@@ -799,8 +799,11 @@ class Data(Step[DataConfig]):
         self.log.debug(f"Valid Phases ({self.min_phase} <= p <= {self.max_phase}):")
         self.get_unmasked_dims(data["mask"])
 
-        valid_wavelength_mask = nearest_mask(
-            data["wavelength"], data["wl_mask_min"], data["wl_mask_max"]
+        # valid_wavelength_mask = nearest_mask(
+        #     data["wavelength"], data["wl_mask_min"], data["wl_mask_max"]
+        # )
+        valid_wavelength_mask = (data["wavelength"] >= data["wl_mask_min"]) & (
+            data["wavelength"] <= data["wl_mask_max"]
         )
         data["wl_mask"] = wl_mask = valid_wavelength_mask
         data["mask"] &= wl_mask
@@ -818,7 +821,11 @@ class Data(Step[DataConfig]):
         laser_width = 2  # in units of wavelength bins
         laser_height = 0.4  # fractional increase in amplitude over neighbours to be considered laser
 
-        laser_wl_mask = nearest_mask(data["wavelength"], laser_wl_start, laser_wl_end)
+        # laser_wl_mask = nearest_mask(data["wavelength"], laser_wl_start, laser_wl_end)
+        laser_wl_mask = (data["wavelength"] >= laser_wl_start) & (
+            data["wavelength"] <= laser_wl_end
+        )
+
         laser_amp = np.full(data["amplitude"].shape, np.nan)
         laser_amp[laser_wl_mask] = data["amplitude"][laser_wl_mask]
 
@@ -828,14 +835,18 @@ class Data(Step[DataConfig]):
         laser_amp_smooth = (
             0.5 * (laser_amp_min + laser_amp_max) * laser_wl_mask.astype(np.float32)
         )
+
         laser_amp = np.where(
-            np.isfinite(laser_amp), laser_amp, np.zeros_like(laser_amp)
+            np.isfinite(laser_amp) & np.isfinite(laser_amp_smooth),
+            laser_amp,
+            np.zeros_like(laser_amp),
         )
         laser_amp_smooth = np.where(
-            np.isfinite(laser_amp_smooth),
+            np.isfinite(laser_amp) & np.isfinite(laser_amp_smooth),
             laser_amp_smooth,
             np.zeros_like(laser_amp_smooth),
         )
+
         laser_mask = (laser_amp - laser_amp_smooth) > laser_height
 
         while laser_width > 0:

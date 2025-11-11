@@ -281,7 +281,7 @@ class TFNFlowModel(ks.Model):
 
         return tf.where(
             mask,
-            log_prob + zero_log_prob,
+            log_prob,  # + zero_log_prob,
             np.inf * tf.ones_like(log_prob),
         )
 
@@ -466,7 +466,7 @@ class TFNFlowModel(ks.Model):
                 self.lr, self.lr_decay_steps, self.lr_decay_rate
             )
             optimiser = self._optimiser(
-                learning_rate=self.lr,
+                learning_rate=schedule,
                 beta_1=0.85,
                 beta_2=0.999,
                 amsgrad=True,
