@@ -310,6 +310,8 @@ class DispersionPlotter(Plotter):
             wl_mask=wl_mask,
         )
 
+        laser_mask = data.laser_mask
+
         # Determine which spectra to keep
         # Will mask out any spectrum without at least one masked wavelength within the valid wavelength range
         mask_spec = np.any(input_mask, axis=-1)
@@ -325,6 +327,8 @@ class DispersionPlotter(Plotter):
 
         pae_mask = mask_sn[pae_order]
         pae_names = sn_name[:, 0, 0][pae_order]
+
+        pae_laser_mask = np.any(laser_mask, axis=-1)[:, 0][pae_order]
 
         pae_amplitudes = []
         pae_amplitude_errs_lower = []
@@ -401,14 +405,17 @@ class DispersionPlotter(Plotter):
         )
 
         pae_twins_mask = np.ones_like(pae_mask, dtype=bool)
+        pae_salt_mask = np.ones_like(pae_mask, dtype=bool)
         if twins is not None:
             pae_twins_mask = np.zeros_like(pae_mask, dtype=bool)
+            pae_salt_mask = np.zeros_like(pae_mask, dtype=bool)
             twins_names = twins.name
             pae_intersection = set(pae_names) & set(twins_names)
             for name in pae_intersection:
                 ind = np.argwhere(pae_names == name)[0]
                 df = twins[twins.name == name]
                 pae_twins_mask[ind] = df.mask_twins
+                pae_salt_mask[ind] = df.mask_salt
 
         def _plot(
             x: "npt.NDArray[Any]",
@@ -548,9 +555,8 @@ class DispersionPlotter(Plotter):
         no_plot_mask = None
         sn_plot_mask = pae_mask
         twins_plot_mask = pae_twins_mask
-        combined_plot_mask = pae_mask & pae_twins_mask
-        # combined_plot_mask = np.logical_and(combined_plot_mask, np.abs(pae_y) < 0.3)
-        # print("test")
+        salt_plot_mask = pae_salt_mask
+        combined_plot_mask = pae_mask & pae_twins_mask & pae_salt_mask
 
         residual_max = np.log10(np.max(np.abs(pae_y[combined_plot_mask])))
         residual_scale_min = np.floor(residual_max)
@@ -737,6 +743,22 @@ class DispersionPlotter(Plotter):
                     names=twins_names,
                 )
 
+                # === Salt Mask ===
+                fig, twins_ax = _plot(
+                    twins_x,
+                    twins_y,
+                    twins_yerr,
+                    salt_plot_mask[pae_twins],
+                    fig,
+                    twins_ax,
+                    "purple",
+                    0.25,
+                    "Twins Salt Mask",
+                    residual_bins=residual_bins,
+                    pull_bins=pull_bins,
+                    names=twins_names,
+                )
+
             # === Combined Mask ===
             fig, twins_ax = _plot(
                 twins_x,
@@ -852,6 +874,21 @@ class DispersionPlotter(Plotter):
                     pull_bins=pull_bins,
                 )
 
+                # === Salt Mask ===
+                fig, legacy_ax = _plot(
+                    legacy_x,
+                    legacy_y,
+                    legacy_yerr,
+                    salt_plot_mask,
+                    fig,
+                    legacy_ax,
+                    "purple",
+                    0.25,
+                    "Legacy Salt Mask",
+                    residual_bins=residual_bins,
+                    pull_bins=pull_bins,
+                )
+
             # === Combined Mask ===
             fig, legacy_ax = _plot(
                 legacy_x,
@@ -915,6 +952,23 @@ class DispersionPlotter(Plotter):
                 "blue",
                 0.25,
                 "Twins Mask",
+                residual_bins=residual_bins,
+                pull_bins=pull_bins,
+                yerr_lower=pae_yerr_lower,
+                yerr_upper=pae_yerr_upper,
+            )
+
+            # === Salt Mask ===
+            fig, pae_ax = _plot(
+                pae_x,
+                pae_y,
+                pae_yerr,
+                salt_plot_mask,
+                fig,
+                pae_ax,
+                "purple",
+                0.25,
+                "Salt Mask",
                 residual_bins=residual_bins,
                 pull_bins=pull_bins,
                 yerr_lower=pae_yerr_lower,

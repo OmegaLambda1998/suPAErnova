@@ -45,6 +45,7 @@ class SNPAEData(StepResult):
     salt_flux: npt.NDArray[float]
     wavelength: npt.NDArray[float]
     mask: npt.NDArray[int]
+    laser_mask: npt.NDArray[int]
     sn_mask: npt.NDArray[int]
     spec_mask: npt.NDArray[int]
     wl_mask: npt.NDArray[int]

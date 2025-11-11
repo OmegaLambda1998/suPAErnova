@@ -7,7 +7,7 @@ from astropy import cosmology as cosmo
 import sncosmo
 
 from supaernova.steps import Step
-from supaernova.utils import resolve_path
+from supaernova.utils import pp, resolve_path
 from supaernova.steps.variants import Variant
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis.analysis import Plotter
@@ -844,6 +844,7 @@ class Data(Step[DataConfig]):
             laser_mask = laser_mask | laser_mask_min | laser_mask_max
             laser_width -= 1
 
+        data["laser_mask"] = laser_mask
         data["mask"] &= ~laser_mask
 
         self.log.debug("Laser Lines:")
