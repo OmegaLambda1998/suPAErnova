@@ -310,8 +310,6 @@ class DispersionPlotter(Plotter):
             wl_mask=wl_mask,
         )
 
-        laser_mask = data.laser_mask
-
         # Determine which spectra to keep
         # Will mask out any spectrum without at least one masked wavelength within the valid wavelength range
         mask_spec = np.any(input_mask, axis=-1)
@@ -327,8 +325,6 @@ class DispersionPlotter(Plotter):
 
         pae_mask = mask_sn[pae_order]
         pae_names = sn_name[:, 0, 0][pae_order]
-
-        pae_laser_mask = np.any(laser_mask, axis=-1)[:, 0][pae_order]
 
         pae_amplitudes = []
         pae_amplitude_errs_lower = []
