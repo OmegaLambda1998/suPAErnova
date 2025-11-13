@@ -76,6 +76,9 @@ class TFPosteriorModel(ks.Model):
         self.data_amplitude[~self.data_mask] = -HUGE
         self.data_sigma[~self.data_mask] = -HUGE
 
+        self.legacy_path = config.legacy_path
+        self.data_dir = config.data_dir
+
         # Equivalent to `self.pae = ...` but avoids tf / ks from tracking self.pae
         self.pae: TFPAEModel
         vars(self)["pae"] = config.pae
@@ -1904,9 +1907,7 @@ class TFPosteriorModel(ks.Model):
         step_size_init = tf.where(
             tf.math.is_finite(step_size_init), step_size_init, step_size_std
         )
-        step_size_inner = tf.math.minimum(step_size_init, step_size_std) * (
-            1 - self.target_acceptance_rate
-        )
+        step_size_inner = tf.math.maximum(step_size_init, step_size_std)
         pp(step_size_inner, name="step_size_inner")
         step_size_inner = self.map.unconstrain(step_size_inner)
         pp(step_size_inner, name="unconstrained step_size_inner")

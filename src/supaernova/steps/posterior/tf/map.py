@@ -67,6 +67,41 @@ class PosteriorMap(tf.Module):
         self.n_z_latents = self.pae.n_z_latents
         self.n_pae_latents = self.pae.n_pae_latents
 
+        self.legacy = {}
+        self.legacy_mask = tf.zeros_like(self.data.sn_name)
+        self.pae_unsort = np.zeros_like(self.data.sn_name)
+        self.legacy_sort = np.zeros_like(self.data.sn_name)
+        if config.legacy_path is not None:
+            legacy_keys = {
+                ("names", 0),
+                ("z_latent_mcmc", 0),
+            }
+            for path in config.legacy_path or []:
+                legacy_path = config.data_dir / path
+                legacy_data = np.load(legacy_path, allow_pickle=True).item()
+                self.legacy = {
+                    k: (
+                        legacy_data[k]
+                        if k not in self.legacy
+                        else np.concatenate((self.legacy[k], legacy_data[k]), axis=axis)
+                    )
+                    for (k, axis) in legacy_keys
+                }
+
+            legacy_intersection = set(self.data.sn_name[:, 0, 0]) & set(
+                self.legacy["names"]
+            )
+            self.legacy_mask = tf.zeros_like(self.legacy["names"], dtype=tf.bool)
+            for name in legacy_intersection:
+                self.legacy_mask = tf.where(
+                    self.legacy["names"] == name,
+                    tf.ones_like(self.legacy_mask, dtype=tf.bool),
+                    self.legacy_mask,
+                )
+
+            self.pae_unsort = np.argsort(np.argsort(self.data.sn_name[:, 0, 0]))
+            self.legacy_sort = np.argsort(self.legacy["names"][self.legacy_mask])
+
         # === Training ===
         self.chain_min = tf.Variable(tf.zeros(self.sn_dim, dtype=tf.int32))
         self.converged = tf.Variable(tf.zeros(self.sn_dim, dtype=tf.bool))
@@ -436,6 +471,20 @@ class PosteriorMap(tf.Module):
             delta_p = self.delta_p.best
         if stage.init_bias == "best":
             bias = self.bias.best
+
+        # --- Legacy ---
+        if stage.init_delta_m == "legacy":
+            delta_m = self.legacy["z_latent_mcmc"][self.legacy_mask, 0:1][
+                self.legacy_sort, :
+            ][self.pae_unsort, :]
+        if stage.init_delta_p == "legacy":
+            delta_p = self.legacy["z_latent_mcmc"][self.legacy_mask, 1:2][
+                self.legacy_sort, :
+            ][self.pae_unsort, :]
+        if stage.init_delta_av == "legacy":
+            delta_av = self.legacy["z_latent_mcmc"][self.legacy_mask, 2:3][
+                self.legacy_sort, :
+            ][self.pae_unsort, :]
 
         # At this point, we are certain to have generated u_latents, z_latents, u_delta_av as well as any parameters with "data" generation
         # Now we cover all the other options

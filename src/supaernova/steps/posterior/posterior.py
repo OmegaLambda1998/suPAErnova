@@ -65,6 +65,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.tolerance: float = self.options.tolerance
         self.target_acceptance_rate: float = self.options.target_acceptance_rate
         self.random_initial_positions: bool = self.options.random_initial_positions
+        self.legacy_path: tuple[Path] | None = self.options.legacy
 
         self.u_delta_av_min: float = self.options.u_delta_av_min
         self.u_delta_av_max: float = self.options.u_delta_av_max
@@ -160,6 +161,7 @@ class Posterior(ModelStep[PosteriorConfig]):
             "model",
             "map_stage_init",
             "map_stage_constant",
+            "map_stage_legacy",
             "map_stage_random",
             "map_stage_delta_m",
             "map_stage_delta_av",
@@ -234,6 +236,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.map_stage_setup: PosteriorMAPStage
         self.map_stage_init: PosteriorMAPStage
         self.map_stage_constant: PosteriorMAPStage
+        self.map_stage_legacy: PosteriorMAPStage | None
         self.map_stage_random: PosteriorMAPStage
         self.map_stage_delta_m: PosteriorMAPStage
         self.map_stage_delta_av: PosteriorMAPStage
@@ -418,23 +421,28 @@ class Posterior(ModelStep[PosteriorConfig]):
             self.recon_error_centers[subset] = recon_error_centers
 
         # --- Stages ---
+        i = 0
         self.map_stage_setup = PosteriorMAPStage.model_validate({
-            "stage": 0,
+            "stage": i,
             "name": "setup",
             "fname": "setup",
             "n_chains": 1,
             "init": True,
             "setup": True,
         })
+        i += 1
+
         self.map_stage_init = PosteriorMAPStage.model_validate({
-            "stage": 1,
+            "stage": i,
             "name": "init",
             "fname": "init",
             "n_chains": 1,
             "init": True,
         })
+        i += 1
+
         self.map_stage_constant = PosteriorMAPStage.model_validate({
-            "stage": 2,
+            "stage": i,
             "name": "constant",
             "fname": "constant",
             "n_chains": 1,
@@ -445,8 +453,26 @@ class Posterior(ModelStep[PosteriorConfig]):
             "init_delta_p": "constant",
             "init_bias": "constant",
         })
+        i += 1
+
+        if self.legacy_path is not None:
+            self.map_stage_legacy = PosteriorMAPStage.model_validate({
+                "stage": i,
+                "name": "legacy",
+                "fname": "legacy",
+                "n_chains": 1,
+                "init_u_delta_av": "constant",
+                "init_latents": "u_constant",
+                "init_delta_av": "legacy",
+                "init_delta_m": "legacy",
+                "init_delta_p": "legacy",
+                "init_bias": "constant",
+            })
+            i += 1
+        else:
+            self.map_stage_legacy = None
         self.map_stage_random = PosteriorMAPStage.model_validate({
-            "stage": 3,
+            "stage": i,
             "name": "random",
             "fname": "random",
             "n_chains": self.n_random_chains,
@@ -457,8 +483,10 @@ class Posterior(ModelStep[PosteriorConfig]):
             "init_delta_p": "random",
             "init_bias": "current",
         })
+        i += 1
+
         self.map_stage_delta_m = PosteriorMAPStage.model_validate({
-            "stage": 4,
+            "stage": i,
             "name": "delta_m",
             "fname": "delta_m",
             "n_chains": self.n_delta_m_chains,
@@ -469,8 +497,10 @@ class Posterior(ModelStep[PosteriorConfig]):
             "init_delta_p": "constant",
             "init_bias": "current",
         })
+        i += 1
+
         self.map_stage_delta_av = PosteriorMAPStage.model_validate({
-            "stage": 5,
+            "stage": i,
             "name": "delta_av",
             "fname": "delta_av",
             "n_chains": self.n_delta_av_chains,
@@ -482,14 +512,15 @@ class Posterior(ModelStep[PosteriorConfig]):
             "init_bias": "current",
         })
 
-        self.map_stages = [
-            self.map_stage_setup,
-            self.map_stage_init,
-            self.map_stage_constant,
-            self.map_stage_random,
-            self.map_stage_delta_m,
-            self.map_stage_delta_av,
-        ]
+        self.map_stages = (
+            [self.map_stage_setup, self.map_stage_init, self.map_stage_constant]
+            + ([self.map_stage_legacy] if self.map_stage_legacy is not None else [])
+            + [
+                self.map_stage_random,
+                self.map_stage_delta_m,
+                self.map_stage_delta_av,
+            ]
+        )
 
     @override
     def _has_run(self, *args: "Any", **kwargs: "Any") -> bool:

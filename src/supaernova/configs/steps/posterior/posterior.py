@@ -26,7 +26,7 @@ from supaernova.configs.steps.nflow import NFlowStepConfig
 from supaernova.configs.steps.models import ModelConfig, BackendConfig
 from supaernova.analysis.distribution import DistributionPlot
 
-type InitPreset = Literal["initial", "current", "best"]
+type InitPreset = Literal["initial", "current", "best", "legacy"]
 type InitULatents = Literal["u_random", "u_constant"]
 type InitZLatents = Literal["z_random", "z_data", "z_constant"]
 type InitLatents = InitPreset | InitULatents | InitZLatents
@@ -215,6 +215,7 @@ class PosteriorConfig(BackendConfig):
     test_subset: bool = True
     subset: Literal["train", "test"] = "train"
     save_best: bool = False
+    legacy: tuple[Path, ...] | None = None
 
     min_redshift: float | None = None
     max_redshift: float | None = None
