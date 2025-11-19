@@ -401,11 +401,14 @@ class Posterior(ModelStep[PosteriorConfig]):
 
             self.step_sizes[subset] = np.concatenate(step_sizes, axis=-1)
 
-            subset_data = getattr(self, f"{subset}_data")
-            time = subset_data.time
-            amplitude = subset_data.amplitude
-            sigma = subset_data.sigma
-            subset_data.clear()
+            stage = pae.model.stage
+            time = stage.data.time
+            amplitude = stage.data.amplitude
+            sigma = stage.data.sigma
+            mask = stage.mask
+            sn_mask = stage.sn_mask
+            spec_mask = stage.spec_mask
+            wl_mask = stage.wl_mask
 
             recon_error, _, recon_error_centers = pae.model.recon_error((
                 time,
@@ -2046,6 +2049,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
                 chain_data = {}
                 samples = results.hmc.samples
+                log_prob = results.hmc.log_prob
                 self.log.debug(f"Plotting {o.name}")
 
                 if o.masked:
@@ -2078,9 +2082,21 @@ class Posterior(ModelStep[PosteriorConfig]):
                     sn_mask &= mask_sn
 
                 samples = samples[:, sn_mask, :]
+                log_prob = log_prob[:, sn_mask]
 
                 if o.mean:
-                    chains = np.mean(samples, axis=0)
+                    if o.reduce == "mean":
+                        chains = samples.mean(axis=0)
+                    elif o.reduce == "max_central":
+                        chains = np.array([
+                            np.array([
+                                max_central(
+                                    samples[:, sn, pos], weight=log_prob[:, sn]
+                                )[1]
+                                for pos in range(samples.shape[-1])
+                            ])
+                            for sn in range(samples.shape[-2])
+                        ])
                 else:
                     chains = np.reshape(samples, (-1, samples.shape[-1]))
                 o.mean = False

@@ -13,9 +13,6 @@ def WHuber(
     mask = tf.cast(model._loss.input_mask, tf.bool)
     d_amp = model._loss.input_d_amp
 
-    y_true = tf.nn.relu(y_true)
-    # y_pred = tf.nn.relu(y_pred)
-
     error = tf.where(
         mask, tf.abs(y_true - y_pred) / d_amp, tf.zeros_like(mask, tf.float32)
     )

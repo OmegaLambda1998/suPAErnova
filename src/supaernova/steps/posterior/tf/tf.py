@@ -396,6 +396,7 @@ class TFPosteriorModel(ks.Model):
         amp = tf.where(posterior_mask, input_amp, tf.zeros_like(input_amp))
 
         log_likelihood_wl = likelihood.log_prob(amp)
+
         log_likelihood_spec_num = tf.reduce_sum(
             tf.where(
                 posterior_mask,
@@ -406,16 +407,15 @@ class TFPosteriorModel(ks.Model):
         )
         log_likelihood_spec_sum = tf.math.maximum(
             tf.math.count_nonzero(
-                posterior_mask, axis=-1, dtype=log_likelihood_wl.dtype
+                posterior_mask,
+                axis=-1,
+                dtype=log_likelihood_wl.dtype,
             ),
             1,
         )
 
-        log_likelihood_spec = (
-            log_likelihood_spec_num
-            # * tf.reduce_max(log_likelihood_spec_sum, axis=-1, keepdims=True)
-            # / log_likelihood_spec_sum
-        )
+        log_likelihood_spec = log_likelihood_spec_num
+
         log_likelihood_num = tf.reduce_sum(
             tf.where(
                 mask_spec,
@@ -425,14 +425,17 @@ class TFPosteriorModel(ks.Model):
             axis=-1,
         )
         log_likelihood_sum = tf.math.maximum(
-            tf.math.count_nonzero(mask_spec, axis=-1, dtype=log_likelihood_spec.dtype),
+            tf.math.count_nonzero(
+                mask_spec,
+                axis=-1,
+                dtype=log_likelihood_spec.dtype,
+            ),
             1,
         )
 
         log_likelihood = log_likelihood_num / log_likelihood_sum
 
         # Ignore likelihood of fully masked SN
-        # Important to avoid them affecting accept ratio / step size calculations
         log_likelihood = tf.where(
             mask_sn, log_likelihood, -np.inf * tf.ones_like(log_likelihood)
         )
@@ -446,7 +449,6 @@ class TFPosteriorModel(ks.Model):
         log_probability = log_likelihood + log_prior
 
         # Ignore probability of fully masked SN
-        # Important to avoid them affecting accept ratio / step size calculations
         log_probability = tf.where(
             mask_sn, log_probability, -np.inf * tf.ones_like(log_probability)
         )
