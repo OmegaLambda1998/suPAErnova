@@ -41,6 +41,12 @@ tf-rocm = [
     "tb_nightly>=2.20.0a,<2.21",
     "tfp_nightly>=0.26.0.dev",
 ]
+tf-cuda = [
+    "tensorflow[and-cuda]>=2.18,<2.19",
+    "tf_keras>=2.18,<2.19",
+    "tensorboard>=2.18,<2.19",
+    "tensorflow_probability>=0.25,<0.26",
+]
 
 [dependency-groups]
 dev = ["pandas_stubs", "types_tensorflow"]
@@ -56,7 +62,14 @@ build-backend = "hatchling.build"
 [tool.uv]
 environments = ["sys_platform == 'linux'"]
 prerelease = "allow"
-conflicts = [[{ extra = "tf" }, { extra = "tf-cpu" }, { extra = "tf-rocm" }]]
+conflicts = [
+    [
+        { extra = "tf" },
+        { extra = "tf-cpu" },
+        { extra = "tf-rocm" },
+        { extra = "tf-cuda" },
+    ],
+]
 
 [tool.uv.sources]
 tensorflow_rocm = [{ index = "rocm" }]
