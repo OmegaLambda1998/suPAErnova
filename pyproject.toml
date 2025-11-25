@@ -38,7 +38,7 @@ tf-cpu = [
 tf-rocm = [
     "tensorflow_rocm>=2.20.0.dev0,<2.21",
     "tf_keras_nightly>=2.20.0.dev,<2.21",
-    "tb_nightly>=2.20.0a,<2.21",
+    "tensorboard>=2.20,<2.21",
     "tfp_nightly>=0.26.0.dev",
 ]
 tf-cuda = [

@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 
     from supaernova.typing import Config
 
+    from .configs.run import RunConfig
+
 
 @click.command()
 @click.argument("input_path", type=click.Path(exists=True, path_type=Path))
@@ -62,7 +64,7 @@ def cli(
     result_path: Path | None = None,
     plot_path: Path | None = None,
     log_path: Path | None = None,
-) -> None:
+) -> "RunConfig":
     input_config: Config[JsonValue] = toml.load(input_path)
 
     # Set base_path to input_path.parent if none provided
