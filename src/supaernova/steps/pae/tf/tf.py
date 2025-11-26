@@ -55,9 +55,8 @@ class TFPAEEncoder(ks.layers.Layer):
             trainable=False,
             name="PAEELatentsPhysicalMask",
         )
-        # dtype is int64 as int32 Variables can't go on GPUs.
         self.stage_num: tf.Variable = tf.Variable(
-            tf.constant(-1, dtype=tf.int64), trainable=False, name="PAEEStageNum"
+            tf.constant(-1), trainable=False, name="PAEEStageNum"
         )
         self.moving_means: tf.Variable = tf.Variable(
             tf.zeros(self.n_pae_latents), trainable=False, name="PAEEMovingMeans"
@@ -1464,10 +1463,10 @@ class TFPAEModel(ks.Model):
         spec_mask = self.stage.train_spec_mask
         wl_mask = self.stage.train_wl_mask
 
-        # self.train_step(
-        #     (phase, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask),
-        #     dummy=True,
-        # )
+        self.train_step(
+            (phase, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask),
+            dummy=True,
+        )
 
         tf.train.Checkpoint(
             self,
