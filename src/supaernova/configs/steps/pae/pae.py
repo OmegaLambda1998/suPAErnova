@@ -235,39 +235,39 @@ class PAEConfig(BackendConfig):
     loss_decorrelate_dust: bool = True
     loss_clip_delta: PositiveFloat = 25
 
-    delta_av_epochs: PositiveInt = 10000
-    delta_av_patience: PositiveFloat | PositiveInt = 0.05  # Run for 10%
+    delta_av_epochs: PositiveInt = 1000
+    delta_av_patience: PositiveFloat | PositiveInt = 0.5  # Run for 100%
     delta_av_lr: PositiveFloat = 0.005
-    delta_av_lr_decay_steps: PositiveInt | PositiveFloat = 300
-    delta_av_lr_decay_rate: PositiveFloat = 0.99
+    delta_av_lr_decay_steps: PositiveInt | PositiveFloat = 0.25
+    delta_av_lr_decay_rate: PositiveFloat = 0.95
     delta_av_lr_weight_decay_rate: PositiveFloat = 0.0001
 
-    zs_epochs: PositiveInt = 50000
-    zs_patience: PositiveFloat | PositiveInt = 0.05  # Run for 10%
+    zs_epochs: PositiveInt = 1000
+    zs_patience: PositiveFloat | PositiveInt = 0.5  # Run for 100%
     zs_lr: PositiveFloat = 0.005
-    zs_lr_decay_steps: PositiveInt | PositiveFloat = 300
-    zs_lr_decay_rate: PositiveFloat = 0.99
+    zs_lr_decay_steps: PositiveInt | PositiveFloat = 0.25
+    zs_lr_decay_rate: PositiveFloat = 0.95
     zs_lr_weight_decay_rate: PositiveFloat = 0.0001
 
-    delta_m_epochs: PositiveInt = 100000
-    delta_m_patience: PositiveFloat | PositiveInt = 0.05  # Run for 10%
+    delta_m_epochs: PositiveInt = 5000
+    delta_m_patience: PositiveFloat | PositiveInt = 0.5  # Run for 100%
     delta_m_lr: PositiveFloat = 0.005
-    delta_m_lr_decay_steps: PositiveInt | PositiveFloat = 300
-    delta_m_lr_decay_rate: PositiveFloat = 0.99
+    delta_m_lr_decay_steps: PositiveInt | PositiveFloat = 0.25
+    delta_m_lr_decay_rate: PositiveFloat = 0.95
     delta_m_lr_weight_decay_rate: PositiveFloat = 0.0001
 
-    delta_p_epochs: PositiveInt = 100000
+    delta_p_epochs: PositiveInt = 50000
     delta_p_patience: PositiveFloat | PositiveInt = 0.05  # Run for 10%
     delta_p_lr: PositiveFloat = 0.005
-    delta_p_lr_decay_steps: PositiveInt | PositiveFloat = 300
-    delta_p_lr_decay_rate: PositiveFloat = 0.99
+    delta_p_lr_decay_steps: PositiveInt | PositiveFloat = 0.025
+    delta_p_lr_decay_rate: PositiveFloat = 0.95
     delta_p_lr_weight_decay_rate: PositiveFloat = 0.0001
 
-    final_epochs: PositiveFloat = 150000
-    final_patience: PositiveFloat | PositiveInt = 0.05  # Run for 10%
+    final_epochs: PositiveFloat = 15000
+    final_patience: PositiveFloat | PositiveInt = 0.5  # Run for 100%
     final_lr: PositiveFloat = 0.005
-    final_lr_decay_steps: PositiveInt | PositiveFloat = 300
-    final_lr_decay_rate: PositiveFloat = 0.99
+    final_lr_decay_steps: PositiveInt | PositiveFloat = 0.025
+    final_lr_decay_rate: PositiveFloat = 0.95
     final_lr_weight_decay_rate: PositiveFloat = 0.0001
 
     # === Model Validators ===

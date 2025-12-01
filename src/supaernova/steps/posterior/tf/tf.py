@@ -548,7 +548,7 @@ class TFPosteriorModel(ks.Model):
 
         ckpt.restore(
             tf.train.latest_checkpoint(f"{loadpath / self.ckpt_path}/")
-        ).assert_existing_objects_matched()
+        ).expect_partial()
 
     @override
     def get_config(self) -> dict[str, "Any"]:
@@ -952,7 +952,7 @@ class TFPosteriorModel(ks.Model):
 
         _update(min_log_prob, mean_log_prob, max_log_prob)
 
-    @tf.function
+    @tf.function(jit_compile=False)
     def vals_and_grads(self, position: tf.Tensor) -> tf.Tensor:
         input_position = self.map.get_position(position)
         log_prob = self(
@@ -1789,7 +1789,7 @@ class TFPosteriorModel(ks.Model):
         log_accept_ratio = pkr.inner_results.log_accept_ratio
         return step_size, is_accepted, log_accept_ratio, log_prior, log_like, log_prob
 
-    @tf.function
+    @tf.function(jit_compile=False)
     def sample_chain(
         self,
         position: tf.Tensor,

@@ -608,8 +608,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                 input_spectra_id = data.spectra_id
                 data.clear()
 
-                pp(model.pae.encoder.moving_means)
-
                 map_results = {
                     "chain_min": model.map.chain_min.numpy(),
                     "converged": model.map.converged.numpy(),

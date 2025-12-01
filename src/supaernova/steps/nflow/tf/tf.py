@@ -262,10 +262,9 @@ class TFNFlowModel(ks.Model):
         training = False if training is None else training
 
         # === Unpack Inputs ===
-        latents = inputs[..., :-1]
-        mask = tf.cast(inputs[..., -1:][..., 0], tf.bool)
+        latents = inputs
 
-        if training:
+        if training and self.latent_offset_scale > 0:
             latents_std = tf.math.reduce_std(latents, axis=0)
             latents_offset = (
                 tf.random.normal(tf.shape(latents))
@@ -274,16 +273,10 @@ class TFNFlowModel(ks.Model):
             )
             latents += latents_offset
 
-        # === Calculate Log Probability ===
-        log_prob = self.flow.log_prob(latents)
-
         zero_log_prob = self.flow.distribution.log_prob(tf.zeros_like(latents))
 
-        return tf.where(
-            mask,
-            log_prob + zero_log_prob,
-            np.inf * tf.ones_like(log_prob),
-        )
+        # === Calculate Log Probability ===
+        return self.flow.log_prob(latents) + zero_log_prob
 
     def u_to_z(self, inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         # If permute is True, then the incoming u_latents need to be permuted correctly
@@ -394,37 +387,22 @@ class TFNFlowModel(ks.Model):
         )
 
         # === Prep Data ===
-        _data = tf.concat(
-            (self.latents, tf.cast(self.mask, tf.float32)),
-            axis=-1,
-        )
-
-        train_data = tf.concat(
-            (self.train_latents, tf.cast(self.train_mask, tf.float32)),
-            axis=-1,
-        )
-
-        _test_data = tf.concat(
-            (self.test_latents, tf.cast(self.test_mask, tf.float32)),
-            axis=-1,
-        )
-
-        val_data = tf.concat(
-            (self.val_latents, tf.cast(self.val_mask, tf.float32)),
-            axis=-1,
-        )
+        _data = self.latents
+        train_data = self.train_latents
+        _test_data = self.test_latents
+        val_data = self.val_latents
 
         # === Train ===
         self._epoch = 0
         return self.fit(
             x=train_data,
-            y=tf.zeros_like(self.train_latents),
+            y=self.train_mask[:, 0],
             initial_epoch=self._epoch,
             epochs=self.epochs,
             batch_size=self.batch_size,
             callbacks=callbacks,
             verbose=0,
-            validation_data=(val_data, tf.zeros_like(self.val_latents)),
+            validation_data=(val_data, self.val_mask[:, 0]),
             validation_freq=1,
             shuffle=True,
         )
@@ -481,15 +459,12 @@ class TFNFlowModel(ks.Model):
                 optimizer=optimiser,
                 loss=loss,
                 run_eagerly=self.debug,
-                jit_compile=JIT_COMPILE,
+                jit_compile=False,
             )
 
             self.built = True
 
-        train_data = tf.concat(
-            (self.train_latents, tf.cast(self.train_mask, tf.float32)),
-            axis=-1,
-        )
+        train_data = self.train_latents
         self(train_data)
         if self.debug:
             self.log.debug("Trainable variables:")
@@ -512,7 +487,7 @@ class TFNFlowModel(ks.Model):
             self,
         ).restore(
             tf.train.latest_checkpoint(f"{loadpath / self.ckpt_path}/")
-        ).assert_existing_objects_matched()
+        ).expect_partial()
 
     @override
     def get_config(self) -> dict[str, "Any"]:

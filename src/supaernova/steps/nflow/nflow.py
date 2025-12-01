@@ -5,6 +5,7 @@ import importlib
 import numpy as np
 
 from supaernova.analysis import Plotter
+from supaernova.utils.tf import pp
 from supaernova.steps.models import Model, ModelStep
 from supaernova.configs.steps.nflow import (
     NFlowConfig,
@@ -345,10 +346,9 @@ class NFlow(ModelStep[NFlowConfig]):
             input_spectra_id = data.spectra_id
             data.clear()
 
-            mask = getattr(self.model, f"{dt}mask")
             z_latents = getattr(self.model, f"{dt}latents")
 
-            nflow_inputs = np.concatenate((z_latents, mask), axis=-1)
+            nflow_inputs = z_latents
             log_prob = self.model(nflow_inputs, training=False)
 
             u_latents = self.model.z_to_u(z_latents)
@@ -667,7 +667,6 @@ class NFlow(ModelStep[NFlowConfig]):
 
         for dt in ["train_", "test_"]:
             results = self.results.models[dt[:-1]]
-            gaussian = self.rng.normal(0, 1, (results.u_latents.size**2, ind))
 
             mask = getattr(self.model, f"{dt}mask")[:, 0].numpy().astype(bool)
 
@@ -677,6 +676,8 @@ class NFlow(ModelStep[NFlowConfig]):
             z = results.z_latents[mask]
             z_to_u = u_latents[mask]
             u_to_z = z_latents[mask]
+
+            gaussian = self.rng.normal(0, 1, (z_to_u.size**2, ind))
 
             n_latents = z.shape[0]
             latents_num = np.log10(n_latents)

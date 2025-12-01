@@ -55,8 +55,9 @@ class TFPAEEncoder(ks.layers.Layer):
             trainable=False,
             name="PAEELatentsPhysicalMask",
         )
+        # dtype is int64 as int32 Variables can't go on GPUs.
         self.stage_num: tf.Variable = tf.Variable(
-            tf.constant(-1), trainable=False, name="PAEEStageNum"
+            tf.constant(-1, dtype=tf.int64), trainable=False, name="PAEEStageNum"
         )
         self.moving_means: tf.Variable = tf.Variable(
             tf.zeros(self.n_pae_latents), trainable=False, name="PAEEMovingMeans"
@@ -1403,7 +1404,7 @@ class TFPAEModel(ks.Model):
                     loss=loss,
                     metrics=self.metrics,
                     run_eagerly=self.stage.debug,
-                    jit_compile=JIT_COMPILE,
+                    jit_compile=JIT_COMPILE and not self.stage.debug,
                 )
 
                 phase = tf.convert_to_tensor(self.stage.data.time, dtype=tf.float32)
@@ -1463,16 +1464,16 @@ class TFPAEModel(ks.Model):
         spec_mask = self.stage.train_spec_mask
         wl_mask = self.stage.train_wl_mask
 
-        self.train_step(
-            (phase, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask),
-            dummy=True,
-        )
+        # self.train_step(
+        #     (phase, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask),
+        #     dummy=True,
+        # )
 
         tf.train.Checkpoint(
             self,
         ).restore(
             tf.train.latest_checkpoint(f"{loadpath / self.ckpt_path}/")
-        ).assert_existing_objects_matched()
+        ).expect_partial()
 
         self.stage.stage = stage_num
 
@@ -1514,6 +1515,7 @@ class TFPAEModel(ks.Model):
             latents_mean = tf.reduce_sum(encoded, axis=0) / n_unmasked_sn
 
             self.encoder.moving_means.assign(latents_mean)
+            self.log.debug(self.encoder.moving_means)
 
     def prep_data_per_epoch(
         self, data: tuple["TensorLike", ...]

@@ -19,9 +19,7 @@ ActivationObject = Callable[[tf.Tensor], tf.Tensor]
 def validate_activation(
     activation: ConfigInputObject[ActivationObject],
 ) -> ActivationObject:
-    return validate_object(
-        activation, dummy_obj=ks.activations.relu, mod=ks.activations
-    )
+    return validate_object(activation, dummy_obj=tf.nn.relu, mod=tf.nn)
 
 
 SchedulerObject = (
