@@ -20,10 +20,10 @@ dependencies = [
     "sncosmo",
     "toml",
     "tqdm",
-
     "tf_keras>=2.19,<2.20",
     "tensorboard>=2.19,<2.20",
     "tensorflow_probability>=0.25,<0.26",
+    "numpy>2.1",
 ]
 
 [project.optional-dependencies]
