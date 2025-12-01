@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, override
 from tqdm import tqdm
 import numpy as np
 
-from supaernova._tf import HUGE, ks, tf, tfd, tfp
+from supaernova._tf import HUGE, JIT_COMPILE, ks, tf, tfd, tfp
 from supaernova.utils.tf import db, pp
 
 from .hmc import PosteriorHMCValue
@@ -952,7 +952,7 @@ class TFPosteriorModel(ks.Model):
 
         _update(min_log_prob, mean_log_prob, max_log_prob)
 
-    @tf.function(jit_compile=False)
+    @tf.function(jit_compile=JIT_COMPILE)
     def vals_and_grads(self, position: tf.Tensor) -> tf.Tensor:
         input_position = self.map.get_position(position)
         log_prob = self(
@@ -967,7 +967,8 @@ class TFPosteriorModel(ks.Model):
             wl_mask=self.wl_mask,
         )
 
-        self.update_map_progress(log_prob)
+        if not JIT_COMPILE:
+            self.update_map_progress(log_prob)
 
         return self._loss(self.norm_prob, log_prob)
 
@@ -1769,10 +1770,11 @@ class TFPosteriorModel(ks.Model):
         log_like = tf.reduce_sum(log_like, axis=0)
         log_prior = tf.reduce_sum(log_prior, axis=0)
 
-        if sample:
-            self.update_sample_progress(log_prior, log_like, log_prob)
-        if pkr is not None:
-            self.update_run_progress(log_prior, log_like, log_prob, pkr)
+        if not JIT_COMPILE:
+            if sample:
+                self.update_sample_progress(log_prior, log_like, log_prob)
+            if pkr is not None:
+                self.update_run_progress(log_prior, log_like, log_prob, pkr)
 
         if additional_outputs:
             return log_prior, log_like, log_prob
@@ -1789,7 +1791,7 @@ class TFPosteriorModel(ks.Model):
         log_accept_ratio = pkr.inner_results.log_accept_ratio
         return step_size, is_accepted, log_accept_ratio, log_prior, log_like, log_prob
 
-    @tf.function(jit_compile=False)
+    @tf.function(jit_compile=JIT_COMPILE)
     def sample_chain(
         self,
         position: tf.Tensor,
