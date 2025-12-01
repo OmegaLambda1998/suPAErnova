@@ -981,7 +981,7 @@ class TFPosteriorModel(ks.Model):
                 self.vals_and_grads,
                 x,
                 auto_unpack_single_arg=False,
-                use_gradient_tape=True,
+                use_gradient_tape=False,
             ),
             initial_position=position,
             tolerance=self.tolerance,
