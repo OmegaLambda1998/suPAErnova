@@ -256,7 +256,7 @@ class PAEConfig(BackendConfig):
     delta_m_lr_decay_rate: PositiveFloat = 0.95
     delta_m_lr_weight_decay_rate: PositiveFloat = 0.0001
 
-    delta_p_epochs: PositiveInt = 50000
+    delta_p_epochs: PositiveInt = 100000
     delta_p_patience: PositiveFloat | PositiveInt = 0.05  # Run for 10%
     delta_p_lr: PositiveFloat = 0.005
     delta_p_lr_decay_steps: PositiveInt | PositiveFloat = 0.025

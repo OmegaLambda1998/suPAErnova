@@ -241,8 +241,10 @@ class TFPAEEncoder(ks.layers.Layer):
             / n_unmasked_spec
         )
 
-        # Mask latents which aren't being trained
-        latents = tf.where(latent_mask, latents, tf.zeros_like(latents))
+        latents_mean = (
+            tf.reduce_sum(tf.where(mask_sn, latents, tf.zeros_like(latents)), axis=0)
+            / n_unmasked_sn
+        )
 
         if training or testing:
             latents_mean = (
@@ -260,8 +262,21 @@ class TFPAEEncoder(ks.layers.Layer):
             tf.zeros_like(latents_mean),
         )
 
+        latents_mean = (
+            tf.reduce_sum(tf.where(mask_sn, latents, tf.zeros_like(latents)), axis=0)
+            / n_unmasked_sn
+        )
+
         # Zero out latents of masked SNe
         latents = tf.where(mask_sn, latents, tf.zeros_like(latents))
+
+        # Mask latents which aren't being trained
+        latents = tf.where(latent_mask, latents, tf.zeros_like(latents))
+
+        latents_mean = (
+            tf.reduce_sum(tf.where(mask_sn, latents, tf.zeros_like(latents)), axis=0)
+            / n_unmasked_sn
+        )
 
         # Repeat latent layers across spec_dim
         return self.repeat_latent_layer(latents)
@@ -1451,23 +1466,15 @@ class TFPAEModel(ks.Model):
         self.build_model()
         init_weights = self.encoder.encode_output_layer.get_weights()[0]
 
-        phase = tf.convert_to_tensor(self.stage.train_data.time, dtype=tf.float32)
-        amplitude = tf.convert_to_tensor(
-            self.stage.train_data.amplitude, dtype=tf.float32
-        )
-        sigma = tf.convert_to_tensor(self.stage.train_data.sigma, dtype=tf.float32)
+        phase = tf.convert_to_tensor(self.stage.data.time, dtype=tf.float32)
+        amplitude = tf.convert_to_tensor(self.stage.data.amplitude, dtype=tf.float32)
 
         self.stage.train_data.clear()
 
-        mask = self.stage.train_mask
-        sn_mask = self.stage.train_sn_mask
-        spec_mask = self.stage.train_spec_mask
-        wl_mask = self.stage.train_wl_mask
-
-        # self.train_step(
-        #     (phase, amplitude, sigma, mask, sn_mask, spec_mask, wl_mask),
-        #     dummy=True,
-        # )
+        mask = self.stage.mask
+        sn_mask = self.stage.sn_mask
+        spec_mask = self.stage.spec_mask
+        wl_mask = self.stage.wl_mask
 
         tf.train.Checkpoint(
             self,
