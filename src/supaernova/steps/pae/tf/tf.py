@@ -1466,15 +1466,17 @@ class TFPAEModel(ks.Model):
         self.build_model()
         init_weights = self.encoder.encode_output_layer.get_weights()[0]
 
-        phase = tf.convert_to_tensor(self.stage.data.time, dtype=tf.float32)
-        amplitude = tf.convert_to_tensor(self.stage.data.amplitude, dtype=tf.float32)
+        phase = tf.convert_to_tensor(self.stage.train_data.time, dtype=tf.float32)
+        amplitude = tf.convert_to_tensor(
+            self.stage.train_data.amplitude, dtype=tf.float32
+        )
 
         self.stage.train_data.clear()
 
-        mask = self.stage.mask
-        sn_mask = self.stage.sn_mask
-        spec_mask = self.stage.spec_mask
-        wl_mask = self.stage.wl_mask
+        mask = self.stage.train_mask
+        sn_mask = self.stage.train_sn_mask
+        spec_mask = self.stage.train_spec_mask
+        wl_mask = self.stage.train_wl_mask
 
         tf.train.Checkpoint(
             self,
@@ -1513,8 +1515,26 @@ class TFPAEModel(ks.Model):
                 wl_mask=wl_mask,
             )[:, 0, :]
 
+            # === Setup Masks ===
+            # Apply sn and spec masks
+            mask &= sn_mask & spec_mask & wl_mask
+
+            # ~(~input_mask & input_wl_mask)
+            # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
+            valid_wl_mask = tf.logical_not(
+                tf.logical_and(tf.logical_not(mask), wl_mask)
+            )
+
+            # Determine which spectra to keep
+            # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+            mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True)
+
+            # Determine which SNe to keep
+            # Will mask out any SN with *no* unmasked spectra
+            mask_sn = tf.math.reduce_any(mask_spec, axis=-2)
+
             n_unmasked_sn = tf.math.count_nonzero(
-                tf.math.logical_not(tf.math.reduce_all(encoded == 0, axis=-1)),
+                tf.math.logical_not(tf.math.reduce_all(mask_sn, axis=-1)),
                 axis=0,
                 dtype=encoded.dtype,
             )
