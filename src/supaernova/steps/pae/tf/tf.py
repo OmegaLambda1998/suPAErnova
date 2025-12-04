@@ -192,7 +192,9 @@ class TFPAEEncoder(ks.layers.Layer):
 
         # Determine which spectra to keep
         # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-        mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True)
+        mask_spec = tf.logical_and(
+            tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True), input_spec_mask
+        )
 
         # The number of unmasked spectra
         n_unmasked_spec = tf.math.count_nonzero(
@@ -202,7 +204,9 @@ class TFPAEEncoder(ks.layers.Layer):
 
         # Determine which SNe to keep
         # Will mask out any SN with *no* unmasked spectra
-        mask_sn = tf.math.reduce_any(mask_spec, axis=-2)
+        mask_sn = tf.logical_and(
+            tf.math.reduce_any(mask_spec, axis=-2, keepdims=True), input_sn_mask
+        )[..., 0]
 
         # The number of unmasked SNe
         n_unmasked_sn = tf.math.count_nonzero(mask_sn[:, 0], dtype=tf.float32)
@@ -822,7 +826,6 @@ class TFPAEModel(ks.Model):
         )
 
         # === Setup Masks ===
-
         # Apply sn and spec masks
         input_mask &= input_sn_mask & input_spec_mask & input_wl_mask
 
@@ -834,11 +837,15 @@ class TFPAEModel(ks.Model):
 
         # Determine which spectra to keep
         # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-        mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True)
+        mask_spec = tf.logical_and(
+            tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True), input_spec_mask
+        )
 
         # Determine which SNe to keep
         # Will mask out any SN with *no* unmasked spectra
-        mask_sn = tf.math.reduce_any(mask_spec, axis=-2)
+        mask_sn = tf.logical_and(
+            tf.math.reduce_any(mask_spec, axis=-2, keepdims=True), input_sn_mask
+        )[..., 0]
 
         loss = self.options.loss_cls()
         loss.input_mask = input_mask
@@ -1527,17 +1534,18 @@ class TFPAEModel(ks.Model):
 
             # Determine which spectra to keep
             # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
-            mask_spec = tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True)
+            mask_spec = tf.logical_and(
+                tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True), spec_mask
+            )
 
             # Determine which SNe to keep
             # Will mask out any SN with *no* unmasked spectra
-            mask_sn = tf.math.reduce_any(mask_spec, axis=-2)
+            mask_sn = tf.logical_and(
+                tf.math.reduce_any(mask_spec, axis=-2, keepdims=True), sn_mask
+            )[..., 0]
 
-            n_unmasked_sn = tf.math.count_nonzero(
-                tf.math.logical_not(tf.math.reduce_all(mask_sn, axis=-1)),
-                axis=0,
-                dtype=encoded.dtype,
-            )
+            # The number of unmasked SNe
+            n_unmasked_sn = tf.math.count_nonzero(mask_sn[:, 0], dtype=encoded.dtype)
 
             latents_mean = tf.reduce_sum(encoded, axis=0) / n_unmasked_sn
 

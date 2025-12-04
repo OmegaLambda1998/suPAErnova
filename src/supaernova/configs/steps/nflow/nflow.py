@@ -93,9 +93,9 @@ class NFlowConfig(BackendConfig):
     patience: PositiveFloat | PositiveInt = 0.05  # Run for 10%
     lr: PositiveFloat = 0.0001
     lr_decay_steps: PositiveInt | PositiveFloat = 1.0
-    lr_decay_rate: PositiveFloat = 0.01
+    lr_decay_rate: PositiveFloat = 0.1
 
-    latent_offset_scale: PositiveFloat = 0.1
+    latent_offset_scale: PositiveFloat = 0.25
 
     ema_steps: NonNegativeInt = 0
     ema_momentum: PositiveFloat = 0.999
