@@ -245,11 +245,6 @@ class TFPAEEncoder(ks.layers.Layer):
             / n_unmasked_spec
         )
 
-        latents_mean = (
-            tf.reduce_sum(tf.where(mask_sn, latents, tf.zeros_like(latents)), axis=0)
-            / n_unmasked_sn
-        )
-
         if training or testing:
             latents_mean = (
                 tf.reduce_sum(
@@ -266,21 +261,11 @@ class TFPAEEncoder(ks.layers.Layer):
             tf.zeros_like(latents_mean),
         )
 
-        latents_mean = (
-            tf.reduce_sum(tf.where(mask_sn, latents, tf.zeros_like(latents)), axis=0)
-            / n_unmasked_sn
-        )
-
         # Zero out latents of masked SNe
         latents = tf.where(mask_sn, latents, tf.zeros_like(latents))
 
         # Mask latents which aren't being trained
         latents = tf.where(latent_mask, latents, tf.zeros_like(latents))
-
-        latents_mean = (
-            tf.reduce_sum(tf.where(mask_sn, latents, tf.zeros_like(latents)), axis=0)
-            / n_unmasked_sn
-        )
 
         # Repeat latent layers across spec_dim
         return self.repeat_latent_layer(latents)
@@ -1473,17 +1458,15 @@ class TFPAEModel(ks.Model):
         self.build_model()
         init_weights = self.encoder.encode_output_layer.get_weights()[0]
 
-        phase = tf.convert_to_tensor(self.stage.train_data.time, dtype=tf.float32)
-        amplitude = tf.convert_to_tensor(
-            self.stage.train_data.amplitude, dtype=tf.float32
-        )
+        phase = tf.convert_to_tensor(self.stage.data.time, dtype=tf.float32)
+        amplitude = tf.convert_to_tensor(self.stage.data.amplitude, dtype=tf.float32)
 
-        self.stage.train_data.clear()
+        self.stage.data.clear()
 
-        mask = self.stage.train_mask
-        sn_mask = self.stage.train_sn_mask
-        spec_mask = self.stage.train_spec_mask
-        wl_mask = self.stage.train_wl_mask
+        mask = self.stage.mask
+        sn_mask = self.stage.sn_mask
+        spec_mask = self.stage.spec_mask
+        wl_mask = self.stage.wl_mask
 
         tf.train.Checkpoint(
             self,
@@ -1535,7 +1518,7 @@ class TFPAEModel(ks.Model):
             # Determine which spectra to keep
             # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
             mask_spec = tf.logical_and(
-                tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True), spec_mask
+                tf.math.reduce_any(valid_wl_mask, axis=-1, keepdims=True), spec_mask
             )
 
             # Determine which SNe to keep
@@ -1547,7 +1530,12 @@ class TFPAEModel(ks.Model):
             # The number of unmasked SNe
             n_unmasked_sn = tf.math.count_nonzero(mask_sn[:, 0], dtype=encoded.dtype)
 
-            latents_mean = tf.reduce_sum(encoded, axis=0) / n_unmasked_sn
+            latents_mean = (
+                tf.reduce_sum(
+                    tf.where(mask_sn, encoded, tf.zeros_like(encoded)), axis=0
+                )
+                / n_unmasked_sn
+            )
 
             self.encoder.moving_means.assign(latents_mean)
             self.log.debug(self.encoder.moving_means)

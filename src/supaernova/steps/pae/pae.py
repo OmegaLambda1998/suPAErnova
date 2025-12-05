@@ -845,12 +845,25 @@ class PAE(ModelStep[PAEConfig]):
                 # Will mask out any SN with *no* unmasked spectra
                 mask_sn = np.any(mask_spec, axis=-1)
 
+                truth = {}
+                for k, v in o.labels.items():
+                    if isinstance(k, int):
+                        if 0 not in truth:
+                            truth[0] = {}
+                        truth[0][v] = 0
+                    else:
+                        sub_truth = {}
+                        for vv in v.values():
+                            sub_truth[vv] = 0
+                        truth[k] = sub_truth
+
                 DistributionPlotter.plot_corner(
                     chains(mask_sn),
                     o,
                     statistics=o.reduce,
                     shade_alpha=0.0,
                     plot_cloud=True,
+                    truth=truth,
                 )
 
     @override

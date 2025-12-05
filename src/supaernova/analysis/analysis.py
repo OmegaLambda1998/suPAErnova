@@ -11,6 +11,7 @@ import chainconsumer as cc
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 import matplotlib.pyplot as plt
+from chainconsumer.truth import Truth
 
 COLOURS = (
     np.array([
@@ -321,6 +322,8 @@ class Plotter:
                     **kwargs,
                 )
             )
+            if "truth" in chain_opts:
+                c.add_truth(Truth(location=chain_opts["truth"]))
 
         fig = c.plotter.plot(*plot_args, *args, **plot_kwargs, **kwargs)
         ax = fig.gca()
