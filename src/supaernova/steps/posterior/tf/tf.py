@@ -543,6 +543,22 @@ class TFPosteriorModel(ks.Model):
             tf.train.latest_checkpoint(f"{loadpath / self.ckpt_path}/")
         ).expect_partial()
 
+        if load_hmc:
+            ess = tfp.mcmc.effective_sample_size(
+                self.hmc.samples, filter_beyond_positive_pairs=True
+            )
+            self.log.debug(f"Effective Sample Size: {ess}")
+            valid_ess = tf.math.is_finite(ess)
+            mean_ess = tf.reduce_sum(
+                tf.where(valid_ess, ess, tf.zeros_like(ess)), axis=0
+            ) / tf.math.count_nonzero(
+                tf.math.reduce_all(valid_ess, axis=-1), dtype=ess.dtype
+            )
+            self.log.info(f"ESS: {mean_ess} ({mean_ess / self.n_run_steps})")
+            self.log.info(
+                f"R-Hat: {tfp.mcmc.potential_scale_reduction(self.hmc.samples, split_chains=True)}"
+            )
+
     @override
     def get_config(self) -> dict[str, "Any"]:
         return {**super().get_config()}
@@ -1955,6 +1971,7 @@ class TFPosteriorModel(ks.Model):
             inner_kernel=sampler,
             num_adaptation_steps=self.n_adaption_steps,
             target_accept_prob=self.target_acceptance_rate,
+            # reduce_fn = tfp.math.reduce_log_harmonic_mean_exp
         )
 
         (
