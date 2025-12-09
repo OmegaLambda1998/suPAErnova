@@ -545,19 +545,14 @@ class TFPosteriorModel(ks.Model):
 
         if load_hmc:
             ess = tfp.mcmc.effective_sample_size(
-                self.hmc.samples, filter_beyond_positive_pairs=True
+                self.hmc.samples, filter_beyond_positive_pairs=True, cross_chain_dims=1
             )
-            self.log.debug(f"Effective Sample Size: {ess}")
-            valid_ess = tf.math.is_finite(ess)
-            mean_ess = tf.reduce_sum(
-                tf.where(valid_ess, ess, tf.zeros_like(ess)), axis=0
-            ) / tf.math.count_nonzero(
-                tf.math.reduce_all(valid_ess, axis=-1), dtype=ess.dtype
+            r_hat = tfp.mcmc.potential_scale_reduction(
+                self.hmc.samples, split_chains=True
             )
-            self.log.info(f"ESS: {mean_ess} ({mean_ess / self.n_run_steps})")
-            self.log.info(
-                f"R-Hat: {tfp.mcmc.potential_scale_reduction(self.hmc.samples, split_chains=True)}"
-            )
+
+            self.log.info(f"Effective Sample Size: {ess} ({(ess / self.sn_dim)}")
+            self.log.info(f"R-Hat: {r_hat}")
 
     @override
     def get_config(self) -> dict[str, "Any"]:
