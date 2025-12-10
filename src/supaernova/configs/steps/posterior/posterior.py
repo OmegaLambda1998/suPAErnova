@@ -205,6 +205,7 @@ class PosteriorConfig(BackendConfig):
     n_run_steps: PositiveInt
     n_burnin_steps: NonNegativeInt | NonNegativeFloat
     n_adaption_steps: PositiveInt | PositiveFloat
+    n_walkers: PositiveInt | PositiveFloat = 1.0
     n_thinning: NonNegativeInt = 0
     # --- Optional ---
     debug: bool = False
@@ -251,8 +252,10 @@ class PosteriorConfig(BackendConfig):
     max_iterations: PositiveInt = 2500
     max_line_search_iterations: PositiveInt | None = None
     num_correction_pairs: PositiveInt | None = None
-    # See [Betancourt et al (2014)](https://arxiv.org/abs/1411.6669) for why 0.75 is optimal for the NUTS Sampler
-    target_acceptance_rate: PositiveFloat = 0.75
+    # See [Betancourt et al (2014)](https://arxiv.org/abs/1411.6669).
+    # Since we run MAP first, our initial guass is very good and we want small, precise steps.
+    # So use a large acceptance rate.
+    target_acceptance_rate: PositiveFloat = 0.9
 
     # u_delta_av_min: float | None = -10
     # u_delta_av_max: float | None = 10

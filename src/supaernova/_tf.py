@@ -17,6 +17,9 @@ os.environ["TF_NUM_INTRAOP_THREADS"] = NPROC
 os.environ["OMP_NUM_THREADS"] = NPROC
 os.environ["MKL_NUM_THREADS"] = NPROC
 
+NPROC = int(NPROC)
+
+import gc
 from contextlib import nullcontext
 
 import tensorflow as tf
@@ -31,8 +34,8 @@ GPUS = tf.config.list_physical_devices("GPU")
 tf.config.set_soft_device_placement(True)
 for gpu in GPUS:
     tf.config.experimental.set_memory_growth(gpu, True)
-tf.config.threading.set_inter_op_parallelism_threads(int(NPROC))
-tf.config.threading.set_intra_op_parallelism_threads(int(NPROC))
+tf.config.threading.set_inter_op_parallelism_threads(NPROC)
+tf.config.threading.set_intra_op_parallelism_threads(NPROC)
 
 IS_GPU = len(GPUS) > 0
 IS_ROCM = any(
@@ -43,3 +46,18 @@ TF_CTX = tf.device("/CPU:0") if IS_ROCM else nullcontext()
 JIT_COMPILE = IS_GPU
 
 HUGE = tf.float16.max
+
+
+def mem_trace() -> dict[str, str]:
+    trace: dict[str, str] = {}
+    if IS_GPU:
+        trace = {
+            k: f"{(v * 1e-9):.2f}GB"
+            for k, v in tf.config.experimental.get_memory_info("GPU:0").items()
+        }
+    return trace
+
+
+def clear_session() -> None:
+    ks.backend.clear_session()
+    gc.collect()

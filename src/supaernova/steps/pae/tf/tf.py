@@ -8,7 +8,7 @@ from typing import (
 
 from tqdm.keras import TqdmCallback
 
-from supaernova._tf import HUGE, JIT_COMPILE, ks, tf, tfp
+from supaernova._tf import HUGE, JIT_COMPILE, ks, tf, tfp, clear_session
 from supaernova.utils.tf import db, pp
 
 if TYPE_CHECKING:
@@ -403,8 +403,8 @@ class TFPAEDecoder(ks.layers.Layer):
         # --- Data Phase ---
         input_phase = inputs[..., :1]
         phase_shape = tf.shape(input_phase)
-        sn_dim = phase_shape[0]
-        spec_dim = phase_shape[1]
+        sn_dim = phase_shape[-3]
+        spec_dim = phase_shape[-2]
 
         # --- Encoder Latents ---
         input_latents = inputs[..., 1:]
@@ -416,20 +416,20 @@ class TFPAEDecoder(ks.layers.Layer):
             else tf.zeros_like((sn_dim, spec_dim, self.n_z_latents + 3))
         )
         # ΔAᵥ
-        delta_av_latent = physical_latents[:, :, 0:1]
+        delta_av_latent = physical_latents[..., :1]
         # zs
         zs_latent = (
-            input_latents[:, :, 1 : self.n_z_latents + 1]
+            input_latents[..., 1 : self.n_z_latents + 1]
             if self.physical_latents
             else input_latents
         )
         # ΔM
         delta_m_latent = physical_latents[
-            :, :, self.n_z_latents + 1 : self.n_z_latents + 2
+            ..., self.n_z_latents + 1 : self.n_z_latents + 2
         ]
         # Δp
         delta_p_latent = physical_latents[
-            :, :, self.n_z_latents + 2 : self.n_z_latents + 3
+            ..., self.n_z_latents + 2 : self.n_z_latents + 3
         ]
 
         # --- Masks ---
@@ -1366,6 +1366,7 @@ class TFPAEModel(ks.Model):
             validation_data=(val_data,),
             validation_freq=1,
         )
+        clear_session()
 
     def build_model(self, *, update: bool = False) -> None:
         if not self.built or update:
@@ -1539,6 +1540,7 @@ class TFPAEModel(ks.Model):
 
             self.encoder.moving_means.assign(latents_mean)
             self.log.debug(self.encoder.moving_means)
+        clear_session()
 
     def prep_data_per_epoch(
         self, data: tuple["TensorLike", ...]

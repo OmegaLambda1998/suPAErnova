@@ -5,6 +5,8 @@ import numpy as np
 from numpy import typing as npt  # noqa: TC002
 from pydantic import PositiveInt  # noqa: TC002
 
+from supaernova.utils import pp
+
 from .analysis import Plotter, AbstractPlot
 
 if TYPE_CHECKING:

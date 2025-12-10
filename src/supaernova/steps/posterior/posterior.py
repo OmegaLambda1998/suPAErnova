@@ -911,7 +911,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     spec_mask=input_spec_mask,
                     wl_mask=input_wl_mask,
                 )
-                pae_pae_latents = pae_pae_latents[:, 0, :]
+                pae_pae_latents = pae_pae_latents[:, 0, :][None, ...]
 
                 # --- NFlow ---
                 pae_delta_m = pae_pae_latents[..., -2:-1]
@@ -947,6 +947,9 @@ class Posterior(ModelStep[PosteriorConfig]):
                     wl_mask=input_wl_mask,
                     additional_outputs=True,
                 )
+
+                pae_amplitude = pae_amplitude[0, ...]
+                pae_sigma = pae_sigma[0, ...]
 
                 if not force:
                     pae_log_prob = pae_log_prob.numpy()
@@ -1058,6 +1061,9 @@ class Posterior(ModelStep[PosteriorConfig]):
                     additional_outputs=True,
                 )
 
+                map_amplitude = map_amplitude[0, ...]
+                map_sigma = map_sigma[0, ...]
+
                 if not force:
                     map_log_prob = map_log_prob.numpy()
                     map_log_like = map_log_like.numpy()
@@ -1138,15 +1144,17 @@ class Posterior(ModelStep[PosteriorConfig]):
                 samples = model.hmc.samples.numpy()
                 log_prob = model.hmc.log_prob.numpy()
                 if o.reduce == "mean":
-                    reduce_samples = samples.mean(axis=0)
+                    reduce_samples = samples.mean(axis=0, keepdims=True)
                 else:
                     reduce_samples = np.array([
                         np.array([
-                            max_central(samples[:, sn, pos], weight=log_prob[:, sn])[1]
+                            max_central(
+                                samples[..., sn, pos], weight=log_prob[..., sn]
+                            )[1]
                             for pos in range(samples.shape[-1])
                         ])
                         for sn in range(samples.shape[-2])
-                    ])
+                    ])[None, ...]
                 pos_position = model.map.unconstrain(
                     model.map.get_position(reduce_samples), full=True
                 )
@@ -1168,6 +1176,9 @@ class Posterior(ModelStep[PosteriorConfig]):
                     wl_mask=input_wl_mask,
                     additional_outputs=True,
                 )
+
+                pos_amplitude = pos_amplitude[0, ...]
+                pos_sigma = pos_sigma[0, ...]
 
                 if not force:
                     pos_log_prob = pos_log_prob.numpy()

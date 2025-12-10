@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, cast, override
 import numpy as np
 from tqdm.keras import TqdmCallback
 
-from supaernova._tf import JIT_COMPILE, ks, tf, tfb, tfd
+from supaernova._tf import ks, tf, tfb, tfd, clear_session
 from supaernova.utils.tf import db, pp
 
 if TYPE_CHECKING:
@@ -406,6 +406,8 @@ class TFNFlowModel(ks.Model):
             validation_freq=1,
             shuffle=True,
         )
+        clear_session()
+        return None
 
     def _get_latents(self) -> None:
         for dt in ["train_", "test_", "val_", ""]:
@@ -488,6 +490,8 @@ class TFNFlowModel(ks.Model):
         ).restore(
             tf.train.latest_checkpoint(f"{loadpath / self.ckpt_path}/")
         ).expect_partial()
+
+        clear_session()
 
     @override
     def get_config(self) -> dict[str, "Any"]:

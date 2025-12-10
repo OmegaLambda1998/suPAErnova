@@ -60,7 +60,7 @@ tensorflow_rocm = [{ index = "rocm" }]
 
 [[tool.uv.index]]
 name = "rocm"
-url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1/"
+url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.1.1/"
 format = "flat"
 explicit = true
 

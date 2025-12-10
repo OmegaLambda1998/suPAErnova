@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, override
 from tqdm import tqdm
 import numpy as np
 
-from supaernova._tf import HUGE, ks, tf, tfd, tfp
+from supaernova._tf import HUGE, NPROC, ks, tf, tfd, tfp, clear_session
 from supaernova.utils.tf import db, pp
 
 from .hmc import PosteriorHMCValue
@@ -30,8 +30,6 @@ if TYPE_CHECKING:
     from supaernova.typing.backends.tf import Loss, TensorLike
     from supaernova.configs.steps.posterior import PosteriorMAPStage
     from supaernova.configs.steps.posterior.tf import TFPosteriorConfig
-
-NPROC = os.cpu_count()
 
 POSTERIORMODELSTEP: "Posterior"
 
@@ -94,6 +92,12 @@ class TFPosteriorModel(ks.Model):
 
         self.sn_dim, self.spec_dim, self.wl_dim = self.data_mask.shape
 
+        n_walkers: int | float = self.options.n_walkers
+        if isinstance(n_walkers, float):
+            n_walkers = int(NPROC * n_walkers)
+        self.n_walkers = n_walkers
+        self.n_chains = 1
+
         # MAP Variables
         self.map: PosteriorMap
         vars(self)["map"] = PosteriorMap(self)
@@ -145,6 +149,8 @@ class TFPosteriorModel(ks.Model):
             max_leapfrog * (self.n_burnin_steps + self.n_run_steps)
         )
 
+        self.max_steps: int = self.n_run_steps * self.n_walkers
+
         self.n_thinning: int = self.options.n_thinning
         self.target_acceptance_rate: float = self.options.target_acceptance_rate
 
@@ -152,91 +158,99 @@ class TFPosteriorModel(ks.Model):
         vars(self)["hmc"] = PosteriorHMCValue(
             tf.Variable(  # Samples
                 tf.convert_to_tensor(
-                    [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.n_run_steps,
+                    [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
                     dtype=tf.float32,
                 ),
-                shape=(self.n_run_steps, self.sn_dim, self.map.n_pae_latents),
+                shape=(
+                    self.max_steps,
+                    self.sn_dim,
+                    self.map.n_pae_latents,
+                ),
             ),
             tf.Variable(  # Step Sizes Final
                 tf.convert_to_tensor(
-                    [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.n_run_steps,
+                    [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
                     dtype=tf.float32,
                 ),
-                shape=(self.n_run_steps, self.sn_dim, self.map.n_pae_latents),
+                shape=(
+                    self.max_steps,
+                    self.sn_dim,
+                    self.map.n_pae_latents,
+                ),
             ),
             tf.Variable(  # Is Accepted
                 tf.convert_to_tensor(
-                    [[False] * self.sn_dim] * self.n_run_steps, dtype=tf.bool
+                    [[False] * self.sn_dim] * self.max_steps, dtype=tf.bool
                 ),
                 shape=(
-                    self.n_run_steps,
+                    self.max_steps,
                     self.sn_dim,
                 ),
             ),
             tf.Variable(  # Log Prior
                 tf.convert_to_tensor(
-                    [[0] * self.sn_dim] * self.n_run_steps, dtype=tf.float32
+                    [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
                 ),
                 shape=(
-                    self.n_run_steps,
+                    self.max_steps,
                     self.sn_dim,
                 ),
             ),
             tf.Variable(  # Log Like
                 tf.convert_to_tensor(
-                    [[0] * self.sn_dim] * self.n_run_steps, dtype=tf.float32
+                    [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
                 ),
                 shape=(
-                    self.n_run_steps,
+                    self.max_steps,
                     self.sn_dim,
                 ),
             ),
             tf.Variable(  # Log Prob
                 tf.convert_to_tensor(
-                    [[0] * self.sn_dim] * self.n_run_steps, dtype=tf.float32
+                    [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
                 ),
                 shape=(
-                    self.n_run_steps,
+                    self.max_steps,
                     self.sn_dim,
                 ),
             ),
             tf.Variable(  # UDeltaAv
                 tf.convert_to_tensor(
-                    [[[0] * 1] * self.sn_dim] * self.n_run_steps, dtype=tf.float32
+                    [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
                 ),
-                shape=(self.n_run_steps, self.sn_dim, 1),
+                shape=(self.max_steps, self.sn_dim, 1),
             ),
             tf.Variable(  # ULatents
                 tf.convert_to_tensor(
-                    [[[0] * self.map.n_u_latents] * self.sn_dim] * self.n_run_steps,
+                    [[[0] * self.map.n_u_latents] * self.sn_dim] * self.max_steps,
                     dtype=tf.float32,
                 ),
-                shape=(self.n_run_steps, self.sn_dim, self.map.n_u_latents),
+                shape=(self.max_steps, self.sn_dim, self.map.n_u_latents),
             ),
             tf.Variable(  # DeltaAv
                 tf.convert_to_tensor(
-                    [[[0] * 1] * self.sn_dim] * self.n_run_steps, dtype=tf.float32
+                    [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
                 ),
-                shape=(self.n_run_steps, self.sn_dim, 1),
+                shape=(self.max_steps, self.sn_dim, 1),
             ),
             tf.Variable(  # ZLatents
                 tf.convert_to_tensor(
-                    [[[0] * self.map.n_z_latents] * self.sn_dim] * self.n_run_steps,
+                    [[[0] * self.map.n_z_latents] * self.sn_dim] * self.max_steps,
                     dtype=tf.float32,
                 ),
-                shape=(self.n_run_steps, self.sn_dim, self.map.n_z_latents),
+                shape=(self.max_steps, self.sn_dim, self.map.n_z_latents),
             ),
             tf.Variable(  # DeltaM
                 tf.convert_to_tensor(
-                    [[[0] * 1] * self.sn_dim] * self.n_run_steps, dtype=tf.float32
+                    [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
                 ),
-                shape=(self.n_run_steps, self.sn_dim, 1),
+                shape=(self.max_steps, self.sn_dim, 1),
             ),
             tf.Variable(  # DeltaP
                 tf.convert_to_tensor(
-                    [[[0] * 1] * self.sn_dim] * self.n_run_steps, dtype=tf.float32
+                    [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
                 ),
-                shape=(self.n_run_steps, self.sn_dim, 1),
+                shape=(self.max_steps, self.sn_dim, 1),
             ),
         )
 
@@ -338,9 +352,12 @@ class TFPosteriorModel(ks.Model):
             )
 
         zs = tf.repeat(tf.expand_dims(zs, axis=-2), repeats=[self.spec_dim], axis=-2)
+        phase = tf.repeat(
+            tf.expand_dims(input_phase, axis=0), repeats=self.n_chains, axis=0
+        )
 
         # Create synthetic spectra from z-latents
-        decoder_inputs = tf.concat((input_phase, zs), axis=-1)
+        decoder_inputs = tf.concat((phase, zs), axis=-1)
         synth_amp = self.pae.decoder(
             decoder_inputs,
             mask=input_mask,
@@ -358,7 +375,6 @@ class TFPosteriorModel(ks.Model):
             bias = tf.expand_dims(bias, axis=-2)
             synth_amp += bias
 
-        phase = input_phase
         if self.map.train_delta_p:  # and not self.pae.physical_latents:
             delta_p = tf.expand_dims(delta_p, axis=-2)
             phase += delta_p
@@ -530,6 +546,7 @@ class TFPosteriorModel(ks.Model):
         load_map: bool = False,
         load_hmc: bool = False,
     ) -> None:
+        self.n_chains = 1
         if load_map and load_hmc:
             ckpt = tf.train.Checkpoint(self, map=self.map, hmc=self.hmc)
         elif load_map:
@@ -545,7 +562,7 @@ class TFPosteriorModel(ks.Model):
 
         if load_hmc:
             ess = tfp.mcmc.effective_sample_size(
-                self.hmc.samples, filter_beyond_positive_pairs=True, cross_chain_dims=1
+                self.hmc.samples, filter_beyond_positive_pairs=True, cross_chain_dims=-2
             )
             r_hat = tfp.mcmc.potential_scale_reduction(
                 self.hmc.samples, split_chains=True
@@ -553,6 +570,7 @@ class TFPosteriorModel(ks.Model):
 
             self.log.info(f"Effective Sample Size: {ess} ({(ess / self.sn_dim)}")
             self.log.info(f"R-Hat: {r_hat}")
+        clear_session()
 
     @override
     def get_config(self) -> dict[str, "Any"]:
@@ -743,7 +761,7 @@ class TFPosteriorModel(ks.Model):
                                 tf.ones_like(self.map.converged, dtype=tf.int32)
                                 * tf.cast(self.map.converged, tf.int32)
                             )
-                            / self.map.converged.shape[0],
+                            / self.map.converged.shape[1],
                             step=chain,
                         )
                         tf.summary.scalar(
@@ -752,7 +770,7 @@ class TFPosteriorModel(ks.Model):
                                 tf.ones_like(self.map.failed, dtype=tf.int32)
                                 * tf.cast(self.map.failed, tf.int32)
                             )
-                            / self.map.failed.shape[0],
+                            / self.map.failed.shape[1],
                             step=chain,
                         )
                         tf.summary.scalar(
@@ -760,7 +778,7 @@ class TFPosteriorModel(ks.Model):
                             tf.reduce_sum(
                                 tf.ones_like(self.map.improved, dtype=tf.int32)
                                 * tf.cast(self.map.improved, tf.int32)
-                                / self.map.converged.shape[0],
+                                / self.map.converged.shape[1],
                             ),
                             step=chain,
                         )
@@ -902,6 +920,7 @@ class TFPosteriorModel(ks.Model):
 
         if savepath is not None:
             self.save_checkpoint(savepath, save_map=True, save_hmc=True)
+        clear_session()
 
     def update_map_progress(self, log_prob: tf.Tensor) -> None:
         if self.map_progress.n % 10 != 0:
@@ -1005,6 +1024,7 @@ class TFPosteriorModel(ks.Model):
         *,
         savepath: "Path | None" = None,
     ) -> None:
+        self.n_chains = 1
         if self.norm_prob is None:
             self.map.setup(stage, chain)
 
@@ -1160,8 +1180,8 @@ class TFPosteriorModel(ks.Model):
         initial_position = []
         current_position = []
         if self.map.train_delta_m:
-            initial_delta_m = self.map.position.current[:, ind : ind + 1]
-            delta_m = position[:, ind : ind + 1]
+            initial_delta_m = self.map.position.current[..., ind : ind + 1]
+            delta_m = position[..., ind : ind + 1]
             ind += 1
             initial_position.append(initial_delta_m)
             current_position.append(delta_m)
@@ -1180,8 +1200,8 @@ class TFPosteriorModel(ks.Model):
         )
 
         if self.map.train_delta_p:
-            initial_delta_p = self.map.position.current[:, ind : ind + 1]
-            delta_p = position[:, ind : ind + 1]
+            initial_delta_p = self.map.position.current[..., ind : ind + 1]
+            delta_p = position[..., ind : ind + 1]
             ind += 1
             initial_position.append(initial_delta_p)
             current_position.append(delta_p)
@@ -1200,8 +1220,8 @@ class TFPosteriorModel(ks.Model):
         )
 
         if self.map.train_bias:
-            initial_bias = self.map.position.current[:, ind : ind + 1]
-            bias = position[:, ind : ind + 1]
+            initial_bias = self.map.position.current[..., ind : ind + 1]
+            bias = position[..., ind : ind + 1]
             ind += 1
             initial_position.append(initial_bias)
             current_position.append(bias)
@@ -1220,8 +1240,8 @@ class TFPosteriorModel(ks.Model):
         )
 
         if self.nflow.physical_latents:
-            initial_u_delta_av = self.map.position.current[:, ind : ind + 1]
-            u_delta_av = position[:, ind : ind + 1]
+            initial_u_delta_av = self.map.position.current[..., ind : ind + 1]
+            u_delta_av = position[..., ind : ind + 1]
             ind += 1
             initial_position.append(initial_u_delta_av)
             current_position.append(u_delta_av)
@@ -1239,8 +1259,8 @@ class TFPosteriorModel(ks.Model):
             self.map.u_delta_av.best,
         )
 
-        initial_u_latents = self.map.position.current[:, ind:]
-        u_latents = position[:, ind:]
+        initial_u_latents = self.map.position.current[..., ind:]
+        u_latents = position[..., ind:]
         initial_position.append(initial_u_latents)
         current_position.append(u_latents)
         self.map.u_latents.initial = tf.where(
@@ -1273,10 +1293,10 @@ class TFPosteriorModel(ks.Model):
         z_latents = self.nflow.u_to_z(us, permute=True)
 
         if self.nflow.physical_latents:
-            initial_delta_av = initial_z_latents[:, 0:1]
-            initial_z_latents = initial_z_latents[:, 1:]
-            delta_av = z_latents[:, 0:1]
-            z_latents = z_latents[:, 1:]
+            initial_delta_av = initial_z_latents[..., 0:1]
+            initial_z_latents = initial_z_latents[..., 1:]
+            delta_av = z_latents[..., 0:1]
+            z_latents = z_latents[..., 1:]
         else:
             initial_delta_av = self.map.delta_av.current
             delta_av = self.map.delta_av.current
@@ -1839,6 +1859,7 @@ class TFPosteriorModel(ks.Model):
         *,
         savepath: "Path | None" = None,
     ) -> None:
+        self.n_chains = self.n_walkers
         if savepath is not None:
             hmc_savepath = savepath / "hmc"
             hmc_savepath.mkdir(parents=True, exist_ok=True)
@@ -1899,13 +1920,11 @@ class TFPosteriorModel(ks.Model):
                 return
         self.log.debug("Running HMC")
         step_size_init = self.step_size
-        pp(step_size_init, name="step_size_init")
-
         initial_position = self.map.position.best
+
         step_size_std = tf.math.reduce_std(
             tf.boolean_mask(initial_position, self.map.converged), axis=0
         )
-        pp(step_size_std, name="step_size_std")
 
         step_size_std = tf.where(
             tf.math.is_finite(step_size_std), step_size_std, step_size_init
@@ -1914,17 +1933,20 @@ class TFPosteriorModel(ks.Model):
             tf.math.is_finite(step_size_init), step_size_init, step_size_std
         )
         step_size_inner = tf.math.minimum(step_size_init, step_size_std)
-        pp(step_size_inner, name="step_size_inner")
         step_size_inner = self.map.unconstrain(step_size_inner)
-        pp(step_size_inner, name="unconstrained step_size_inner")
+        self.log.debug(f"Step Size: {step_size_inner}")
 
         step_size = tf.repeat(
             tf.expand_dims(step_size_inner, axis=0),
-            repeats=initial_position.shape[0],
+            repeats=initial_position.shape[1],
             axis=0,
+        )
+        step_size = tf.repeat(
+            tf.expand_dims(step_size, axis=0), repeats=self.n_walkers, axis=0
         )
 
         initial_position = self.map.unconstrain(initial_position)
+        initial_position = tf.repeat(initial_position, repeats=self.n_walkers, axis=0)
 
         self.log.debug(
             f"With {self.n_burnin_steps} burn-in steps and {self.n_run_steps} run steps ({self.n_adaption_steps} of which will be used for step-size adaption), a maximum of {self.max_samples} samples will be generated for a max leapfrog depth of {(2**self.n_leapfrog) - 1}"
@@ -2005,6 +2027,35 @@ class TFPosteriorModel(ks.Model):
             log_like.numpy(),
             log_prob.numpy(),
         )
+
+        samples = samples.reshape((
+            samples.shape[0] * samples.shape[1],
+            *samples.shape[2:],
+        ))
+        step_sizes_final = step_sizes_final.reshape((
+            step_sizes_final.shape[0] * step_sizes_final.shape[1],
+            *step_sizes_final.shape[2:],
+        ))
+        is_accepted = is_accepted.reshape((
+            is_accepted.shape[0] * is_accepted.shape[1],
+            *is_accepted.shape[2:],
+        ))
+        log_accept_ratio = log_accept_ratio.reshape((
+            log_accept_ratio.shape[0] * log_accept_ratio.shape[1],
+            *log_accept_ratio.shape[2:],
+        ))
+        log_prior = log_prior.reshape((
+            log_prior.shape[0] * log_prior.shape[1],
+            *log_prior.shape[2:],
+        ))
+        log_like = log_like.reshape((
+            log_like.shape[0] * log_like.shape[1],
+            *log_like.shape[2:],
+        ))
+        log_prob = log_prob.reshape((
+            log_prob.shape[0] * log_prob.shape[1],
+            *log_prob.shape[2:],
+        ))
 
         ind = 0
         if self.map.train_delta_m:

@@ -32,5 +32,7 @@ def db(
 def pp(expression: object, name: str | None = None) -> None:
     if isinstance(expression, tf.Tensor):
         db(expression, name or "Tensor", verbose=True, debug=False)
+    elif name is not None:
+        tf.print(f"{name}:\n{pf(expression)}")
     else:
-        tf.print(pf(expression))
+        tf.print(f"{pf(expression)}")
