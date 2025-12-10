@@ -100,7 +100,6 @@ class TFPosteriorModel(ks.Model):
 
         # MAP Variables
         self.map: PosteriorMap
-        vars(self)["map"] = PosteriorMap(self)
         self.norm_prob: float | None = None
         self.tolerance: float = self.options.tolerance
         self.x_tolerance: float = self.options.x_tolerance
@@ -155,104 +154,6 @@ class TFPosteriorModel(ks.Model):
         self.target_acceptance_rate: float = self.options.target_acceptance_rate
 
         self.hmc: PosteriorHMCValue
-        vars(self)["hmc"] = PosteriorHMCValue(
-            tf.Variable(  # Samples
-                tf.convert_to_tensor(
-                    [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
-                    dtype=tf.float32,
-                ),
-                shape=(
-                    self.max_steps,
-                    self.sn_dim,
-                    self.map.n_pae_latents,
-                ),
-            ),
-            tf.Variable(  # Step Sizes Final
-                tf.convert_to_tensor(
-                    [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
-                    dtype=tf.float32,
-                ),
-                shape=(
-                    self.max_steps,
-                    self.sn_dim,
-                    self.map.n_pae_latents,
-                ),
-            ),
-            tf.Variable(  # Is Accepted
-                tf.convert_to_tensor(
-                    [[False] * self.sn_dim] * self.max_steps, dtype=tf.bool
-                ),
-                shape=(
-                    self.max_steps,
-                    self.sn_dim,
-                ),
-            ),
-            tf.Variable(  # Log Prior
-                tf.convert_to_tensor(
-                    [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                ),
-                shape=(
-                    self.max_steps,
-                    self.sn_dim,
-                ),
-            ),
-            tf.Variable(  # Log Like
-                tf.convert_to_tensor(
-                    [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                ),
-                shape=(
-                    self.max_steps,
-                    self.sn_dim,
-                ),
-            ),
-            tf.Variable(  # Log Prob
-                tf.convert_to_tensor(
-                    [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                ),
-                shape=(
-                    self.max_steps,
-                    self.sn_dim,
-                ),
-            ),
-            tf.Variable(  # UDeltaAv
-                tf.convert_to_tensor(
-                    [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                ),
-                shape=(self.max_steps, self.sn_dim, 1),
-            ),
-            tf.Variable(  # ULatents
-                tf.convert_to_tensor(
-                    [[[0] * self.map.n_u_latents] * self.sn_dim] * self.max_steps,
-                    dtype=tf.float32,
-                ),
-                shape=(self.max_steps, self.sn_dim, self.map.n_u_latents),
-            ),
-            tf.Variable(  # DeltaAv
-                tf.convert_to_tensor(
-                    [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                ),
-                shape=(self.max_steps, self.sn_dim, 1),
-            ),
-            tf.Variable(  # ZLatents
-                tf.convert_to_tensor(
-                    [[[0] * self.map.n_z_latents] * self.sn_dim] * self.max_steps,
-                    dtype=tf.float32,
-                ),
-                shape=(self.max_steps, self.sn_dim, self.map.n_z_latents),
-            ),
-            tf.Variable(  # DeltaM
-                tf.convert_to_tensor(
-                    [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                ),
-                shape=(self.max_steps, self.sn_dim, 1),
-            ),
-            tf.Variable(  # DeltaP
-                tf.convert_to_tensor(
-                    [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                ),
-                shape=(self.max_steps, self.sn_dim, 1),
-            ),
-        )
 
         self.set_seed()
 
@@ -519,6 +420,112 @@ class TFPosteriorModel(ks.Model):
             additional_outputs=additional_outputs,
         )
 
+    def setup_map(self) -> None:
+        if not hasattr(self, "map"):
+            vars(self)["map"] = PosteriorMap(self)
+
+    def setup_hmc(self) -> None:
+        self.setup_map()
+        if not hasattr(self, "hmc"):
+            vars(self)["hmc"] = PosteriorHMCValue(
+                tf.Variable(  # Samples
+                    tf.convert_to_tensor(
+                        [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
+                        dtype=tf.float32,
+                    ),
+                    shape=(
+                        self.max_steps,
+                        self.sn_dim,
+                        self.map.n_pae_latents,
+                    ),
+                ),
+                tf.Variable(  # Step Sizes Final
+                    tf.convert_to_tensor(
+                        [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
+                        dtype=tf.float32,
+                    ),
+                    shape=(
+                        self.max_steps,
+                        self.sn_dim,
+                        self.map.n_pae_latents,
+                    ),
+                ),
+                tf.Variable(  # Is Accepted
+                    tf.convert_to_tensor(
+                        [[False] * self.sn_dim] * self.max_steps, dtype=tf.bool
+                    ),
+                    shape=(
+                        self.max_steps,
+                        self.sn_dim,
+                    ),
+                ),
+                tf.Variable(  # Log Prior
+                    tf.convert_to_tensor(
+                        [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                    ),
+                    shape=(
+                        self.max_steps,
+                        self.sn_dim,
+                    ),
+                ),
+                tf.Variable(  # Log Like
+                    tf.convert_to_tensor(
+                        [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                    ),
+                    shape=(
+                        self.max_steps,
+                        self.sn_dim,
+                    ),
+                ),
+                tf.Variable(  # Log Prob
+                    tf.convert_to_tensor(
+                        [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                    ),
+                    shape=(
+                        self.max_steps,
+                        self.sn_dim,
+                    ),
+                ),
+                tf.Variable(  # UDeltaAv
+                    tf.convert_to_tensor(
+                        [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                    ),
+                    shape=(self.max_steps, self.sn_dim, 1),
+                ),
+                tf.Variable(  # ULatents
+                    tf.convert_to_tensor(
+                        [[[0] * self.map.n_u_latents] * self.sn_dim] * self.max_steps,
+                        dtype=tf.float32,
+                    ),
+                    shape=(self.max_steps, self.sn_dim, self.map.n_u_latents),
+                ),
+                tf.Variable(  # DeltaAv
+                    tf.convert_to_tensor(
+                        [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                    ),
+                    shape=(self.max_steps, self.sn_dim, 1),
+                ),
+                tf.Variable(  # ZLatents
+                    tf.convert_to_tensor(
+                        [[[0] * self.map.n_z_latents] * self.sn_dim] * self.max_steps,
+                        dtype=tf.float32,
+                    ),
+                    shape=(self.max_steps, self.sn_dim, self.map.n_z_latents),
+                ),
+                tf.Variable(  # DeltaM
+                    tf.convert_to_tensor(
+                        [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                    ),
+                    shape=(self.max_steps, self.sn_dim, 1),
+                ),
+                tf.Variable(  # DeltaP
+                    tf.convert_to_tensor(
+                        [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                    ),
+                    shape=(self.max_steps, self.sn_dim, 1),
+                ),
+            )
+
     def save_checkpoint(
         self,
         savepath: "Path",
@@ -539,6 +546,8 @@ class TFPosteriorModel(ks.Model):
 
         ckpt.save(f"{savepath / self.ckpt_path}/")
 
+        clear_session()
+
     def load_checkpoint(
         self,
         loadpath: "Path",
@@ -546,6 +555,11 @@ class TFPosteriorModel(ks.Model):
         load_map: bool = False,
         load_hmc: bool = False,
     ) -> None:
+        if load_map:
+            self.setup_map()
+        if load_hmc:
+            self.setup_hmc()
+
         self.n_chains = 1
         if load_map and load_hmc:
             ckpt = tf.train.Checkpoint(self, map=self.map, hmc=self.hmc)
@@ -601,9 +615,7 @@ class TFPosteriorModel(ks.Model):
 
         n_total = sum(stage.n_chains for stage in stages) - 1
         chain = 0
-        progress = tqdm(
-            total=n_total, leave=False, dynamic_ncols=True, smoothing=1, position=1
-        )
+        progress = tqdm(total=n_total, leave=False, dynamic_ncols=True, position=1)
 
         summary_writer = None
         if self.profile and savepath is not None:
@@ -916,64 +928,11 @@ class TFPosteriorModel(ks.Model):
             summary_writer.close()
         progress.close()
         self.set_seed()
-        self.hmc_train(savepath=savepath)
+        self.train_hmc(savepath=savepath)
 
         if savepath is not None:
             self.save_checkpoint(savepath, save_map=True, save_hmc=True)
         clear_session()
-
-    def update_map_progress(self, log_prob: tf.Tensor) -> None:
-        if self.map_progress.n % 10 != 0:
-            self.map_progress.n += 1
-            return
-
-        min_log_prob = tf.reduce_min(
-            tf.where(
-                tf.math.is_finite(log_prob),
-                log_prob,
-                np.inf * tf.ones_like(log_prob),
-            )
-        )
-        mean_log_prob = tf.reduce_sum(
-            tf.where(
-                tf.math.is_finite(log_prob),
-                log_prob,
-                tf.zeros_like(log_prob),
-            )
-        ) / tf.math.maximum(
-            tf.reduce_sum(
-                tf.where(
-                    tf.math.is_finite(log_prob),
-                    tf.ones_like(log_prob),
-                    tf.zeros_like(log_prob),
-                )
-            ),
-            1,
-        )
-        max_log_prob = tf.reduce_max(
-            tf.where(
-                tf.math.is_finite(log_prob),
-                log_prob,
-                -np.inf * tf.ones_like(log_prob),
-            )
-        )
-
-        @tf.py_function(Tout=[])
-        def _update(
-            min_log_prob: tf.Tensor,
-            mean_log_prob: tf.Tensor,
-            max_log_prob: tf.Tensor,
-        ) -> None:
-            self.map_progress.set_postfix({
-                "log_prob": (
-                    f"{min_log_prob:.3E}",
-                    f"{mean_log_prob:.3E}",
-                    f"{max_log_prob:.3E}",
-                ),
-            })
-            self.map_progress.update()
-
-        _update(min_log_prob, mean_log_prob, max_log_prob)
 
     @tf.function(jit_compile=False)
     def vals_and_grads(self, position: tf.Tensor) -> tf.Tensor:
@@ -989,8 +948,6 @@ class TFPosteriorModel(ks.Model):
             spec_mask=self.spec_mask,
             wl_mask=self.wl_mask,
         )
-
-        self.update_map_progress(log_prob)
 
         return self._loss(self.norm_prob, log_prob)
 
@@ -1024,6 +981,7 @@ class TFPosteriorModel(ks.Model):
         *,
         savepath: "Path | None" = None,
     ) -> None:
+        self.setup_map()
         self.n_chains = 1
         if self.norm_prob is None:
             self.map.setup(stage, chain)
@@ -1085,10 +1043,6 @@ class TFPosteriorModel(ks.Model):
         initial_position = self.map.position.current
         initial_position = self.map.unconstrain(initial_position)
 
-        self.map_progress = tqdm(
-            leave=False, dynamic_ncols=True, smoothing=1, position=0
-        )
-
         if stage.setup:
             objective_value = self.vals_and_grads(initial_position) / self.norm_prob
             converged = tf.math.is_finite(objective_value)
@@ -1106,7 +1060,6 @@ class TFPosteriorModel(ks.Model):
             improved = tf.math.logical_and(
                 (objective_value < self.map.negative_log_prob), converged
             )
-        self.map_progress.close()
 
         _val, _grad = tfp.math.value_and_gradient(
             self.vals_and_grads,
@@ -1356,6 +1309,7 @@ class TFPosteriorModel(ks.Model):
         if savepath is not None:
             (stage_savepath / self.ckpt_path).mkdir(parents=True, exist_ok=True)
             self.save_checkpoint(stage_savepath, save_map=True)
+        clear_session()
 
     # === HMC Functions ===
     def update_sample_progress(
@@ -1854,11 +1808,12 @@ class TFPosteriorModel(ks.Model):
             log_prob,
         )
 
-    def hmc_train(
+    def train_hmc(
         self,
         *,
         savepath: "Path | None" = None,
     ) -> None:
+        self.setup_hmc()
         self.n_chains = self.n_walkers
         if savepath is not None:
             hmc_savepath = savepath / "hmc"
@@ -1963,7 +1918,6 @@ class TFPosteriorModel(ks.Model):
             total=self.max_samples,
             leave=False,
             dynamic_ncols=True,
-            smoothing=1,
             position=0,
         )
         self.sample_progress.set_description("samples")
@@ -1971,7 +1925,6 @@ class TFPosteriorModel(ks.Model):
             total=self.n_run_steps + 1,
             leave=False,
             dynamic_ncols=True,
-            smoothing=1,
             position=1,
         )
         self.run_progress.set_description("run")

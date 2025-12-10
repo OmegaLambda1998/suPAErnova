@@ -1446,6 +1446,8 @@ class TFPAEModel(ks.Model):
             self,
         ).save(f"{savepath / self.ckpt_path}/")
 
+        clear_session()
+
     def load_checkpoint(
         self,
         loadpath: "Path",
