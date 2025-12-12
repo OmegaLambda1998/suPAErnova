@@ -486,44 +486,44 @@ class TFPosteriorModel(ks.Model):
                         self.sn_dim,
                     ),
                 ),
-                tf.Variable(  # UDeltaAv
-                    tf.convert_to_tensor(
-                        [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                    ),
-                    shape=(self.max_steps, self.sn_dim, 1),
-                ),
-                tf.Variable(  # ULatents
-                    tf.convert_to_tensor(
-                        [[[0] * self.map.n_u_latents] * self.sn_dim] * self.max_steps,
-                        dtype=tf.float32,
-                    ),
-                    shape=(self.max_steps, self.sn_dim, self.map.n_u_latents),
-                ),
-                tf.Variable(  # DeltaAv
-                    tf.convert_to_tensor(
-                        [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                    ),
-                    shape=(self.max_steps, self.sn_dim, 1),
-                ),
-                tf.Variable(  # ZLatents
-                    tf.convert_to_tensor(
-                        [[[0] * self.map.n_z_latents] * self.sn_dim] * self.max_steps,
-                        dtype=tf.float32,
-                    ),
-                    shape=(self.max_steps, self.sn_dim, self.map.n_z_latents),
-                ),
-                tf.Variable(  # DeltaM
-                    tf.convert_to_tensor(
-                        [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                    ),
-                    shape=(self.max_steps, self.sn_dim, 1),
-                ),
-                tf.Variable(  # DeltaP
-                    tf.convert_to_tensor(
-                        [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                    ),
-                    shape=(self.max_steps, self.sn_dim, 1),
-                ),
+                # tf.Variable(  # UDeltaAv
+                #     tf.convert_to_tensor(
+                #         [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                #     ),
+                #     shape=(self.max_steps, self.sn_dim, 1),
+                # ),
+                # tf.Variable(  # ULatents
+                #     tf.convert_to_tensor(
+                #         [[[0] * self.map.n_u_latents] * self.sn_dim] * self.max_steps,
+                #         dtype=tf.float32,
+                #     ),
+                #     shape=(self.max_steps, self.sn_dim, self.map.n_u_latents),
+                # ),
+                # tf.Variable(  # DeltaAv
+                #     tf.convert_to_tensor(
+                #         [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                #     ),
+                #     shape=(self.max_steps, self.sn_dim, 1),
+                # ),
+                # tf.Variable(  # ZLatents
+                #     tf.convert_to_tensor(
+                #         [[[0] * self.map.n_z_latents] * self.sn_dim] * self.max_steps,
+                #         dtype=tf.float32,
+                #     ),
+                #     shape=(self.max_steps, self.sn_dim, self.map.n_z_latents),
+                # ),
+                # tf.Variable(  # DeltaM
+                #     tf.convert_to_tensor(
+                #         [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                #     ),
+                #     shape=(self.max_steps, self.sn_dim, 1),
+                # ),
+                # tf.Variable(  # DeltaP
+                #     tf.convert_to_tensor(
+                #         [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                #     ),
+                #     shape=(self.max_steps, self.sn_dim, 1),
+                # ),
             )
 
     def save_checkpoint(
@@ -545,6 +545,10 @@ class TFPosteriorModel(ks.Model):
             ckpt = tf.train.Checkpoint(self)
 
         ckpt.save(f"{savepath / self.ckpt_path}/")
+
+        if save_map and save_hmc:
+            del self.map
+            del self.hmc
 
         clear_session()
 
@@ -1822,41 +1826,41 @@ class TFPosteriorModel(ks.Model):
                 self.log.debug(f"Loading HMC from {hmc_savepath}")
                 self.load_checkpoint(hmc_savepath, load_hmc=True)
 
-                samples = self.hmc.samples.numpy()
+                samples = self.hmc.samples
 
-                ind = 0
-                if self.map.train_delta_m:
-                    delta_m = samples[..., ind : ind + 1]
-                    ind += 1
-                else:
-                    delta_m = self.hmc.delta_m
-                if self.map.train_delta_p:
-                    delta_p = samples[..., ind : ind + 1]
-                    ind += 1
-                else:
-                    delta_p = self.hmc.delta_p
-                if self.nflow.physical_latents:
-                    u_delta_av = samples[..., ind : ind + 1]
-                    ind += 1
-                else:
-                    u_delta_av = self.hmc.u_delta_av
-                u_latents = samples[..., ind:]
-                if self.nflow.physical_latents:
-                    us = np.concatenate([u_delta_av, u_latents], axis=-1)
-                else:
-                    us = u_latents
-                us = us.reshape(-1, self.map.n_flow_latents)
-                # Transform u_latents to z_latents
-                z_latents = (
-                    self.nflow.u_to_z(us, permute=True)
-                    .numpy()
-                    .reshape(*samples.shape[:-1], self.map.n_flow_latents)
-                )
-                if self.pae.physical_latents:
-                    delta_av = z_latents[..., 0:1]
-                    z_latents = z_latents[..., 1:]
-                else:
-                    delta_av = self.hmc.delta_av
+                # ind = 0
+                # if self.map.train_delta_m:
+                #     delta_m = samples[..., ind : ind + 1]
+                #     ind += 1
+                # else:
+                #     delta_m = self.hmc.delta_m
+                # if self.map.train_delta_p:
+                #     delta_p = samples[..., ind : ind + 1]
+                #     ind += 1
+                # else:
+                #     delta_p = self.hmc.delta_p
+                # if self.nflow.physical_latents:
+                #     u_delta_av = samples[..., ind : ind + 1]
+                #     ind += 1
+                # else:
+                #     u_delta_av = self.hmc.u_delta_av
+                # u_latents = samples[..., ind:]
+                # if self.nflow.physical_latents:
+                #     us = np.concatenate([u_delta_av, u_latents], axis=-1)
+                # else:
+                #     us = u_latents
+                # us = us.reshape(-1, self.map.n_flow_latents)
+                # # Transform u_latents to z_latents
+                # z_latents = (
+                #     self.nflow.u_to_z(us, permute=True)
+                #     .numpy()
+                #     .reshape(*samples.shape[:-1], self.map.n_flow_latents)
+                # )
+                # if self.pae.physical_latents:
+                #     delta_av = z_latents[..., 0:1]
+                #     z_latents = z_latents[..., 1:]
+                # else:
+                #     delta_av = self.hmc.delta_av
 
                 vars(self)["hmc"] = PosteriorHMCValue(
                     tf.Variable(samples),
@@ -1865,12 +1869,12 @@ class TFPosteriorModel(ks.Model):
                     tf.Variable(self.hmc.log_prior),
                     tf.Variable(self.hmc.log_like),
                     tf.Variable(self.hmc.log_prob),
-                    tf.Variable(u_delta_av),
-                    tf.Variable(u_latents),
-                    tf.Variable(delta_av),
-                    tf.Variable(z_latents),
-                    tf.Variable(delta_m),
-                    tf.Variable(delta_p),
+                    # tf.Variable(u_delta_av),
+                    # tf.Variable(u_latents),
+                    # tf.Variable(delta_av),
+                    # tf.Variable(z_latents),
+                    # tf.Variable(delta_m),
+                    # tf.Variable(delta_p),
                 )
                 return
         self.log.debug("Running HMC")
@@ -2010,39 +2014,39 @@ class TFPosteriorModel(ks.Model):
             *log_prob.shape[2:],
         ))
 
-        ind = 0
-        if self.map.train_delta_m:
-            delta_m = samples[..., ind : ind + 1]
-            ind += 1
-        else:
-            delta_m = self.hmc.delta_m
-        if self.map.train_delta_p:
-            delta_p = samples[..., ind : ind + 1]
-            ind += 1
-        else:
-            delta_p = self.hmc.delta_p
-        if self.nflow.physical_latents:
-            u_delta_av = samples[..., ind : ind + 1]
-            ind += 1
-        else:
-            u_delta_av = self.hmc.u_delta_av
-        u_latents = samples[..., ind:]
-        if self.nflow.physical_latents:
-            us = np.concatenate([u_delta_av, u_latents], axis=-1)
-        else:
-            us = u_latents
-        us = us.reshape(-1, self.map.n_flow_latents)
-        # Transform u_latents to z_latents
-        z_latents = (
-            self.nflow.u_to_z(us, permute=True)
-            .numpy()
-            .reshape(*samples.shape[:-1], self.map.n_flow_latents)
-        )
-        if self.pae.physical_latents:
-            delta_av = z_latents[..., 0:1]
-            z_latents = z_latents[..., 1:]
-        else:
-            delta_av = self.hmc.delta_av
+        # ind = 0
+        # if self.map.train_delta_m:
+        #     delta_m = samples[..., ind : ind + 1]
+        #     ind += 1
+        # else:
+        #     delta_m = self.hmc.delta_m
+        # if self.map.train_delta_p:
+        #     delta_p = samples[..., ind : ind + 1]
+        #     ind += 1
+        # else:
+        #     delta_p = self.hmc.delta_p
+        # if self.nflow.physical_latents:
+        #     u_delta_av = samples[..., ind : ind + 1]
+        #     ind += 1
+        # else:
+        #     u_delta_av = self.hmc.u_delta_av
+        # u_latents = samples[..., ind:]
+        # if self.nflow.physical_latents:
+        #     us = np.concatenate([u_delta_av, u_latents], axis=-1)
+        # else:
+        #     us = u_latents
+        # us = us.reshape(-1, self.map.n_flow_latents)
+        # # Transform u_latents to z_latents
+        # z_latents = (
+        #     self.nflow.u_to_z(us, permute=True)
+        #     .numpy()
+        #     .reshape(*samples.shape[:-1], self.map.n_flow_latents)
+        # )
+        # if self.pae.physical_latents:
+        #     delta_av = z_latents[..., 0:1]
+        #     z_latents = z_latents[..., 1:]
+        # else:
+        #     delta_av = self.hmc.delta_av
 
         vars(self)["hmc"] = PosteriorHMCValue(
             tf.Variable(samples),
@@ -2051,12 +2055,12 @@ class TFPosteriorModel(ks.Model):
             tf.Variable(log_prior),
             tf.Variable(log_like),
             tf.Variable(log_prob),
-            tf.Variable(u_delta_av),
-            tf.Variable(u_latents),
-            tf.Variable(delta_av),
-            tf.Variable(z_latents),
-            tf.Variable(delta_m),
-            tf.Variable(delta_p),
+            # tf.Variable(u_delta_av),
+            # tf.Variable(u_latents),
+            # tf.Variable(delta_av),
+            # tf.Variable(z_latents),
+            # tf.Variable(delta_m),
+            # tf.Variable(delta_p),
         )
 
         if savepath is not None:

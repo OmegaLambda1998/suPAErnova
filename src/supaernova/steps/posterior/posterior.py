@@ -527,7 +527,17 @@ class Posterior(ModelStep[PosteriorConfig]):
 
     @override
     def _has_run(self, *args: "Any", **kwargs: "Any") -> bool:
-        return self.has_attributes(self.run_attributes)
+        if self.has_attributes(self.run_attributes):
+            for subset in self.subsets:
+                for seed in self.seeds:
+                    model = self.models[subset][str(seed)]
+                    if not hasattr(model, "map"):
+                        return False
+                    if not hasattr(model, "hmc"):
+                        return False
+        else:
+            return False
+        return True
 
     @override
     def _run(self, *args: Any, **kwargs: Any) -> None:
@@ -541,7 +551,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # Don't retrain stages if you don't need to
                 if self.force or not (ckpt_path.exists() and any(ckpt_path.iterdir())):
                     self.model.train_model(self.map_stages, savepath=savepath)
-                    self.model.save_checkpoint(savepath, save_map=True, save_hmc=True)
                 else:
                     self.log.debug(
                         f"Loading Posterior {subset}_{seed} weights from {ckpt_path}"
@@ -635,12 +644,12 @@ class Posterior(ModelStep[PosteriorConfig]):
                     "samples": samples,
                     "step_sizes_final": model.hmc.step_sizes_final.numpy(),
                     "is_accepted": model.hmc.is_accepted.numpy(),
-                    "u_delta_av": model.hmc.u_delta_av.numpy(),
-                    "u_latents": model.hmc.u_latents.numpy(),
-                    "delta_av": model.hmc.delta_av.numpy(),
-                    "z_latents": model.hmc.z_latents.numpy(),
-                    "delta_m": model.hmc.delta_m.numpy(),
-                    "delta_p": model.hmc.delta_p.numpy(),
+                    # "u_delta_av": model.hmc.u_delta_av.numpy(),
+                    # "u_latents": model.hmc.u_latents.numpy(),
+                    # "delta_av": model.hmc.delta_av.numpy(),
+                    # "z_latents": model.hmc.z_latents.numpy(),
+                    # "delta_m": model.hmc.delta_m.numpy(),
+                    # "delta_p": model.hmc.delta_p.numpy(),
                     "log_prior": model.hmc.log_prior.numpy(),
                     "log_like": model.hmc.log_like.numpy(),
                     "log_prob": model.hmc.log_prob.numpy(),
@@ -1806,7 +1815,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                     mean_log_prob = np.mean(log_prob, axis=0)
                     valid_log_prob = input_sn_mask[:, 0, 0] & np.isfinite(mean_log_prob)
 
-                    delta_m = model.hmc.delta_m.numpy()[..., 0]
+                    delta_m = model.hmc.samples[..., 0]
+                    delta_p = model.hmc.samples[..., 1]
+
+                    # delta_m = model.hmc.delta_m.numpy()[..., 0]
                     if o.reduce == "mean":
                         mean_delta_m = np.mean(delta_m, axis=0)
                     else:
@@ -1814,7 +1826,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                             max_central(delta_m[:, sn], weight=log_prob[:, sn])[1]
                             for sn in range(delta_m.shape[-1])
                         ])
-                    delta_p = model.hmc.delta_p.numpy()[..., 0]
+                    # delta_p = model.hmc.delta_p.numpy()[..., 0]
                     if o.reduce == "mean":
                         mean_delta_p = np.mean(delta_p, axis=0)
                     else:

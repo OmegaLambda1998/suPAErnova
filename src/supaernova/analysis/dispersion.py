@@ -335,9 +335,9 @@ class DispersionPlotter(Plotter):
             amplitude_errs_lower = []
             amplitude_stds = []
             amplitude_errs_upper = []
-            for sn in range(hmc.hmc.delta_m.shape[1]):
+            for sn in range(hmc.hmc.samples.shape[-2]):
                 name = f"{i}_{sn}"
-                delta_m = hmc.hmc.delta_m[:, sn, 0]
+                delta_m = hmc.hmc.samples[..., sn, 0]
                 log_prob = hmc.hmc.log_prob[:, sn]
                 lower, center, upper = max_central(delta_m, weight=log_prob)
                 amplitudes.append(center)
@@ -356,11 +356,17 @@ class DispersionPlotter(Plotter):
 
         if config.reduce == "mean":
             pae_amplitudes = np.vstack(
-                [np.mean(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
+                [
+                    np.mean(hmc.hmc.samples[..., 0], axis=0, keepdims=True)
+                    for hmc in hmcs
+                ],
             )[..., 0][..., pae_order]
 
             pae_amplitude_stds = np.vstack(
-                [np.std(hmc.hmc.delta_m, axis=0, keepdims=True) for hmc in hmcs],
+                [
+                    np.std(hmc.hmc.samples[..., 0], axis=0, keepdims=True)
+                    for hmc in hmcs
+                ],
             )[..., 0][..., pae_order]
 
         pae_weights = 1 / np.clip(pae_amplitude_stds * pae_amplitude_stds, 1e-7, np.inf)
