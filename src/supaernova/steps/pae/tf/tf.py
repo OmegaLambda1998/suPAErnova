@@ -245,13 +245,19 @@ class TFPAEEncoder(ks.layers.Layer):
             / n_unmasked_spec
         )
 
+        # Zero out latents of masked SNe
+        latents = tf.where(mask_sn, latents, tf.zeros_like(latents))
+
         if training or testing:
-            latents_mean = (
-                tf.reduce_sum(
-                    tf.where(mask_sn, latents, tf.zeros_like(latents)), axis=0
-                )
-                / n_unmasked_sn
-            )
+            # latents_mean = (
+            #     tf.reduce_sum(
+            #         tf.where(mask_sn, latents, tf.zeros_like(latents)), axis=0
+            #     )
+            #     / n_unmasked_sn
+            # )
+            latents_mean = tf.nn.weighted_moments(
+                latents, [0], n_unmasked_spec * tf.cast(mask_sn, tf.float32)
+            )[0]
         else:
             latents_mean = self.moving_means
 
@@ -1149,14 +1155,26 @@ class TFPAEModel(ks.Model):
         patience = self.stage.patience
         if isinstance(patience, float):
             patience = int(self.stage.epochs * patience)
-        callbacks.append(
+        callbacks.extend([
             ks.callbacks.EarlyStopping(
                 monitor="val_loss",
                 patience=patience,
                 mode="min",
                 start_from_epoch=patience,
-            )
-        )
+            ),
+            # ks.callbacks.EarlyStopping(
+            #     monitor="val_loss_pred",
+            #     patience=2 * patience,
+            #     mode="min",
+            #     start_from_epoch=patience,
+            # ),
+            # ks.callbacks.EarlyStopping(
+            #     monitor="val_loss_cov",
+            #     patience=2 * patience,
+            #     mode="min",
+            #     start_from_epoch=patience,
+            # ),
+        ])
 
         # --- Backup & Restore ---
         # Backup checkpoints each epoch and restore if training got cancelled midway through
@@ -1461,15 +1479,27 @@ class TFPAEModel(ks.Model):
         self.build_model()
         init_weights = self.encoder.encode_output_layer.get_weights()[0]
 
-        phase = tf.convert_to_tensor(self.stage.data.time, dtype=tf.float32)
-        amplitude = tf.convert_to_tensor(self.stage.data.amplitude, dtype=tf.float32)
+        # phase = tf.convert_to_tensor(self.stage.data.time, dtype=tf.float32)
+        # amplitude = tf.convert_to_tensor(self.stage.data.amplitude, dtype=tf.float32)
+        #
+        # self.stage.data.clear()
+        #
+        # mask = self.stage.mask
+        # sn_mask = self.stage.sn_mask
+        # spec_mask = self.stage.spec_mask
+        # wl_mask = self.stage.wl_mask
 
-        self.stage.data.clear()
+        phase = tf.convert_to_tensor(self.stage.train_data.time, dtype=tf.float32)
+        amplitude = tf.convert_to_tensor(
+            self.stage.train_data.amplitude, dtype=tf.float32
+        )
 
-        mask = self.stage.mask
-        sn_mask = self.stage.sn_mask
-        spec_mask = self.stage.spec_mask
-        wl_mask = self.stage.wl_mask
+        self.stage.train_data.clear()
+
+        mask = self.stage.train_mask
+        sn_mask = self.stage.train_sn_mask
+        spec_mask = self.stage.train_spec_mask
+        wl_mask = self.stage.train_wl_mask
 
         tf.train.Checkpoint(
             self,
@@ -1483,7 +1513,7 @@ class TFPAEModel(ks.Model):
 
         reset_weights = (
             (self.stage.prev_stage is not None)
-            and (self.stage.stage < self.n_pae_latents)
+            and (self.stage.stage <= self.n_pae_latents)
             if reset_weights is None
             else reset_weights
         )
@@ -1508,37 +1538,32 @@ class TFPAEModel(ks.Model):
                 wl_mask=wl_mask,
             )[:, 0, :]
 
-            # === Setup Masks ===
-            # Apply sn and spec masks
             mask &= sn_mask & spec_mask & wl_mask
-
-            # ~(~input_mask & input_wl_mask)
-            # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
             valid_wl_mask = tf.logical_not(
                 tf.logical_and(tf.logical_not(mask), wl_mask)
             )
-
-            # Determine which spectra to keep
-            # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
             mask_spec = tf.logical_and(
-                tf.math.reduce_any(valid_wl_mask, axis=-1, keepdims=True), spec_mask
+                tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True), spec_mask
             )
-
-            # Determine which SNe to keep
-            # Will mask out any SN with *no* unmasked spectra
+            n_unmasked_spec = tf.math.count_nonzero(
+                mask_spec[..., 0], axis=-1, keepdims=True, dtype=tf.float32
+            )
+            n_unmasked_spec = tf.math.maximum(n_unmasked_spec, 1)
             mask_sn = tf.logical_and(
                 tf.math.reduce_any(mask_spec, axis=-2, keepdims=True), sn_mask
             )[..., 0]
+            n_unmasked_sn = tf.math.count_nonzero(mask_sn[:, 0], dtype=tf.float32)
 
-            # The number of unmasked SNe
-            n_unmasked_sn = tf.math.count_nonzero(mask_sn[:, 0], dtype=encoded.dtype)
+            # latents_mean = (
+            #     tf.reduce_sum(
+            #         tf.where(mask_sn, encoded, tf.zeros_like(encoded)), axis=0
+            #     )
+            #     / n_unmasked_sn
+            # )
 
-            latents_mean = (
-                tf.reduce_sum(
-                    tf.where(mask_sn, encoded, tf.zeros_like(encoded)), axis=0
-                )
-                / n_unmasked_sn
-            )
+            latents_mean = tf.nn.weighted_moments(
+                encoded, [0], n_unmasked_spec * tf.cast(mask_sn, tf.float32)
+            )[0]
 
             self.encoder.moving_means.assign(latents_mean)
             self.log.debug(self.encoder.moving_means)

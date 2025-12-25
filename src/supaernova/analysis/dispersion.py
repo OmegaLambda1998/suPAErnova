@@ -360,14 +360,14 @@ class DispersionPlotter(Plotter):
                     np.mean(hmc.hmc.samples[..., 0], axis=0, keepdims=True)
                     for hmc in hmcs
                 ],
-            )[..., 0][..., pae_order]
+            )[..., pae_order]
 
             pae_amplitude_stds = np.vstack(
                 [
                     np.std(hmc.hmc.samples[..., 0], axis=0, keepdims=True)
                     for hmc in hmcs
                 ],
-            )[..., 0][..., pae_order]
+            )[..., pae_order]
 
         pae_weights = 1 / np.clip(pae_amplitude_stds * pae_amplitude_stds, 1e-7, np.inf)
 

@@ -612,24 +612,32 @@ class PosteriorMap(tf.Module):
         u_delta_av = self.u_delta_av.best if best else self.u_delta_av.current
         if len(u_delta_av.shape) > n_dims:
             u_delta_av = u_delta_av[0, ...]
+        if len(u_delta_av.shape) < n_dims:
+            u_delta_av = u_delta_av[None, ...]
         if u_delta_av.shape[0] != n_chains:
             u_delta_av = tf.repeat(u_delta_av, repeats=n_chains, axis=0)
 
         delta_m = self.delta_m.best if best else self.delta_m.current
         if len(delta_m.shape) > n_dims:
             delta_m = delta_m[0, ...]
+        if len(delta_m.shape) < n_dims:
+            delta_m = delta_m[None, ...]
         if delta_m.shape[0] != n_chains:
             delta_m = tf.repeat(delta_m, repeats=n_chains, axis=0)
 
         delta_p = self.delta_p.best if best else self.delta_p.current
         if len(delta_p.shape) > n_dims:
             delta_p = delta_p[0, ...]
+        if len(delta_p.shape) < n_dims:
+            delta_p = delta_p[None, ...]
         if delta_p.shape[0] != n_chains:
             delta_p = tf.repeat(delta_p, repeats=n_chains, axis=0)
 
         bias = self.bias.best if best else self.bias.current
         if len(bias.shape) > n_dims:
             bias = bias[0, ...]
+        if len(bias.shape) < n_dims:
+            bias = bias[None, ...]
         if bias.shape[0] != n_chains:
             bias = tf.repeat(bias, repeats=n_chains, axis=0)
 

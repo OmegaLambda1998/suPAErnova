@@ -275,9 +275,9 @@ class SpectraPlotter(Plotter):
             _sn_name,
             _time,
             input_mask,
-            _input_sn_mask,
-            _input_spec_mask,
-            _input_wl_mask,
+            input_sn_mask,
+            input_spec_mask,
+            input_wl_mask,
         ) = SpectraPlotter.prep(
             data,
             config,
@@ -287,11 +287,29 @@ class SpectraPlotter(Plotter):
             wl_mask=wl_mask,
         )
 
-        input_mask = np.logical_not(input_mask)
+        # ~(~input_mask & input_wl_mask)
+        # Extracts unmasked wavelengths from the valid wavelength range provided by wl_mask
+        valid_wl_mask = np.logical_not(
+            np.logical_and(np.logical_not(input_mask), input_wl_mask)
+        )
 
-        x = np.ma.masked_array(wl, input_mask).mean(axis=(0, 1))
-        y = np.ma.masked_array(amplitude, input_mask)
-        yerr = np.ma.masked_array(sigma, input_mask)
+        # Determine which spectra to keep
+        # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+        mask_spec = np.logical_and(
+            np.any(valid_wl_mask, axis=-1, keepdims=True), input_spec_mask
+        )
+
+        # Determine which SNe to keep
+        # Will mask out any SN with *no* unmasked spectra
+        mask_sn = np.logical_and(
+            np.any(mask_spec, axis=-2, keepdims=True), input_sn_mask
+        )
+
+        summary_mask = np.logical_not(input_mask & mask_spec & mask_sn)
+
+        x = np.ma.masked_array(wl, summary_mask).mean(axis=(0, 1))
+        y = np.ma.masked_array(amplitude, summary_mask)
+        yerr = np.ma.masked_array(sigma, summary_mask)
 
         # Mean
         y_mean = y.mean(axis=(0, 1))

@@ -253,7 +253,7 @@ class PosteriorConfig(BackendConfig):
     max_line_search_iterations: PositiveInt | None = None
     num_correction_pairs: PositiveInt | None = None
     # See [Betancourt et al (2014)](https://arxiv.org/abs/1411.6669).
-    # Since we run MAP first, our initial guass is very good and we want small, precise steps.
+    # Since we run MAP first, our initial guess is very good and we want small, precise steps.
     # So use a large acceptance rate.
     target_acceptance_rate: PositiveFloat = 0.9
 

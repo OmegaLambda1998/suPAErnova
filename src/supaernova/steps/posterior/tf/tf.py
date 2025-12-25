@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, override
 from tqdm import tqdm
 import numpy as np
 
-from supaernova._tf import HUGE, NPROC, ks, tf, tfd, tfp, clear_session
+from supaernova._tf import HUGE, NPROC, ks, tf, tfb, tfd, tfp, clear_session
 from supaernova.utils.tf import db, pp
 
 from .hmc import PosteriorHMCValue
@@ -254,7 +254,7 @@ class TFPosteriorModel(ks.Model):
 
         zs = tf.repeat(tf.expand_dims(zs, axis=-2), repeats=[self.spec_dim], axis=-2)
         phase = tf.repeat(
-            tf.expand_dims(input_phase, axis=0), repeats=self.n_chains, axis=0
+            tf.expand_dims(input_phase, axis=0), repeats=zs.shape[0], axis=0
         )
 
         # Create synthetic spectra from z-latents
@@ -537,6 +537,8 @@ class TFPosteriorModel(ks.Model):
 
         if save_map and save_hmc:
             ckpt = tf.train.Checkpoint(self, map=self.map, hmc=self.hmc)
+            del self.hmc
+            del self.map
         elif save_map:
             ckpt = tf.train.Checkpoint(self, map=self.map)
         elif save_hmc:
@@ -545,10 +547,6 @@ class TFPosteriorModel(ks.Model):
             ckpt = tf.train.Checkpoint(self)
 
         ckpt.save(f"{savepath / self.ckpt_path}/")
-
-        if save_map and save_hmc:
-            del self.map
-            del self.hmc
 
         clear_session()
 
@@ -771,24 +769,24 @@ class TFPosteriorModel(ks.Model):
                             tf.boolean_mask(self.map.chain_min, converged),
                             step=chain,
                         )
-                        tf.summary.scalar(
-                            "converged",
-                            tf.reduce_sum(
-                                tf.ones_like(self.map.converged, dtype=tf.int32)
-                                * tf.cast(self.map.converged, tf.int32)
-                            )
-                            / self.map.converged.shape[1],
-                            step=chain,
-                        )
-                        tf.summary.scalar(
-                            "failed",
-                            tf.reduce_sum(
-                                tf.ones_like(self.map.failed, dtype=tf.int32)
-                                * tf.cast(self.map.failed, tf.int32)
-                            )
-                            / self.map.failed.shape[1],
-                            step=chain,
-                        )
+                        # tf.summary.scalar(
+                        #     "converged",
+                        #     tf.reduce_sum(
+                        #         tf.ones_like(self.map.converged, dtype=tf.int32)
+                        #         * tf.cast(self.map.converged, tf.int32)
+                        #     )
+                        #     / self.map.converged.shape[1],
+                        #     step=chain,
+                        # )
+                        # tf.summary.scalar(
+                        #     "failed",
+                        #     tf.reduce_sum(
+                        #         tf.ones_like(self.map.failed, dtype=tf.int32)
+                        #         * tf.cast(self.map.failed, tf.int32)
+                        #     )
+                        #     / self.map.failed.shape[1],
+                        #     step=chain,
+                        # )
                         tf.summary.scalar(
                             "improved",
                             tf.reduce_sum(
@@ -798,14 +796,14 @@ class TFPosteriorModel(ks.Model):
                             ),
                             step=chain,
                         )
-                        tf.summary.scalar(
-                            "num_evaluations", self.map.num_evaluations, step=chain
-                        )
-                        tf.summary.scalar(
-                            "num_chain_evaluations",
-                            self.map.num_chain_evaluations,
-                            step=chain,
-                        )
+                        # tf.summary.scalar(
+                        #     "num_evaluations", self.map.num_evaluations, step=chain
+                        # )
+                        # tf.summary.scalar(
+                        #     "num_chain_evaluations",
+                        #     self.map.num_chain_evaluations,
+                        #     step=chain,
+                        # )
                         tf.summary.scalar(
                             "map/min_log_prior",
                             min_log_prior,
@@ -878,7 +876,7 @@ class TFPosteriorModel(ks.Model):
                         )
                         for i in range(self.map.n_u_latents):
                             tf.summary.histogram(
-                                f"u_{i + 1}",
+                                f"us/u_{i + 1}",
                                 tf.boolean_mask(
                                     self.map.u_latents.best[..., i], converged
                                 ),
@@ -886,7 +884,7 @@ class TFPosteriorModel(ks.Model):
                             )
                         for i in range(self.map.n_z_latents):
                             tf.summary.histogram(
-                                f"z_{i + 1}",
+                                f"zs/z_{i + 1}",
                                 tf.boolean_mask(
                                     self.map.z_latents.best[..., i], converged
                                 ),
@@ -900,32 +898,36 @@ class TFPosteriorModel(ks.Model):
                         keep = tf.math.logical_and(converged, valid)
 
                         j = 0
-                        tf.summary.histogram(
-                            "unconstrained/delta_m",
-                            tf.boolean_mask(unconstrained[..., j : j + 1], keep),
-                            step=chain,
-                        )
-                        j += 1
-                        tf.summary.histogram(
-                            "unconstrained/delta_p",
-                            tf.boolean_mask(unconstrained[..., j : j + 1], keep),
-                            step=chain,
-                        )
-                        j += 1
-                        tf.summary.histogram(
-                            "unconstrained/u_delta_av",
-                            tf.boolean_mask(unconstrained[..., j : j + 1], keep),
-                            step=chain,
-                        )
-                        j += 1
-                        for i in range(self.map.n_u_latents):
+                        if not isinstance(self.map.delta_m_transform, tfb.Identity):
                             tf.summary.histogram(
-                                f"unconstrained/u_{i + 1}",
-                                tf.boolean_mask(
-                                    unconstrained[..., j + i : j + i + 1], keep
-                                ),
+                                "unconstrained/delta_m",
+                                tf.boolean_mask(unconstrained[..., j : j + 1], keep),
                                 step=chain,
                             )
+                            j += 1
+                        if not isinstance(self.map.delta_p_transform, tfb.Identity):
+                            tf.summary.histogram(
+                                "unconstrained/delta_p",
+                                tf.boolean_mask(unconstrained[..., j : j + 1], keep),
+                                step=chain,
+                            )
+                            j += 1
+                        if not isinstance(self.map.u_delta_av_transform, tfb.Identity):
+                            tf.summary.histogram(
+                                "unconstrained/u_delta_av",
+                                tf.boolean_mask(unconstrained[..., j : j + 1], keep),
+                                step=chain,
+                            )
+                            j += 1
+                        if not isinstance(self.map.u_latents_transform, tfb.Identity):
+                            for i in range(self.map.n_u_latents):
+                                tf.summary.histogram(
+                                    f"unconstrained/u_{i + 1}",
+                                    tf.boolean_mask(
+                                        unconstrained[..., j + i : j + i + 1], keep
+                                    ),
+                                    step=chain,
+                                )
                 chain += 1
         self.log.info(f"Minimum found at chains:\n{self.map.chain_min}")
         if summary_writer is not None:
@@ -1680,18 +1682,18 @@ class TFPosteriorModel(ks.Model):
                     tf.summary.scalar(
                         "accept_ratio", accept_ratio, step=self.run_progress.n
                     )
-                    tf.summary.scalar(
-                        "step_samples",
-                        self.sample_progress.n - self.step_samples,
-                        step=self.run_progress.n,
-                    )
+                    # tf.summary.scalar(
+                    #     "step_samples",
+                    #     self.sample_progress.n - self.step_samples,
+                    #     step=self.run_progress.n,
+                    # )
                     self.step_samples = self.sample_progress.n
-                    for i in range(step_size.shape[-1]):
-                        tf.summary.histogram(
-                            f"step_size/{i}",
-                            step_size[..., i],
-                            step=self.run_progress.n,
-                        )
+                    # for i in range(step_size.shape[-1]):
+                    #     tf.summary.histogram(
+                    #         f"step_size/{i}",
+                    #         step_size[..., i],
+                    #         step=self.run_progress.n,
+                    #     )
 
         _update(
             min_log_prior,
@@ -1707,6 +1709,26 @@ class TFPosteriorModel(ks.Model):
             step_size,
         )
 
+    def _step(
+        self,
+        position: tf.Tensor,
+    ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+        input_position = self.map.get_position(position)
+        log_prob, log_like, log_prior, _, _ = self(
+            input_position,
+            training=False,
+            input_phase=self.data_time,
+            input_amp=self.data_amplitude,
+            input_sigma=self.data_sigma,
+            mask=self.data_mask,
+            sn_mask=self.sn_mask,
+            spec_mask=self.spec_mask,
+            wl_mask=self.wl_mask,
+            additional_outputs=True,
+        )
+
+        return log_prob, log_like, log_prior
+
     def unnormalized_posterior_log_prob(
         self,
         *pos: tf.Tensor,
@@ -1717,34 +1739,9 @@ class TFPosteriorModel(ks.Model):
         if sample is None:
             sample = pkr is None
 
-        def _step(
-            position: tf.Tensor,
-        ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-            input_position = self.map.get_position(position)
-            log_prob, log_like, log_prior, _, _ = self(
-                input_position,
-                training=False,
-                input_phase=self.data_time,
-                input_amp=self.data_amplitude,
-                input_sigma=self.data_sigma,
-                mask=self.data_mask,
-                sn_mask=self.sn_mask,
-                spec_mask=self.spec_mask,
-                wl_mask=self.wl_mask,
-                additional_outputs=True,
-            )
-
-            return log_prob, log_like, log_prior
-
-        log_prob, log_like, log_prior = tf.map_fn(
-            _step,
+        log_prob, log_like, log_prior = tf.vectorized_map(
+            self._step,
             tf.convert_to_tensor(pos),
-            parallel_iterations=NPROC,
-            fn_output_signature=(
-                tf.float32,
-                tf.float32,
-                tf.float32,
-            ),
         )
 
         log_prob = tf.reduce_sum(log_prob, axis=0)
@@ -1907,6 +1904,19 @@ class TFPosteriorModel(ks.Model):
         initial_position = self.map.unconstrain(initial_position)
         initial_position = tf.repeat(initial_position, repeats=self.n_walkers, axis=0)
 
+        offsets = (
+            tf.random.normal((
+                initial_position.shape[0] - 1,
+                *initial_position.shape[1:],
+            ))
+            * (1 - self.target_acceptance_rate)
+            * step_size[0:1, ...]
+        )
+        zero_offset = tf.zeros((1, *initial_position.shape[1:]))
+        offsets = tf.concat((zero_offset, offsets), axis=0)
+
+        initial_position += offsets
+
         self.log.debug(
             f"With {self.n_burnin_steps} burn-in steps and {self.n_run_steps} run steps ({self.n_adaption_steps} of which will be used for step-size adaption), a maximum of {self.max_samples} samples will be generated for a max leapfrog depth of {(2**self.n_leapfrog) - 1}"
         )
@@ -2065,3 +2075,4 @@ class TFPosteriorModel(ks.Model):
 
         if savepath is not None:
             self.save_checkpoint(hmc_savepath, save_hmc=True)
+        clear_session()

@@ -402,13 +402,23 @@ class Posterior(ModelStep[PosteriorConfig]):
             self.step_sizes[subset] = np.concatenate(step_sizes, axis=-1)
 
             stage = pae.model.stage
-            time = stage.data.time
-            amplitude = stage.data.amplitude
-            sigma = stage.data.sigma
-            mask = stage.mask
-            sn_mask = stage.sn_mask
-            spec_mask = stage.spec_mask
-            wl_mask = stage.wl_mask
+
+            subset_data = getattr(stage, f"{subset}_data")
+            time = subset_data.time
+            amplitude = subset_data.amplitude
+            sigma = subset_data.sigma
+            mask = getattr(stage, f"{subset}_mask")
+            sn_mask = getattr(stage, f"{subset}_sn_mask")
+            spec_mask = getattr(stage, f"{subset}_spec_mask")
+            wl_mask = getattr(stage, f"{subset}_wl_mask")
+
+            # time = stage.data.time
+            # amplitude = stage.data.amplitude
+            # sigma = stage.data.sigma
+            # mask = stage.mask
+            # sn_mask = stage.sn_mask
+            # spec_mask = stage.spec_mask
+            # wl_mask = stage.wl_mask
 
             recon_error, _, recon_error_centers = pae.model.recon_error((
                 time,
@@ -488,6 +498,20 @@ class Posterior(ModelStep[PosteriorConfig]):
         })
         i += 1
 
+        self.map_stage_delta_av = PosteriorMAPStage.model_validate({
+            "stage": i,
+            "name": "delta_av",
+            "fname": "delta_av",
+            "n_chains": self.n_delta_av_chains,
+            "init_u_delta_av": "data",
+            "init_latents": "z_constant",
+            "init_delta_av": "scale",
+            "init_delta_m": "constant",
+            "init_delta_p": "constant",
+            "init_bias": "current",
+        })
+        i += 1
+
         self.map_stage_delta_m = PosteriorMAPStage.model_validate({
             "stage": i,
             "name": "delta_m",
@@ -502,26 +526,13 @@ class Posterior(ModelStep[PosteriorConfig]):
         })
         i += 1
 
-        self.map_stage_delta_av = PosteriorMAPStage.model_validate({
-            "stage": i,
-            "name": "delta_av",
-            "fname": "delta_av",
-            "n_chains": self.n_delta_av_chains,
-            "init_u_delta_av": "data",
-            "init_latents": "z_constant",
-            "init_delta_av": "scale",
-            "init_delta_m": "constant",
-            "init_delta_p": "constant",
-            "init_bias": "current",
-        })
-
         self.map_stages = (
             [self.map_stage_setup, self.map_stage_init, self.map_stage_constant]
             + ([self.map_stage_legacy] if self.map_stage_legacy is not None else [])
             + [
                 self.map_stage_random,
-                self.map_stage_delta_m,
                 self.map_stage_delta_av,
+                self.map_stage_delta_m,
             ]
         )
 
@@ -551,11 +562,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # Don't retrain stages if you don't need to
                 if self.force or not (ckpt_path.exists() and any(ckpt_path.iterdir())):
                     self.model.train_model(self.map_stages, savepath=savepath)
-                else:
-                    self.log.debug(
-                        f"Loading Posterior {subset}_{seed} weights from {ckpt_path}"
-                    )
-                    self.model.load_checkpoint(savepath, load_map=True, load_hmc=True)
+                self.log.debug(
+                    f"Loading Posterior {subset}_{seed} weights from {ckpt_path}"
+                )
+                self.model.load_checkpoint(savepath, load_map=True, load_hmc=True)
                 models[subset][str(seed)] = self.model
         self.models = models
 
@@ -1834,7 +1844,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                             max_central(delta_p[:, sn], weight=log_prob[:, sn])[1]
                             for sn in range(delta_p.shape[-1])
                         ])
-                    names = data.sn_name
+                    names = data.sn_name[..., :1, :]
 
                     if plot_type == "Best":
                         mean_log_prob[~valid_log_prob] = -np.inf
