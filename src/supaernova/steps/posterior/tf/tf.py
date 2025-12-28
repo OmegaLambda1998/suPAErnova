@@ -581,7 +581,8 @@ class TFPosteriorModel(ks.Model):
                 self.hmc.samples, filter_beyond_positive_pairs=True, cross_chain_dims=-2
             )
             r_hat = tfp.mcmc.potential_scale_reduction(
-                self.hmc.samples, split_chains=True
+                self.hmc.samples,
+                split_chains=True,
             )
 
             self.log.info(f"Effective Sample Size: {ess} ({(ess / self.sn_dim)}")
@@ -1709,11 +1710,14 @@ class TFPosteriorModel(ks.Model):
             step_size,
         )
 
-    def _step(
+    def unnormalized_posterior_log_prob(
         self,
-        position: tf.Tensor,
+        *pos: tf.Tensor,
+        # pkr: "DualAveragingStepSizeAdaptationResults | None" = None,
+        additional_outputs: bool = False,
     ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        input_position = self.map.get_position(position)
+
+        input_position = self.map.get_position(tf.convert_to_tensor(pos)[0, ...])
         log_prob, log_like, log_prior, _, _ = self(
             input_position,
             training=False,
@@ -1727,31 +1731,19 @@ class TFPosteriorModel(ks.Model):
             additional_outputs=True,
         )
 
-        return log_prob, log_like, log_prior
+        # log_prob, log_like, log_prior = tf.vectorized_map(
+        #     self._step,
+        #     tf.convert_to_tensor(pos),
+        # )
+        #
+        # log_prob = tf.reduce_sum(log_prob, axis=0)
+        # log_like = tf.reduce_sum(log_like, axis=0)
+        # log_prior = tf.reduce_sum(log_prior, axis=0)
 
-    def unnormalized_posterior_log_prob(
-        self,
-        *pos: tf.Tensor,
-        sample: bool | None = None,
-        pkr: "DualAveragingStepSizeAdaptationResults | None" = None,
-        additional_outputs: bool = False,
-    ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        if sample is None:
-            sample = pkr is None
-
-        log_prob, log_like, log_prior = tf.vectorized_map(
-            self._step,
-            tf.convert_to_tensor(pos),
-        )
-
-        log_prob = tf.reduce_sum(log_prob, axis=0)
-        log_like = tf.reduce_sum(log_like, axis=0)
-        log_prior = tf.reduce_sum(log_prior, axis=0)
-
-        if sample:
+        if self.summary_writer is not None:
             self.update_sample_progress(log_prior, log_like, log_prob)
-        if pkr is not None:
-            self.update_run_progress(log_prior, log_like, log_prob, pkr)
+        # if pkr is not None:
+        #     self.update_run_progress(log_prior, log_like, log_prob, pkr)
 
         if additional_outputs:
             return log_prior, log_like, log_prob
@@ -1759,14 +1751,18 @@ class TFPosteriorModel(ks.Model):
 
     def trace_fn(
         self, state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
-    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        log_prior, log_like, log_prob = self.unnormalized_posterior_log_prob(
-            state, pkr=pkr, additional_outputs=True
-        )
+    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:  # , tf.Tensor, tf.Tensor, tf.Tensor]:
+        # log_prior, log_like, log_prob = self.unnormalized_posterior_log_prob(
+        #     state, pkr=pkr, additional_outputs=True
+        # )
         step_size = pkr.inner_results.step_size
         is_accepted = pkr.inner_results.is_accepted
         log_accept_ratio = pkr.inner_results.log_accept_ratio
-        return step_size, is_accepted, log_accept_ratio, log_prior, log_like, log_prob
+        return (
+            step_size,
+            is_accepted,
+            log_accept_ratio,
+        )  # , log_prior, log_like, log_prob
 
     @tf.function(jit_compile=False)
     def sample_chain(
@@ -1774,7 +1770,10 @@ class TFPosteriorModel(ks.Model):
         position: tf.Tensor,
         kernel: tfp.mcmc.TransitionKernel,
     ) -> tuple[
-        tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,  # tf.Tensor, tf.Tensor, tf.Tensor
     ]:
         (
             samples,
@@ -1782,9 +1781,9 @@ class TFPosteriorModel(ks.Model):
                 step_sizes_final,
                 is_accepted,
                 log_accept_ratio,
-                log_prior,
-                log_like,
-                log_prob,
+                # log_prior,
+                # log_like,
+                # log_prob,
             ),
         ) = tfp.mcmc.sample_chain(
             num_results=self.n_run_steps,
@@ -1804,9 +1803,9 @@ class TFPosteriorModel(ks.Model):
             step_sizes_final,
             is_accepted,
             log_accept_ratio,
-            log_prior,
-            log_like,
-            log_prob,
+            # log_prior,
+            # log_like,
+            # log_prob,
         )
 
     def train_hmc(
@@ -1904,21 +1903,16 @@ class TFPosteriorModel(ks.Model):
         initial_position = self.map.unconstrain(initial_position)
         initial_position = tf.repeat(initial_position, repeats=self.n_walkers, axis=0)
 
-        offsets = (
-            tf.random.normal((
-                initial_position.shape[0] - 1,
-                *initial_position.shape[1:],
-            ))
-            * (1 - self.target_acceptance_rate)
-            * step_size[0:1, ...]
-        )
-        zero_offset = tf.zeros((1, *initial_position.shape[1:]))
-        offsets = tf.concat((zero_offset, offsets), axis=0)
+        offsets = tf.random.normal(initial_position.shape) * step_size[0:1, ...]
+        offsets *= (
+            tf.sqrt(tf.range(initial_position.shape[0], dtype=offsets.dtype))
+            / initial_position.shape[0]
+        )[:, None, None]
 
         initial_position += offsets
 
         self.log.debug(
-            f"With {self.n_burnin_steps} burn-in steps and {self.n_run_steps} run steps ({self.n_adaption_steps} of which will be used for step-size adaption), a maximum of {self.max_samples} samples will be generated for a max leapfrog depth of {(2**self.n_leapfrog) - 1}"
+            f"With {self.n_burnin_steps} burn-in steps ({self.n_adaption_steps} of which will be used for step-size adaption) and {self.n_run_steps} run steps, a maximum of {self.max_samples} samples will be generated for a max leapfrog depth of {(2**self.n_leapfrog) - 1}"
         )
 
         self.summary_writer = None
@@ -1935,13 +1929,13 @@ class TFPosteriorModel(ks.Model):
             position=0,
         )
         self.sample_progress.set_description("samples")
-        self.run_progress = tqdm(
-            total=self.n_run_steps + 1,
-            leave=False,
-            dynamic_ncols=True,
-            position=1,
-        )
-        self.run_progress.set_description("run")
+        # self.run_progress = tqdm(
+        #     total=self.n_run_steps + 1,
+        #     leave=False,
+        #     dynamic_ncols=True,
+        #     position=1,
+        # )
+        # self.run_progress.set_description("run")
         self.step_samples = 0
 
         sampler = tfp.mcmc.NoUTurnSampler(
@@ -1963,13 +1957,13 @@ class TFPosteriorModel(ks.Model):
             step_sizes_final,
             is_accepted,
             log_accept_ratio,
-            log_prior,
-            log_like,
-            log_prob,
+            # log_prior,
+            # log_like,
+            # log_prob,
         ) = self.sample_chain(initial_position, kernel)
 
-        self.run_progress.close()
-        self.run_progress = None
+        # self.run_progress.close()
+        # self.run_progress = None
         self.step_samples = None
         self.sample_progress.close()
         self.sample_progress = None
@@ -1977,52 +1971,50 @@ class TFPosteriorModel(ks.Model):
             self.summary_writer.close()
         self.summary_writer = None
 
-        (
-            samples,
-            step_sizes_final,
-            is_accepted,
-            log_accept_ratio,
-            log_prior,
-            log_like,
-            log_prob,
-        ) = (
-            samples.numpy(),
-            step_sizes_final.numpy(),
-            is_accepted.numpy(),
-            log_accept_ratio.numpy(),
-            log_prior.numpy(),
-            log_like.numpy(),
-            log_prob.numpy(),
+        clear_session()
+
+        @tf.function
+        def _fn(state):
+            return self.unnormalized_posterior_log_prob(state, additional_outputs=True)
+
+        log_prior, log_like, log_prob = tf.map_fn(
+            _fn,
+            tf.convert_to_tensor(samples),
+            swap_memory=True,
+            fn_output_signature=(tf.float32, tf.float32, tf.float32),
         )
 
-        samples = samples.reshape((
+        samples = samples.numpy().reshape((
             samples.shape[0] * samples.shape[1],
             *samples.shape[2:],
         ))
-        step_sizes_final = step_sizes_final.reshape((
+        step_sizes_final = step_sizes_final.numpy().reshape((
             step_sizes_final.shape[0] * step_sizes_final.shape[1],
             *step_sizes_final.shape[2:],
         ))
-        is_accepted = is_accepted.reshape((
+        is_accepted = is_accepted.numpy().reshape((
             is_accepted.shape[0] * is_accepted.shape[1],
             *is_accepted.shape[2:],
         ))
-        log_accept_ratio = log_accept_ratio.reshape((
+        log_accept_ratio = log_accept_ratio.numpy().reshape((
             log_accept_ratio.shape[0] * log_accept_ratio.shape[1],
             *log_accept_ratio.shape[2:],
         ))
-        log_prior = log_prior.reshape((
+        log_prior = log_prior.numpy().reshape((
             log_prior.shape[0] * log_prior.shape[1],
             *log_prior.shape[2:],
         ))
-        log_like = log_like.reshape((
+        log_like = log_like.numpy().reshape((
             log_like.shape[0] * log_like.shape[1],
             *log_like.shape[2:],
         ))
-        log_prob = log_prob.reshape((
+        log_prob = log_prob.numpy().reshape((
             log_prob.shape[0] * log_prob.shape[1],
             *log_prob.shape[2:],
         ))
+        # log_prior = log_prior.numpy()
+        # log_like = log_like.numpy()
+        # log_prob = log_prob.numpy()
 
         # ind = 0
         # if self.map.train_delta_m:
