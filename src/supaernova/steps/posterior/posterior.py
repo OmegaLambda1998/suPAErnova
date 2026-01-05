@@ -648,12 +648,16 @@ class Posterior(ModelStep[PosteriorConfig]):
                     "best_z_latents": model.map.z_latents.best.numpy(),
                 }
 
-                samples = model.hmc.samples.numpy()
+                samples = model.hmc.samples
+                samples = samples.numpy().reshape((
+                    samples.shape[0] * samples.shape[1],
+                    *samples.shape[2:],
+                ))
 
                 hmc_results = {
                     "samples": samples,
-                    "step_sizes_final": model.hmc.step_sizes_final.numpy(),
-                    "is_accepted": model.hmc.is_accepted.numpy(),
+                    # "step_sizes_final": model.hmc.step_sizes_final.numpy(),
+                    # "is_accepted": model.hmc.is_accepted.numpy(),
                     # "u_delta_av": model.hmc.u_delta_av.numpy(),
                     # "u_latents": model.hmc.u_latents.numpy(),
                     # "delta_av": model.hmc.delta_av.numpy(),
@@ -854,6 +858,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         self,
         subset: str,
         seed: int,
+        results: "PosteriorStepResult",
         model: "TFPosteriorModel",
         data: "LazySNPAEData",
         input_mask: "npt.NDArray[bool]",
@@ -1160,8 +1165,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # --- PAE ---
                 # --- NFlow ---
                 # --- Posterior ---
-                samples = model.hmc.samples.numpy()
-                log_prob = model.hmc.log_prob.numpy()
+                samples = results.hmc.samples
+                log_prob = results.hmc.log_prob
                 if o.reduce == "mean":
                     reduce_samples = samples.mean(axis=0, keepdims=True)
                 else:
@@ -1281,6 +1286,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         self,
         subset: str,
         seed: int,
+        results: "PosteriorStepResult",
         model: "TFPosteriorModel",
         data: "LazySNPAEData",
         input_mask: "npt.NDArray[bool]",
@@ -1591,8 +1597,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # --- PAE ---
                 # --- NFlow ---
                 # --- Posterior ---
-                samples = model.hmc.samples.numpy()
-                log_prob = model.hmc.log_prob.numpy()
+                samples = results.hmc.samples
+                log_prob = results.hmc.log_prob
                 if o.reduce == "mean":
                     reduce_samples = samples.mean(axis=0)
                 else:
@@ -1709,6 +1715,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         subset: str,
         seed: int,
         model: "TFPosteriorModel",
+        results: "PosteriorStepResult",
         data: "LazySNPAEData",
         input_mask: "npt.NDArray[bool]",
         input_sn_mask: "npt.NDArray[bool]",
@@ -1817,16 +1824,16 @@ class Posterior(ModelStep[PosteriorConfig]):
                     if plot_type == "Blank":
                         continue
 
-                    log_prior = model.hmc.log_prior.numpy()
+                    log_prior = results.hmc.log_prior
                     mean_log_prior = np.mean(log_prior, axis=0)
-                    log_like = model.hmc.log_like.numpy()
+                    log_like = results.hmc.log_like
                     mean_log_like = np.mean(log_like, axis=0)
-                    log_prob = model.hmc.log_prob.numpy()
+                    log_prob = results.hmc.log_prob
                     mean_log_prob = np.mean(log_prob, axis=0)
                     valid_log_prob = input_sn_mask[:, 0, 0] & np.isfinite(mean_log_prob)
 
-                    delta_m = model.hmc.samples[..., 0]
-                    delta_p = model.hmc.samples[..., 1]
+                    delta_m = results.hmc.samples[..., 0]
+                    delta_p = results.hmc.samples[..., 1]
 
                     # delta_m = model.hmc.delta_m.numpy()[..., 0]
                     if o.reduce == "mean":
@@ -1902,6 +1909,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     fig, ax = self._plot_comparison(
                         subset,
                         seed,
+                        results,
                         model,
                         data,
                         input_mask,
@@ -2258,6 +2266,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 self._plot_comparison(
                     subset,
                     seed,
+                    results,
                     model,
                     data,
                     input_mask,
@@ -2269,6 +2278,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 self._plot_comparison_spectra(
                     subset,
                     seed,
+                    results,
                     model,
                     data,
                     input_mask,
@@ -2281,6 +2291,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     subset,
                     seed,
                     model,
+                    results,
                     data,
                     input_mask,
                     input_sn_mask,
@@ -2460,9 +2471,9 @@ class Posterior(ModelStep[PosteriorConfig]):
 class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
     id: "ClassVar[str]" = "posterior"
     model_backend: "ClassVar[dict[str, Callable[[], type[PosteriorModel]]]]" = {
-        "TensorFlow": lambda: importlib.import_module(
-            ".tf", __package__
-        ).TFPosteriorModel,
+        "TensorFlow": lambda: (
+            importlib.import_module(".tf", __package__).TFPosteriorModel
+        ),
     }
 
     @override

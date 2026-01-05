@@ -116,8 +116,8 @@ class PosteriorStepHMCResult(StepResult):
     # === Field Variables ===
     # --- Required ---
     samples: npt.NDArray[float]
-    step_sizes_final: npt.NDArray[float]
-    is_accepted: npt.NDArray[float]
+    # step_sizes_final: npt.NDArray[float]
+    # is_accepted: npt.NDArray[float]
     # u_delta_av: npt.NDArray[float]
     # u_latents: npt.NDArray[float]
     # delta_av: npt.NDArray[float]
@@ -357,9 +357,9 @@ class PosteriorStepConfig(ModelConfig):
         NFlowStepConfig.id,
     ]
     model_backend: ClassVar[dict[str, Callable[[], type[PosteriorConfig]]]] = {
-        "TensorFlow": lambda: importlib.import_module(
-            ".tf", __package__
-        ).TFPosteriorConfig
+        "TensorFlow": lambda: (
+            importlib.import_module(".tf", __package__).TFPosteriorConfig
+        )
     }
     # === Class Methods ===
     # === Field Variables ===

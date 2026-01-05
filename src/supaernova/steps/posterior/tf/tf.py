@@ -141,12 +141,18 @@ class TFPosteriorModel(ks.Model):
         self.n_adaption_steps: int = self.options.n_adaption_steps
         if isinstance(self.n_adaption_steps, float):
             self.n_adaption_steps = int(
-                (self.n_burnin_steps + self.n_run_steps) * self.n_adaption_steps
+                (
+                    self.n_burnin_steps
+                    + (self.n_run_steps if self.n_burnin_steps == 0 else 0)
+                )
+                * self.n_adaption_steps
             )
 
         self.max_samples: int = int(
             max_leapfrog * (self.n_burnin_steps + self.n_run_steps)
         )
+
+        self.max_tree_depth = (2**self.n_leapfrog) - 1
 
         self.max_steps: int = self.n_run_steps * self.n_walkers
 
@@ -428,37 +434,53 @@ class TFPosteriorModel(ks.Model):
         self.setup_map()
         if not hasattr(self, "hmc"):
             vars(self)["hmc"] = PosteriorHMCValue(
+                # tf.Variable(  # Samples
+                #     tf.convert_to_tensor(
+                #         [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
+                #         dtype=tf.float32,
+                #     ),
+                #     shape=(
+                #         self.max_steps,
+                #         self.sn_dim,
+                #         self.map.n_pae_latents,
+                #     ),
+                # ),
                 tf.Variable(  # Samples
                     tf.convert_to_tensor(
-                        [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
+                        [
+                            [[[0] * self.map.n_pae_latents] * self.sn_dim]
+                            * self.n_walkers
+                        ]
+                        * self.n_run_steps,
                         dtype=tf.float32,
                     ),
                     shape=(
-                        self.max_steps,
+                        self.n_run_steps,
+                        self.n_walkers,
                         self.sn_dim,
                         self.map.n_pae_latents,
                     ),
                 ),
-                tf.Variable(  # Step Sizes Final
-                    tf.convert_to_tensor(
-                        [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
-                        dtype=tf.float32,
-                    ),
-                    shape=(
-                        self.max_steps,
-                        self.sn_dim,
-                        self.map.n_pae_latents,
-                    ),
-                ),
-                tf.Variable(  # Is Accepted
-                    tf.convert_to_tensor(
-                        [[False] * self.sn_dim] * self.max_steps, dtype=tf.bool
-                    ),
-                    shape=(
-                        self.max_steps,
-                        self.sn_dim,
-                    ),
-                ),
+                # tf.Variable(  # Step Sizes Final
+                #     tf.convert_to_tensor(
+                #         [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
+                #         dtype=tf.float32,
+                #     ),
+                #     shape=(
+                #         self.max_steps,
+                #         self.sn_dim,
+                #         self.map.n_pae_latents,
+                #     ),
+                # ),
+                # tf.Variable(  # Is Accepted
+                #     tf.convert_to_tensor(
+                #         [[False] * self.sn_dim] * self.max_steps, dtype=tf.bool
+                #     ),
+                #     shape=(
+                #         self.max_steps,
+                #         self.sn_dim,
+                #     ),
+                # ),
                 tf.Variable(  # Log Prior
                     tf.convert_to_tensor(
                         [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
@@ -577,16 +599,40 @@ class TFPosteriorModel(ks.Model):
         ).expect_partial()
 
         if load_hmc:
-            ess = tfp.mcmc.effective_sample_size(
-                self.hmc.samples, filter_beyond_positive_pairs=True, cross_chain_dims=-2
-            )
-            r_hat = tfp.mcmc.potential_scale_reduction(
-                self.hmc.samples,
-                split_chains=True,
-            )
+            # ess = tfp.mcmc.effective_sample_size(
+            #     self.hmc.samples, filter_beyond_positive_pairs=True, cross_chain_dims=-2
+            # )
+            # r_hat = tfp.mcmc.potential_scale_reduction(
+            #     self.hmc.samples,
+            #     split_chains=True,
+            # )
 
-            self.log.info(f"Effective Sample Size: {ess} ({(ess / self.sn_dim)}")
-            self.log.info(f"R-Hat: {r_hat}")
+            samples = tf.boolean_mask(self.hmc.samples, self.sn_mask[:, 0, 0], axis=-2)
+
+            ess = tfp.mcmc.effective_sample_size(
+                samples,
+                filter_beyond_positive_pairs=True,
+                cross_chain_dims=1 if self.n_walkers > 1 else None,
+            )
+            if self.n_walkers == 1:
+                ess = ess[0, ...]
+            min_ess = tf.reduce_min(ess, axis=0)
+            median_ess = tfp.stats.percentile(ess, 50.0, axis=0)
+            max_ess = tf.reduce_max(ess, axis=0)
+
+            r_hat = tfp.mcmc.potential_scale_reduction(
+                samples, split_chains=True, independent_chain_ndims=1
+            )
+            max_r_hat = tf.reduce_max(r_hat, axis=0)
+            median_r_hat = tfp.stats.percentile(r_hat, 50.0, axis=0)
+            min_r_hat = tf.reduce_min(r_hat, axis=0)
+
+            self.log.info(f"Worst Effective Sample Size: {min_ess}")
+            self.log.info(f"Worst R-Hat: {max_r_hat}")
+            self.log.info(f"Median Effective Sample Size: {median_ess}")
+            self.log.info(f"Median R-Hat: {median_r_hat}")
+            self.log.info(f"Best Effective Sample Size: {max_ess}")
+            self.log.info(f"Best R-Hat: {min_r_hat}")
         clear_session()
 
     @override
@@ -1433,6 +1479,12 @@ class TFPosteriorModel(ks.Model):
             mean_log_prob: tf.Tensor,
             max_log_prob: tf.Tensor,
         ) -> None:
+            prefix = "adaption"
+            if self.sample_progress.n > self.max_tree_depth * self.n_adaption_steps:
+                prefix = "burn-in"
+            if self.sample_progress.n > self.max_tree_depth * self.n_burnin_steps:
+                prefix = "run"
+            self.sample_progress.set_description(prefix)
             self.sample_progress.set_postfix({
                 "log_prob": (
                     f"{min_log_prob:.3E}",
@@ -1445,47 +1497,47 @@ class TFPosteriorModel(ks.Model):
             if self.summary_writer is not None:
                 with self.summary_writer.as_default():
                     tf.summary.scalar(
-                        "sample/min_log_prior",
+                        f"samples/{prefix}/min_log_prior",
                         min_log_prior,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        "sample/mean_log_prior",
+                        f"samples/{prefix}/mean_log_prior",
                         mean_log_prior,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        "sample/max_log_prior",
+                        f"samples/{prefix}/max_log_prior",
                         max_log_prior,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        "sample/min_log_like",
+                        f"samples/{prefix}/min_log_like",
                         min_log_like,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        "sample/mean_log_like",
+                        f"samples/{prefix}/mean_log_like",
                         mean_log_like,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        "sample/max_log_like",
+                        f"samples/{prefix}/max_log_like",
                         max_log_like,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        "sample/min_log_prob",
+                        f"samples/{prefix}/min_log_prob",
                         min_log_prob,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        "sample/mean_log_prob",
+                        f"samples/{prefix}/mean_log_prob",
                         mean_log_prob,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        "sample/max_log_prob",
+                        f"samples/{prefix}/max_log_prob",
                         max_log_prob,
                         step=self.sample_progress.n,
                     )
@@ -1751,18 +1803,21 @@ class TFPosteriorModel(ks.Model):
 
     def trace_fn(
         self, state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
-    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:  # , tf.Tensor, tf.Tensor, tf.Tensor]:
+    ) -> (
+        "DualAveragingStepSizeAdaptationResults"
+    ):  # tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        return pkr
         # log_prior, log_like, log_prob = self.unnormalized_posterior_log_prob(
         #     state, pkr=pkr, additional_outputs=True
         # )
-        step_size = pkr.inner_results.step_size
-        is_accepted = pkr.inner_results.is_accepted
-        log_accept_ratio = pkr.inner_results.log_accept_ratio
-        return (
-            step_size,
-            is_accepted,
-            log_accept_ratio,
-        )  # , log_prior, log_like, log_prob
+        # step_size = pkr.inner_results.step_size
+        # is_accepted = pkr.inner_results.is_accepted
+        # log_accept_ratio = pkr.inner_results.log_accept_ratio
+        # return (
+        #     step_size,
+        #     is_accepted,
+        #     log_accept_ratio,
+        # )  # , log_prior, log_like, log_prob
 
     @tf.function(jit_compile=False)
     def sample_chain(
@@ -1771,20 +1826,24 @@ class TFPosteriorModel(ks.Model):
         kernel: tfp.mcmc.TransitionKernel,
     ) -> tuple[
         tf.Tensor,
-        tf.Tensor,
-        tf.Tensor,
-        tf.Tensor,  # tf.Tensor, tf.Tensor, tf.Tensor
+        # tf.Tensor,
+        # tf.Tensor,
+        # tf.Tensor,
+        # tf.Tensor,
+        # tf.Tensor,
+        # tf.Tensor
     ]:
         (
             samples,
-            (
-                step_sizes_final,
-                is_accepted,
-                log_accept_ratio,
-                # log_prior,
-                # log_like,
-                # log_prob,
-            ),
+            _pkr,
+            # (
+            #     step_sizes_final,
+            #     is_accepted,
+            #     log_accept_ratio,
+            #     log_prior,
+            #     log_like,
+            #     log_prob,
+            # ),
         ) = tfp.mcmc.sample_chain(
             num_results=self.n_run_steps,
             current_state=position,
@@ -1800,9 +1859,9 @@ class TFPosteriorModel(ks.Model):
 
         return (
             samples,
-            step_sizes_final,
-            is_accepted,
-            log_accept_ratio,
+            # step_sizes_final,
+            # is_accepted,
+            # log_accept_ratio,
             # log_prior,
             # log_like,
             # log_prob,
@@ -1860,8 +1919,8 @@ class TFPosteriorModel(ks.Model):
 
                 vars(self)["hmc"] = PosteriorHMCValue(
                     tf.Variable(samples),
-                    tf.Variable(self.hmc.step_sizes_final),
-                    tf.Variable(self.hmc.is_accepted),
+                    # tf.Variable(self.hmc.step_sizes_final),
+                    # tf.Variable(self.hmc.is_accepted),
                     tf.Variable(self.hmc.log_prior),
                     tf.Variable(self.hmc.log_like),
                     tf.Variable(self.hmc.log_prob),
@@ -1891,28 +1950,53 @@ class TFPosteriorModel(ks.Model):
         step_size_inner = self.map.unconstrain(step_size_inner)
         self.log.debug(f"Step Size: {step_size_inner}")
 
+        # step_size_inner currently has shape (n_params)
+        # We have n_walkers * n_sn chains
+        # We want each sn to have their own step size, across their walkers
+        # So we need step_size to have shape (n_sn, n_params)
+
+        # shape = (1, n_params)
+        step_size = tf.expand_dims(step_size_inner, axis=0)
+
+        # shape = (n_sn, n_params)
         step_size = tf.repeat(
-            tf.expand_dims(step_size_inner, axis=0),
-            repeats=initial_position.shape[1],
+            step_size,
+            repeats=initial_position.shape[-2],
             axis=0,
         )
-        step_size = tf.repeat(
-            tf.expand_dims(step_size, axis=0), repeats=self.n_walkers, axis=0
-        )
+
+        # shape = (1, n_sn, n_params)
+        # step_size = tf.expand_dims(step_size, axis=0)
+
+        # shape = (n_walkers, n_sn, n_params)
+        # step_size = tf.repeat(step_size, repeats=self.n_walkers, axis=0)
 
         initial_position = self.map.unconstrain(initial_position)
         initial_position = tf.repeat(initial_position, repeats=self.n_walkers, axis=0)
 
-        offsets = tf.random.normal(initial_position.shape) * step_size[0:1, ...]
-        offsets *= (
-            tf.sqrt(tf.range(initial_position.shape[0], dtype=offsets.dtype))
-            / initial_position.shape[0]
+        # Draw from a 0-1 Gaussian then scale by step size squared to mimic drawing from a 0-step_size Gaussian
+        offsets = (
+            tf.random.normal(initial_position.shape)
+            * step_size[:1, ...]
+            * step_size[:1, ...]
+        )
+        # The first walker has no offset so it starts at the best position
+        offsets_mask = tf.cast(
+            tf.math.logical_not(
+                tf.sequence_mask(1, initial_position.shape[0], dtype=tf.bool)
+            ),
+            offsets.dtype,
         )[:, None, None]
+        offsets *= offsets_mask
+        # offsets *= (
+        #     tf.range(initial_position.shape[0], dtype=offsets.dtype)
+        #     / initial_position.shape[0]
+        # )[:, None, None]
 
-        initial_position += offsets
+        # initial_position += offsets
 
         self.log.debug(
-            f"With {self.n_burnin_steps} burn-in steps ({self.n_adaption_steps} of which will be used for step-size adaption) and {self.n_run_steps} run steps, a maximum of {self.max_samples} samples will be generated for a max leapfrog depth of {(2**self.n_leapfrog) - 1}"
+            f"With {self.n_burnin_steps} [{self.max_tree_depth * self.n_burnin_steps}] burn-in steps [samples] ({self.n_adaption_steps} [{self.max_tree_depth * self.n_adaption_steps}] of which will be used for step-size adaption) and {self.n_run_steps} [{self.max_tree_depth * self.n_run_steps}] run steps [samples], a maximum of {(self.n_burnin_steps + self.n_run_steps)} [{self.max_samples}] steps [samples] will be drawn per-walker for a max leapfrog depth of {self.max_tree_depth}. Across all {self.n_walkers} walkers a maximum of {self.n_walkers * (self.n_burnin_steps + self.n_run_steps)} [{self.n_walkers * self.max_samples}] steps [samples] will be drawn."
         )
 
         self.summary_writer = None
@@ -1928,7 +2012,6 @@ class TFPosteriorModel(ks.Model):
             dynamic_ncols=True,
             position=0,
         )
-        self.sample_progress.set_description("samples")
         # self.run_progress = tqdm(
         #     total=self.n_run_steps + 1,
         #     leave=False,
@@ -1954,9 +2037,9 @@ class TFPosteriorModel(ks.Model):
 
         (
             samples,
-            step_sizes_final,
-            is_accepted,
-            log_accept_ratio,
+            # step_sizes_final,
+            # is_accepted,
+            # log_accept_ratio,
             # log_prior,
             # log_like,
             # log_prob,
@@ -1984,22 +2067,22 @@ class TFPosteriorModel(ks.Model):
             fn_output_signature=(tf.float32, tf.float32, tf.float32),
         )
 
-        samples = samples.numpy().reshape((
-            samples.shape[0] * samples.shape[1],
-            *samples.shape[2:],
-        ))
-        step_sizes_final = step_sizes_final.numpy().reshape((
-            step_sizes_final.shape[0] * step_sizes_final.shape[1],
-            *step_sizes_final.shape[2:],
-        ))
-        is_accepted = is_accepted.numpy().reshape((
-            is_accepted.shape[0] * is_accepted.shape[1],
-            *is_accepted.shape[2:],
-        ))
-        log_accept_ratio = log_accept_ratio.numpy().reshape((
-            log_accept_ratio.shape[0] * log_accept_ratio.shape[1],
-            *log_accept_ratio.shape[2:],
-        ))
+        # samples = samples.numpy().reshape((
+        #     samples.shape[0] * samples.shape[1],
+        #     *samples.shape[2:],
+        # ))
+        # step_sizes_final = step_sizes_final.numpy().reshape((
+        #     step_sizes_final.shape[0] * step_sizes_final.shape[1],
+        #     *step_sizes_final.shape[2:],
+        # ))
+        # is_accepted = is_accepted.numpy().reshape((
+        #     is_accepted.shape[0] * is_accepted.shape[1],
+        #     *is_accepted.shape[2:],
+        # ))
+        # log_accept_ratio = log_accept_ratio.numpy().reshape((
+        #     log_accept_ratio.shape[0] * log_accept_ratio.shape[1],
+        #     *log_accept_ratio.shape[2:],
+        # ))
         log_prior = log_prior.numpy().reshape((
             log_prior.shape[0] * log_prior.shape[1],
             *log_prior.shape[2:],
@@ -2052,8 +2135,8 @@ class TFPosteriorModel(ks.Model):
 
         vars(self)["hmc"] = PosteriorHMCValue(
             tf.Variable(samples),
-            tf.Variable(step_sizes_final),
-            tf.Variable(is_accepted),
+            # tf.Variable(step_sizes_final),
+            # tf.Variable(is_accepted),
             tf.Variable(log_prior),
             tf.Variable(log_like),
             tf.Variable(log_prob),
