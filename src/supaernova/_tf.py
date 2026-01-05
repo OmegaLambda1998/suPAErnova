@@ -8,6 +8,7 @@ os.environ["TF_DETERMINISTIC_OPS"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 
 # Number of CPUs available
 os.environ["TF_NUM_INTEROP_THREADS"] = "1"

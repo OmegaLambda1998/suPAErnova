@@ -11,6 +11,7 @@ class PosteriorHMCValue(tf.Module):
         log_prior: tf.Variable,
         log_like: tf.Variable,
         log_prob: tf.Variable,
+        zs: tf.Variable,
         # u_delta_av: tf.Variable,
         # u_latents: tf.Variable,
         # delta_av: tf.Variable,
@@ -24,6 +25,7 @@ class PosteriorHMCValue(tf.Module):
         self.log_prior: tf.Variable = log_prior
         self.log_like: tf.Variable = log_like
         self.log_prob: tf.Variable = log_prob
+        self.zs: tf.Variable = zs
 
         # self.u_delta_av: tf.Variable = u_delta_av
         # self.u_latents: tf.Variable = u_latents

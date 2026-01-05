@@ -654,16 +654,26 @@ class Posterior(ModelStep[PosteriorConfig]):
                     *samples.shape[2:],
                 ))
 
+                delta_m = samples[..., 0]
+                delta_p = samples[..., 1]
+                u_delta_av = samples[..., 2]
+                u_latents = samples[..., 3:]
+                us = samples[..., 2:]
+
+                zs = model.hmc.zs.numpy()
+                delta_av = zs[..., 0]
+                z_latents = zs[..., 1:]
+
                 hmc_results = {
                     "samples": samples,
                     # "step_sizes_final": model.hmc.step_sizes_final.numpy(),
                     # "is_accepted": model.hmc.is_accepted.numpy(),
-                    # "u_delta_av": model.hmc.u_delta_av.numpy(),
-                    # "u_latents": model.hmc.u_latents.numpy(),
-                    # "delta_av": model.hmc.delta_av.numpy(),
-                    # "z_latents": model.hmc.z_latents.numpy(),
-                    # "delta_m": model.hmc.delta_m.numpy(),
-                    # "delta_p": model.hmc.delta_p.numpy(),
+                    "delta_m": delta_m,
+                    "delta_p": delta_p,
+                    "u_delta_av": u_delta_av,
+                    "u_latents": u_latents,
+                    "delta_av": delta_av,
+                    "z_latents": z_latents,
                     "log_prior": model.hmc.log_prior.numpy(),
                     "log_like": model.hmc.log_like.numpy(),
                     "log_prob": model.hmc.log_prob.numpy(),

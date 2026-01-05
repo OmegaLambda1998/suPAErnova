@@ -152,7 +152,7 @@ class TFPosteriorModel(ks.Model):
             max_leapfrog * (self.n_burnin_steps + self.n_run_steps)
         )
 
-        self.max_tree_depth = (2**self.n_leapfrog) - 1
+        self.max_tree_depth: int = (2**self.n_leapfrog) - 1
 
         self.max_steps: int = self.n_run_steps * self.n_walkers
 
@@ -508,6 +508,14 @@ class TFPosteriorModel(ks.Model):
                         self.sn_dim,
                     ),
                 ),
+                tf.Variable(  # ZLatents
+                    tf.convert_to_tensor(
+                        [[[0] * self.map.n_flow_latents] * self.sn_dim]
+                        * self.max_steps,
+                        dtype=tf.float32,
+                    ),
+                    shape=(self.max_steps, self.sn_dim, self.map.n_flow_latents),
+                ),
                 # tf.Variable(  # UDeltaAv
                 #     tf.convert_to_tensor(
                 #         [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
@@ -628,10 +636,19 @@ class TFPosteriorModel(ks.Model):
             min_r_hat = tf.reduce_min(r_hat, axis=0)
 
             self.log.info(f"Worst Effective Sample Size: {min_ess}")
+            self.log.info(
+                f"Worst Relative Effective Sample Size: {min_ess / (self.max_tree_depth * self.n_run_steps)}"
+            )
             self.log.info(f"Worst R-Hat: {max_r_hat}")
             self.log.info(f"Median Effective Sample Size: {median_ess}")
+            self.log.info(
+                f"Median Relative Effective Sample Size: {median_ess / (self.max_tree_depth * self.n_run_steps)}"
+            )
             self.log.info(f"Median R-Hat: {median_r_hat}")
             self.log.info(f"Best Effective Sample Size: {max_ess}")
+            self.log.info(
+                f"Best Relative Effective Sample Size: {max_ess / (self.max_tree_depth * self.n_run_steps)}"
+            )
             self.log.info(f"Best R-Hat: {min_r_hat}")
         clear_session()
 
@@ -1924,6 +1941,7 @@ class TFPosteriorModel(ks.Model):
                     tf.Variable(self.hmc.log_prior),
                     tf.Variable(self.hmc.log_like),
                     tf.Variable(self.hmc.log_prob),
+                    tf.Variable(self.hmc.zs),
                     # tf.Variable(u_delta_av),
                     # tf.Variable(u_latents),
                     # tf.Variable(delta_av),
@@ -1946,7 +1964,7 @@ class TFPosteriorModel(ks.Model):
         step_size_init = tf.where(
             tf.math.is_finite(step_size_init), step_size_init, step_size_std
         )
-        step_size_inner = tf.math.minimum(step_size_init, step_size_std)
+        step_size_inner = tf.math.sqrt(step_size_init * step_size_std)
         step_size_inner = self.map.unconstrain(step_size_inner)
         self.log.debug(f"Step Size: {step_size_inner}")
 
@@ -2045,6 +2063,9 @@ class TFPosteriorModel(ks.Model):
             # log_prob,
         ) = self.sample_chain(initial_position, kernel)
 
+        del kernel
+        del sampler
+
         # self.run_progress.close()
         # self.run_progress = None
         self.step_samples = None
@@ -2056,6 +2077,10 @@ class TFPosteriorModel(ks.Model):
 
         clear_session()
 
+        # log_prior, log_like, log_prob = self.unnormalized_posterior_log_prob(
+        #     samples, additional_outputs=True, map_fn=True
+        # )
+
         @tf.function
         def _fn(state):
             return self.unnormalized_posterior_log_prob(state, additional_outputs=True)
@@ -2066,6 +2091,13 @@ class TFPosteriorModel(ks.Model):
             swap_memory=True,
             fn_output_signature=(tf.float32, tf.float32, tf.float32),
         )
+
+        @tf.function
+        def _fn(u):
+            return self.map.nflow.u_to_z(u, permute=True)
+
+        us = samples[..., -self.map.nflow.n_flow_latents :]
+        zs = tf.map_fn(_fn, us, swap_memory=True)
 
         # samples = samples.numpy().reshape((
         #     samples.shape[0] * samples.shape[1],
@@ -2094,6 +2126,10 @@ class TFPosteriorModel(ks.Model):
         log_prob = log_prob.numpy().reshape((
             log_prob.shape[0] * log_prob.shape[1],
             *log_prob.shape[2:],
+        ))
+        zs = zs.numpy().reshape((
+            zs.shape[0] * zs.shape[1],
+            *zs.shape[2:],
         ))
         # log_prior = log_prior.numpy()
         # log_like = log_like.numpy()
@@ -2140,6 +2176,7 @@ class TFPosteriorModel(ks.Model):
             tf.Variable(log_prior),
             tf.Variable(log_like),
             tf.Variable(log_prob),
+            tf.Variable(zs),
             # tf.Variable(u_delta_av),
             # tf.Variable(u_latents),
             # tf.Variable(delta_av),
