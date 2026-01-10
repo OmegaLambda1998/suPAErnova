@@ -89,13 +89,13 @@ class NFlowConfig(BackendConfig):
     save_best: bool = False
     repeats: PositiveInt = 1
 
-    epochs: PositiveInt = 100000
-    patience: PositiveFloat | PositiveInt = 0.025  # Run for 5%
+    epochs: PositiveInt = 10000
+    patience: PositiveFloat | PositiveInt = 0.125  # Run for 25%
     lr: PositiveFloat = 0.0001
     lr_decay_steps: PositiveInt | PositiveFloat = 1.0
     lr_decay_rate: PositiveFloat = 0.1
 
-    latent_offset_scale: PositiveFloat = 0.2
+    latent_offset_scale: PositiveFloat = 0.1
 
     ema_steps: NonNegativeInt = 0
     ema_momentum: PositiveFloat = 0.999

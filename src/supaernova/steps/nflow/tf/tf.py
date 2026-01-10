@@ -1,7 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 from typing import TYPE_CHECKING, cast, override
 
-import numpy as np
 from tqdm.keras import TqdmCallback
 
 from supaernova._tf import ks, tf, tfb, tfd, clear_session
@@ -215,16 +214,19 @@ class TFNFlowModel(ks.Model):
                     )
                 )
 
+            # Build an AutoregressiveNetwork
+            autoregressive_network = tfb.AutoregressiveNetwork(
+                params=2,
+                hidden_units=[self.n_hidden_units, self.n_hidden_units],
+                activation=self.activation,
+                use_bias=True,
+                name=f"NFlowARNetwork_{n}",
+            )
+
             # Finally, pass to a Masked Autoregressive Flow
             bijectors.append(
                 tfb.MaskedAutoregressiveFlow(
-                    shift_and_log_scale_fn=tfb.AutoregressiveNetwork(
-                        params=2,
-                        hidden_units=[self.n_hidden_units, self.n_hidden_units],
-                        activation=self.activation,
-                        use_bias=True,
-                        name=f"NFlowARNetwork_{n}",
-                    ),
+                    shift_and_log_scale_fn=autoregressive_network,
                     name=f"NFlowARFlow_{n}",
                 )
             )

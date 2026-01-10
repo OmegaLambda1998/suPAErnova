@@ -9,6 +9,7 @@ from typing import (
 from tqdm.keras import TqdmCallback
 
 from supaernova._tf import HUGE, JIT_COMPILE, ks, tf, tfp, clear_session
+from supaernova.utils import max_central
 from supaernova.utils.tf import db, pp
 
 if TYPE_CHECKING:
@@ -255,9 +256,10 @@ class TFPAEEncoder(ks.layers.Layer):
             #     )
             #     / n_unmasked_sn
             # )
-            latents_mean = tf.nn.weighted_moments(
-                latents, [0], n_unmasked_spec * tf.cast(mask_sn, tf.float32)
-            )[0]
+            # latents_mean = tf.nn.weighted_moments(
+            #     latents, [0], n_unmasked_spec * tf.cast(mask_sn, tf.float32)
+            # )[0]
+            latents_mean = tfp.stats.percentile(latents, 50.0, axis=0)
         else:
             latents_mean = self.moving_means
 
@@ -491,8 +493,8 @@ class TFPAEDecoder(ks.layers.Layer):
             colourlaw = self.colourlaw_layer(delta_av_latent, training=training)
             amplitude *= tf.pow(10.0, -0.4 * (colourlaw + delta_m_latent))
 
-        if not (training or testing):
-            amplitude = tf.nn.relu(amplitude)
+        # if not (training or testing):
+        #     amplitude = tf.nn.relu(amplitude)
 
         return tf.where(input_mask, amplitude, tf.zeros_like(amplitude))
 
@@ -1554,16 +1556,19 @@ class TFPAEModel(ks.Model):
             )[..., 0]
             n_unmasked_sn = tf.math.count_nonzero(mask_sn[:, 0], dtype=tf.float32)
 
-            # latents_mean = (
-            #     tf.reduce_sum(
-            #         tf.where(mask_sn, encoded, tf.zeros_like(encoded)), axis=0
-            #     )
-            #     / n_unmasked_sn
-            # )
-
+            latents_mean = (
+                tf.reduce_sum(
+                    tf.where(mask_sn, encoded, tf.zeros_like(encoded)), axis=0
+                )
+                / n_unmasked_sn
+            )
+            pp(latents_mean, "mean")
             latents_mean = tf.nn.weighted_moments(
                 encoded, [0], n_unmasked_spec * tf.cast(mask_sn, tf.float32)
             )[0]
+            pp(latents_mean, "weighted_mean")
+            latents_mean = tfp.stats.percentile(encoded, 50.0, axis=0)
+            pp(latents_mean, "median")
 
             self.encoder.moving_means.assign(latents_mean)
             self.log.debug(self.encoder.moving_means)

@@ -360,6 +360,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.spec_dim = data.spec_dim
         self.wl_dim = data.wl_dim
 
+        self.u_latent_bounds = {}
         self.step_sizes = {}
         self.recon_error = {}
         self.recon_error_centers = {}
@@ -376,6 +377,14 @@ class Posterior(ModelStep[PosteriorConfig]):
 
             mask_sn = np.any(
                 np.any(mask & wl_mask & spec_mask & sn_mask, axis=-1), axis=-1
+            )
+
+            u_latents_min = np.min(u_latents[mask_sn], axis=0)
+            u_latents_max = np.max(u_latents[mask_sn], axis=0)
+            u_latents_bounds = (u_latents_min, u_latents_max)
+            pp(u_latents_bounds)
+            self.u_latent_bounds[subset] = self.u_latent_bounds.get(
+                "train", u_latents_bounds
             )
 
             step_sizes = []
@@ -658,7 +667,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                 delta_p = samples[..., 1]
                 u_delta_av = samples[..., 2]
                 u_latents = samples[..., 3:]
-                us = samples[..., 2:]
 
                 zs = model.hmc.zs.numpy()
                 delta_av = zs[..., 0]
@@ -1074,7 +1082,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # --- NFlow ---
                 # --- Posterior ---
                 map_position = model.map.unconstrain(
-                    model.map.get_position(model.map.position.best)
+                    model.map.get_position(model.map.position.best), full=True
                 )
                 (
                     map_log_prob,
@@ -1179,6 +1187,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                 log_prob = results.hmc.log_prob
                 if o.reduce == "mean":
                     reduce_samples = samples.mean(axis=0, keepdims=True)
+                elif o.reduce == "median":
+                    reduce_samples = np.median(samples, axis=0, keepdims=True)
                 else:
                     reduce_samples = np.array([
                         np.array([
@@ -1611,6 +1621,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                 log_prob = results.hmc.log_prob
                 if o.reduce == "mean":
                     reduce_samples = samples.mean(axis=0)
+                elif o.reduce == "median":
+                    reduce_samples = np.median(samples, axis=0)
                 else:
                     reduce_samples = np.array([
                         np.array([
@@ -1848,6 +1860,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                     # delta_m = model.hmc.delta_m.numpy()[..., 0]
                     if o.reduce == "mean":
                         mean_delta_m = np.mean(delta_m, axis=0)
+                    elif o.reduce == "median":
+                        mean_delta_m = np.median(delta_m, axis=0)
                     else:
                         mean_delta_m = np.array([
                             max_central(delta_m[:, sn], weight=log_prob[:, sn])[1]
@@ -1856,6 +1870,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                     # delta_p = model.hmc.delta_p.numpy()[..., 0]
                     if o.reduce == "mean":
                         mean_delta_p = np.mean(delta_p, axis=0)
+                    if o.reduce == "median":
+                        mean_delta_p = np.median(delta_p, axis=0)
                     else:
                         mean_delta_p = np.array([
                             max_central(delta_p[:, sn], weight=log_prob[:, sn])[1]
@@ -2036,7 +2052,11 @@ class Posterior(ModelStep[PosteriorConfig]):
                 chain_data[title] = samples
                 o.labels[title] = map_labels
 
-                DistributionPlotter.plot_corner(chain_data, o, statistics=o.reduce)
+                DistributionPlotter.plot_corner(
+                    chain_data,
+                    o,
+                    statistics="cumulative" if o.reduce == "median" else o.reduce,
+                )
 
     def _plot_hmc(
         self,
@@ -2130,22 +2150,28 @@ class Posterior(ModelStep[PosteriorConfig]):
                     mask_sn = np.any(mask_spec, axis=-1)
                     sn_mask &= mask_sn
 
-                samples = samples[:, sn_mask, :]
-                log_prob = log_prob[:, sn_mask]
+                samples = samples[..., sn_mask, :]
+                log_prob = log_prob[..., sn_mask]
 
+                weights = None
                 if o.mean:
                     if o.reduce == "mean":
                         chains = samples.mean(axis=0)
+                    elif o.reduce == "median":
+                        chains = np.median(samples, axis=0)
                     elif o.reduce == "max_central":
                         chains = np.array([
                             np.array([
                                 max_central(
-                                    samples[:, sn, pos], weight=log_prob[:, sn]
+                                    samples[..., sn, pos], weight=log_prob[:, sn]
                                 )[1]
                                 for pos in range(samples.shape[-1])
                             ])
                             for sn in range(samples.shape[-2])
                         ])
+                elif samples.shape[-2] == 1:
+                    chains = samples[..., 0, :]
+                    weights = log_prob[..., 0]
                 else:
                     chains = np.reshape(samples, (-1, samples.shape[-1]))
                 o.mean = False
@@ -2159,7 +2185,15 @@ class Posterior(ModelStep[PosteriorConfig]):
                 chain_data[title] = chains
                 o.labels[title] = hmc_labels
 
-                DistributionPlotter.plot_corner(chain_data, o, statistics=o.reduce)
+                DistributionPlotter.plot_corner(
+                    chain_data,
+                    o,
+                    statistics="cumulative" if o.reduce == "median" else o.reduce,
+                    log_posterior=weights,
+                    plot_point=weights is not None,
+                    marker_style="P",
+                    marker_size=100,
+                )
 
     def _plot_dispersion(
         self,

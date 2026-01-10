@@ -22,7 +22,7 @@ class DispersionPlot(SpectraPlot):
     subset: Literal["train", "test"]
     legacy: tuple[Path, ...] | None = None
     twins: str | None = None
-    reduce: Literal["mean", "max_central"] = "mean"
+    reduce: Literal["mean", "median", "max_central"] = "median"
 
 
 class DispersionPlotter(Plotter):
@@ -358,6 +358,20 @@ class DispersionPlotter(Plotter):
             pae_amplitudes = np.vstack(
                 [
                     np.mean(hmc.hmc.samples[..., 0], axis=0, keepdims=True)
+                    for hmc in hmcs
+                ],
+            )[..., pae_order]
+
+            pae_amplitude_stds = np.vstack(
+                [
+                    np.std(hmc.hmc.samples[..., 0], axis=0, keepdims=True)
+                    for hmc in hmcs
+                ],
+            )[..., pae_order]
+        elif config.reduce == "median":
+            pae_amplitudes = np.vstack(
+                [
+                    np.median(hmc.hmc.samples[..., 0], axis=0, keepdims=True)
                     for hmc in hmcs
                 ],
             )[..., pae_order]

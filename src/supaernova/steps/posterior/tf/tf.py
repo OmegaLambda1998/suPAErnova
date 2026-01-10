@@ -55,6 +55,7 @@ class TFPosteriorModel(ks.Model):
         self.seed: int = seed
         self.subset: Literal["train", "test"] = subset
         self.step_size = config.step_sizes[self.subset]
+        self.u_latent_bounds = config.u_latent_bounds[self.subset]
 
         self.debug: bool = config.config.debug or self.options.debug
         self.profile: bool = self.options.profile
@@ -245,7 +246,7 @@ class TFPosteriorModel(ks.Model):
 
         zs = self.nflow.u_to_z(us, permute=True)
         if self.nflow.physical_latents:
-            delta_av = zs[..., 0:1]
+            delta_av = zs[..., :1]
             zs = zs[..., 1:]
         if self.pae.physical_latents:
             zs = tf.concat(
@@ -330,7 +331,8 @@ class TFPosteriorModel(ks.Model):
             1,
         )
 
-        log_likelihood_spec = log_likelihood_spec_num
+        log_likelihood_spec = log_likelihood_spec_num / log_likelihood_spec_sum
+        log_likelihood_spec *= tf.math.reduce_max(log_likelihood_spec_sum)
 
         log_likelihood_num = tf.reduce_sum(
             tf.where(
@@ -607,49 +609,27 @@ class TFPosteriorModel(ks.Model):
         ).expect_partial()
 
         if load_hmc:
-            # ess = tfp.mcmc.effective_sample_size(
-            #     self.hmc.samples, filter_beyond_positive_pairs=True, cross_chain_dims=-2
-            # )
-            # r_hat = tfp.mcmc.potential_scale_reduction(
-            #     self.hmc.samples,
-            #     split_chains=True,
-            # )
-
             samples = tf.boolean_mask(self.hmc.samples, self.sn_mask[:, 0, 0], axis=-2)
 
-            ess = tfp.mcmc.effective_sample_size(
-                samples,
-                filter_beyond_positive_pairs=True,
-                cross_chain_dims=1 if self.n_walkers > 1 else None,
-            )
-            if self.n_walkers == 1:
-                ess = ess[0, ...]
-            min_ess = tf.reduce_min(ess, axis=0)
-            median_ess = tfp.stats.percentile(ess, 50.0, axis=0)
-            max_ess = tf.reduce_max(ess, axis=0)
+            # @tf.function
+            # def _fn(state):
+            #     return tfp.mcmc.effective_sample_size(
+            #         state,
+            #         filter_beyond_positive_pairs=True,
+            #         cross_chain_dims=(1, 2) if self.n_walkers > 1 else (2,),
+            #     )
+            #
+            # ess = tf.map_fn(_fn, samples, swap_memory=True)
+            # if self.n_walkers == 1:
+            #     ess = ess[0, ...]
+            # self.log.info(f"Effective Sample Size: {ess}")
 
             r_hat = tfp.mcmc.potential_scale_reduction(
-                samples, split_chains=True, independent_chain_ndims=1
+                samples, independent_chain_ndims=1, split_chains=True
             )
-            max_r_hat = tf.reduce_max(r_hat, axis=0)
-            median_r_hat = tfp.stats.percentile(r_hat, 50.0, axis=0)
-            min_r_hat = tf.reduce_min(r_hat, axis=0)
+            r_hat = tfp.stats.percentile(r_hat, 50.0, axis=0)
 
-            self.log.info(f"Worst Effective Sample Size: {min_ess}")
-            self.log.info(
-                f"Worst Relative Effective Sample Size: {min_ess / (self.max_tree_depth * self.n_run_steps)}"
-            )
-            self.log.info(f"Worst R-Hat: {max_r_hat}")
-            self.log.info(f"Median Effective Sample Size: {median_ess}")
-            self.log.info(
-                f"Median Relative Effective Sample Size: {median_ess / (self.max_tree_depth * self.n_run_steps)}"
-            )
-            self.log.info(f"Median R-Hat: {median_r_hat}")
-            self.log.info(f"Best Effective Sample Size: {max_ess}")
-            self.log.info(
-                f"Best Relative Effective Sample Size: {max_ess / (self.max_tree_depth * self.n_run_steps)}"
-            )
-            self.log.info(f"Best R-Hat: {min_r_hat}")
+            self.log.info(f"R-Hat: {r_hat}")
         clear_session()
 
     @override
@@ -1496,12 +1476,6 @@ class TFPosteriorModel(ks.Model):
             mean_log_prob: tf.Tensor,
             max_log_prob: tf.Tensor,
         ) -> None:
-            prefix = "adaption"
-            if self.sample_progress.n > self.max_tree_depth * self.n_adaption_steps:
-                prefix = "burn-in"
-            if self.sample_progress.n > self.max_tree_depth * self.n_burnin_steps:
-                prefix = "run"
-            self.sample_progress.set_description(prefix)
             self.sample_progress.set_postfix({
                 "log_prob": (
                     f"{min_log_prob:.3E}",
@@ -1514,47 +1488,47 @@ class TFPosteriorModel(ks.Model):
             if self.summary_writer is not None:
                 with self.summary_writer.as_default():
                     tf.summary.scalar(
-                        f"samples/{prefix}/min_log_prior",
+                        "samples/samples/min_log_prior",
                         min_log_prior,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        f"samples/{prefix}/mean_log_prior",
+                        "samples/samples/mean_log_prior",
                         mean_log_prior,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        f"samples/{prefix}/max_log_prior",
+                        "samples/samples/max_log_prior",
                         max_log_prior,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        f"samples/{prefix}/min_log_like",
+                        "samples/samples/min_log_like",
                         min_log_like,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        f"samples/{prefix}/mean_log_like",
+                        "samples/samples/mean_log_like",
                         mean_log_like,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        f"samples/{prefix}/max_log_like",
+                        "samples/samples/max_log_like",
                         max_log_like,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        f"samples/{prefix}/min_log_prob",
+                        "samples/samples/min_log_prob",
                         min_log_prob,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        f"samples/{prefix}/mean_log_prob",
+                        "samples/samples/mean_log_prob",
                         mean_log_prob,
                         step=self.sample_progress.n,
                     )
                     tf.summary.scalar(
-                        f"samples/{prefix}/max_log_prob",
+                        "samples/samples/max_log_prob",
                         max_log_prob,
                         step=self.sample_progress.n,
                     )
@@ -1964,7 +1938,9 @@ class TFPosteriorModel(ks.Model):
         step_size_init = tf.where(
             tf.math.is_finite(step_size_init), step_size_init, step_size_std
         )
-        step_size_inner = tf.math.sqrt(step_size_init * step_size_std)
+        # step_size_inner = tf.math.sqrt(step_size_init * step_size_std)
+        step_size_inner = tf.maximum(step_size_init, step_size_std)
+        # step_size_inner = tf.minimum(step_size_init, step_size_std)
         step_size_inner = self.map.unconstrain(step_size_inner)
         self.log.debug(f"Step Size: {step_size_inner}")
 
@@ -2077,9 +2053,9 @@ class TFPosteriorModel(ks.Model):
 
         clear_session()
 
-        # log_prior, log_like, log_prob = self.unnormalized_posterior_log_prob(
-        #     samples, additional_outputs=True, map_fn=True
-        # )
+        self.log.debug(
+            "Calculating prior, likelihood, and probability across all samples"
+        )
 
         @tf.function
         def _fn(state):
@@ -2091,6 +2067,8 @@ class TFPosteriorModel(ks.Model):
             swap_memory=True,
             fn_output_signature=(tf.float32, tf.float32, tf.float32),
         )
+
+        self.log.debug("Calculating z-latents")
 
         @tf.function
         def _fn(u):

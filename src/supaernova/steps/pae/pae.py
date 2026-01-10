@@ -860,7 +860,7 @@ class PAE(ModelStep[PAEConfig]):
                 DistributionPlotter.plot_corner(
                     chains(mask_sn),
                     o,
-                    statistics=o.reduce,
+                    statistics="cumulative" if o.reduce == "median" else o.reduce,
                     shade_alpha=0.0,
                     plot_cloud=True,
                     truth=truth,

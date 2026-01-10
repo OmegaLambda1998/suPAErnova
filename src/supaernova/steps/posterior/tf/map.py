@@ -92,6 +92,7 @@ class PosteriorMap(tf.Module):
         )
 
         # === Priors ===
+        self.u_min, self.u_max = config.u_latent_bounds
         self.use_u_delta_av_prior: bool = config.options.u_delta_av_prior
         self.u_delta_av_min: float = config.options.u_delta_av_min or -np.inf
         self.u_delta_av_max: float = config.options.u_delta_av_max or np.inf
@@ -104,8 +105,8 @@ class PosteriorMap(tf.Module):
         )
         self.u_delta_av_transform: tfb.Bijector = tfb.Identity()
         if np.isfinite(self.u_delta_av_min) and np.isfinite(self.u_delta_av_max):
-            self.u_delta_av_transform = tfb.Sigmoid(
-                low=self.u_delta_av_min, high=self.u_delta_av_max
+            self.u_delta_av_transform = tfb.SoftClip(
+                low=self.u_delta_av_min, high=self.u_delta_av_max, hinge_softness=10.0
             )
         if self.nflow.physical_latents:
             self.n_pos += 1
@@ -120,9 +121,11 @@ class PosteriorMap(tf.Module):
             scale_diag=self.u_latents_std * tf.ones(self.n_u_latents),
         )
         self.u_latents_transform: tfb.Bijector = tfb.Identity()
-        if np.isfinite(self.u_latents_min) and np.isfinite(self.u_latents_max):
-            self.u_latents_transform = tfb.Sigmoid(
-                low=self.u_latents_min, high=self.u_latents_max
+        if np.all(np.isfinite(self.u_latents_min)) and np.all(
+            np.isfinite(self.u_latents_max)
+        ):
+            self.u_latents_transform = tfb.SoftClip(
+                low=self.u_latents_min, high=self.u_latents_max, hinge_softness=10.0
             )
 
         self.delta_av_start: float = config.options.delta_av_start
@@ -146,8 +149,8 @@ class PosteriorMap(tf.Module):
         )
         self.delta_m_transform: tfb.Bijector = tfb.Identity()
         if np.isfinite(self.delta_m_min) and np.isfinite(self.delta_m_max):
-            self.delta_m_transform = tfb.Sigmoid(
-                low=self.delta_m_min, high=self.delta_m_max
+            self.delta_m_transform = tfb.SoftClip(
+                low=self.delta_m_min, high=self.delta_m_max, hinge_softness=10.0
             )
         if self.train_delta_m:
             self.n_pos += 1
@@ -165,8 +168,8 @@ class PosteriorMap(tf.Module):
         )
         self.delta_p_transform: tfb.Bijector = tfb.Identity()
         if np.isfinite(self.delta_p_min) and np.isfinite(self.delta_p_max):
-            self.delta_p_transform = tfb.Sigmoid(
-                low=self.delta_p_min, high=self.delta_p_max
+            self.delta_p_transform = tfb.SoftClip(
+                low=self.delta_p_min, high=self.delta_p_max, hinge_softness=10.0
             )
         if self.train_delta_p:
             self.n_pos += 1
@@ -184,7 +187,9 @@ class PosteriorMap(tf.Module):
         )
         self.bias_transform: tfb.Bijector = tfb.Identity()
         if np.isfinite(self.bias_min) and np.isfinite(self.bias_max):
-            self.bias_transform = tfb.Sigmoid(low=self.bias_min, high=self.bias_max)
+            self.bias_transform = tfb.SoftClip(
+                low=self.bias_min, high=self.bias_max, hinge_softness=10.0
+            )
         if self.train_bias:
             self.n_pos += 1
 
@@ -543,13 +548,13 @@ class PosteriorMap(tf.Module):
         elif stage.init_bias in {"scale", "constant"}:
             bias = self.bias_mean * tf.ones((self.n_chains, self.sn_dim, 1))
 
-        delta_m = tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max)
-        delta_p = tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max)
-        bias = tf.clip_by_value(bias, self.bias_min, self.bias_max)
-        u_delta_av = tf.clip_by_value(
-            u_delta_av, self.u_delta_av_min, self.u_delta_av_max
-        )
-        u_latents = tf.clip_by_value(u_latents, self.u_latents_min, self.u_latents_max)
+        # delta_m = tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max)
+        # delta_p = tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max)
+        # bias = tf.clip_by_value(bias, self.bias_min, self.bias_max)
+        # u_delta_av = tf.clip_by_value(
+        #     u_delta_av, self.u_delta_av_min, self.u_delta_av_max
+        # )
+        # u_latents = tf.clip_by_value(u_latents, self.u_latents_min, self.u_latents_max)
 
         position = []
         if self.train_delta_m:
@@ -655,6 +660,14 @@ class PosteriorMap(tf.Module):
             u_delta_av = position[..., i : i + 1]
             i += 1
         u_latents = position[..., :, i:]
+
+        # delta_m = tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max)
+        # delta_p = tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max)
+        # bias = tf.clip_by_value(bias, self.bias_min, self.bias_max)
+        # u_delta_av = tf.clip_by_value(
+        #     u_delta_av, self.u_delta_av_min, self.u_delta_av_max
+        # )
+        # u_latents = tf.clip_by_value(u_latents, self.u_latents_min, self.u_latents_max)
 
         return tf.concat((delta_m, delta_p, bias, u_delta_av, u_latents), axis=-1)
 

@@ -19,7 +19,7 @@ class DistributionPlot(SpectraPlot):
     labels: "dict[str | int, str | dict[str | int, str]] | None" = None
     mean: bool = False
     masked: bool = False
-    reduce: Literal["mean", "max_central"] = "max_central"
+    reduce: Literal["mean", "median", "max_central"] = "median"
 
 
 class DistributionPlotter(Plotter):
@@ -78,6 +78,11 @@ class DistributionPlotter(Plotter):
                     chain = DistributionPlotter.prep_from_array(d, config)
                 else:
                     chain = DistributionPlotter.prep_from_result(d, config)
+                if (
+                    "log_posterior" in chain_kwargs
+                    and chain_kwargs["log_posterior"] is not None
+                ):
+                    chain["log_posterior"] = chain_kwargs["log_posterior"]
                 chains.append(chain)
             if labels is None:
                 labels = range(len(chains))

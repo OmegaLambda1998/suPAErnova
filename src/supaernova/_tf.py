@@ -8,7 +8,7 @@ os.environ["TF_DETERMINISTIC_OPS"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
-os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
+os.environ["TF_GPU_ALLOCATOR"] = "tensorpool"
 
 # Number of CPUs available
 os.environ["TF_NUM_INTEROP_THREADS"] = "1"
@@ -37,6 +37,28 @@ for gpu in GPUS:
     tf.config.experimental.set_memory_growth(gpu, True)
 tf.config.threading.set_inter_op_parallelism_threads(NPROC)
 tf.config.threading.set_intra_op_parallelism_threads(NPROC)
+
+tf.config.optimizer.set_experimental_options({
+    "layout_optimizer": False,
+    "constant_folding": True,
+    "shape_optimization": True,
+    "remapping": True,
+    "arithmetic_optimization": True,
+    "dependency_optimization": True,
+    "loop_optimization": True,
+    "function_optimization": True,
+    "debug_stripper": True,
+    "disable_model_pruning": False,
+    "scoped_allocator_optimization": True,
+    "pin_to_host_optimization": False,
+    "implementation_selector": True,
+    "auto_mixed_precision": False,
+    "disable_meta_optimizer": False,
+    "min_graph_nodes": False,
+    "auto_parallel": False,
+})
+
+print(tf.config.optimizer.get_experimental_options())
 
 IS_GPU = len(GPUS) > 0
 IS_ROCM = any(
