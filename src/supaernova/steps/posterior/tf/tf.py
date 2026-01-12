@@ -305,12 +305,13 @@ class TFPosteriorModel(ks.Model):
         synth_sigma = tf.where(posterior_mask, synth_sigma, tf.ones_like(synth_sigma))
 
         # Set missing values to 0 for all times
-        synth_amp = tf.where(posterior_mask, synth_amp, tf.zeros_like(synth_amp))
+        # synth_amp = tf.where(posterior_mask, synth_amp, tf.zeros_like(synth_amp))
 
         likelihood = tfd.Normal(loc=synth_amp, scale=synth_sigma)
 
         # Set missing values to 0 for all times
-        amp = tf.where(posterior_mask, input_amp, tf.zeros_like(input_amp))
+        # amp = tf.where(posterior_mask, input_amp, tf.zeros_like(input_amp))
+        amp = input_amp
 
         log_likelihood_wl = likelihood.log_prob(amp)
 
@@ -331,8 +332,7 @@ class TFPosteriorModel(ks.Model):
             1,
         )
 
-        log_likelihood_spec = log_likelihood_spec_num / log_likelihood_spec_sum
-        log_likelihood_spec *= tf.math.reduce_max(log_likelihood_spec_sum)
+        log_likelihood_spec = log_likelihood_spec_num  # / log_likelihood_spec_sum
 
         log_likelihood_num = tf.reduce_sum(
             tf.where(
@@ -351,7 +351,11 @@ class TFPosteriorModel(ks.Model):
             1,
         )
 
-        log_likelihood = log_likelihood_num / log_likelihood_sum
+        log_likelihood_scale = 5e-2
+
+        log_likelihood = log_likelihood_scale * log_likelihood_num
+        # / log_likelihood_sum
+        # pp((log_likelihood_num, log_likelihood_scale, log_likelihood))
 
         # Ignore likelihood of fully masked SN
         log_likelihood = tf.where(
@@ -1938,8 +1942,8 @@ class TFPosteriorModel(ks.Model):
         step_size_init = tf.where(
             tf.math.is_finite(step_size_init), step_size_init, step_size_std
         )
-        # step_size_inner = tf.math.sqrt(step_size_init * step_size_std)
-        step_size_inner = tf.maximum(step_size_init, step_size_std)
+        step_size_inner = tf.math.sqrt(step_size_init * step_size_std)
+        # step_size_inner = tf.maximum(step_size_init, step_size_std)
         # step_size_inner = tf.minimum(step_size_init, step_size_std)
         step_size_inner = self.map.unconstrain(step_size_inner)
         self.log.debug(f"Step Size: {step_size_inner}")

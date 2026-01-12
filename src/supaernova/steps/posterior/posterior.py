@@ -382,7 +382,6 @@ class Posterior(ModelStep[PosteriorConfig]):
             u_latents_min = np.min(u_latents[mask_sn], axis=0)
             u_latents_max = np.max(u_latents[mask_sn], axis=0)
             u_latents_bounds = (u_latents_min, u_latents_max)
-            pp(u_latents_bounds)
             self.u_latent_bounds[subset] = self.u_latent_bounds.get(
                 "train", u_latents_bounds
             )
@@ -440,7 +439,11 @@ class Posterior(ModelStep[PosteriorConfig]):
             ))
 
             self.recon_error[subset] = recon_error
+            self.recon_error[subset] = self.recon_error.get("train", recon_error)
             self.recon_error_centers[subset] = recon_error_centers
+            self.recon_error_centers[subset] = self.recon_error_centers.get(
+                "train", recon_error_centers
+            )
 
         # --- Stages ---
         i = 0

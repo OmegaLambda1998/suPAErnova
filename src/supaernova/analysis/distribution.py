@@ -19,7 +19,7 @@ class DistributionPlot(SpectraPlot):
     labels: "dict[str | int, str | dict[str | int, str]] | None" = None
     mean: bool = False
     masked: bool = False
-    reduce: Literal["mean", "median", "max_central"] = "median"
+    reduce: Literal["mean", "median", "max_central"] = "max_central"
 
 
 class DistributionPlotter(Plotter):
@@ -35,7 +35,9 @@ class DistributionPlotter(Plotter):
         data: "npt.NDArray[Any]", config: DistributionPlot
     ) -> pd.DataFrame:
         return pd.DataFrame({
-            label: data[:, ind] for (ind, label) in (config.labels or {}).items()
+            label: data[:, ind]
+            for (ind, label) in (config.labels or {}).items()
+            if ind < data.shape[-1]
         })
 
     @staticmethod

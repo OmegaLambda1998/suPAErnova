@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, cast, override
 
 from tqdm.keras import TqdmCallback
 
-from supaernova._tf import ks, tf, tfb, tfd, clear_session
+from supaernova._tf import ks, tf, tfb, tfd, tfp, clear_session
 from supaernova.utils.tf import db, pp
 
 if TYPE_CHECKING:
@@ -50,6 +50,7 @@ class TFNFlowModel(ks.Model):
         self.wl_dim = config.wl_dim
 
         self.latents: tf.Tensor
+        self.cov_latents: tf.Tensor
         self.data: LazySNPAEData = config.data
         self.data_mask: npt.NDArray[bool] = config.mask
         self.sn_mask: npt.NDArray[bool] = config.sn_mask
@@ -61,6 +62,7 @@ class TFNFlowModel(ks.Model):
         self.mask = mask_sn
 
         self.train_latents: tf.Tensor
+        self.train_cov_latents: tf.Tensor
         self.train_data: LazySNPAEData = config.train_data
         self.train_data_mask: npt.NDArray[bool] = config.train_mask
         self.train_sn_mask: npt.NDArray[bool] = config.train_sn_mask
@@ -77,6 +79,7 @@ class TFNFlowModel(ks.Model):
         self.train_mask = train_mask_sn
 
         self.test_latents: tf.Tensor
+        self.test_cov_latents: tf.Tensor
         self.test_data: LazySNPAEData = config.test_data
         self.test_data_mask: npt.NDArray[bool] = config.test_mask
         self.test_sn_mask: npt.NDArray[bool] = config.test_sn_mask
@@ -93,6 +96,7 @@ class TFNFlowModel(ks.Model):
         self.test_mask = test_mask_sn
 
         self.val_latents: tf.Tensor
+        self.val_cov_latents: tf.Tensor
         self.val_data: LazySNPAEData = config.val_data
         self.val_data_mask: npt.NDArray[bool] = config.val_mask
         self.val_sn_mask: npt.NDArray[bool] = config.val_sn_mask
@@ -142,6 +146,7 @@ class TFNFlowModel(ks.Model):
         self.ema_momentum: float = self.options.ema_momentum
 
         self.latent_offset_scale = self.options.latent_offset_scale
+        self.loss_covariance_penalty = self.options.loss_covariance_penalty
 
         self.activation: Callable[[tf.Tensor], tf.Tensor] | None = (
             self.options.activation_fn
@@ -258,13 +263,14 @@ class TFNFlowModel(ks.Model):
     @override
     def call(
         self,
-        inputs: tf.Tensor,
+        inputs: tuple[tf.Tensor, tf.Tensor],
         training: bool | None = None,
     ) -> tf.Tensor:
         training = False if training is None else training
 
         # === Unpack Inputs ===
-        latents = inputs
+        latents = inputs[0]
+        phys_latents = inputs[1]
 
         if training and self.latent_offset_scale > 0:
             latents_std = tf.math.reduce_std(latents, axis=0)
@@ -275,10 +281,41 @@ class TFNFlowModel(ks.Model):
             )
             latents += latents_offset
 
-        zero_log_prob = self.flow.distribution.log_prob(tf.zeros_like(latents))
+        if self.physical_latents:
+            u_latents = self.z_to_u(latents, permute=True)
+            cov_latents = tf.concat((u_latents, phys_latents), axis=-1)
 
+            latents_cov_norm = tfp.stats.covariance(cov_latents)
+            cov_dim = tf.shape(latents_cov_norm)[0]
+            cov_mask = 1.0 - tf.eye(cov_dim)
+
+            decorrelate_delta_av = tf.zeros((1, cov_dim))
+            decorrelate_flow_latents = tf.zeros((self.n_u_latents, cov_dim))
+            decorrelate_physical_latents = tf.ones((2, cov_dim))
+
+            decorrelate = tf.concat(
+                (
+                    decorrelate_delta_av,
+                    decorrelate_flow_latents,
+                    decorrelate_physical_latents,
+                ),
+                axis=0,
+            )
+            decorrelate *= -(tf.transpose(decorrelate) - 1)
+            cov_mask *= decorrelate
+
+            loss_cov = tf.reduce_sum(
+                tf.square(
+                    cov_mask * latents_cov_norm,
+                )
+            ) / tf.reduce_sum(cov_mask)
+        else:
+            loss_cov = tf.convert_to_tensor(0, dtype=latents.dtype)
+        cov_loss = loss_cov * self.loss_covariance_penalty
+        log_prob = self.flow.log_prob(latents)
+        zero_log_prob = self.flow.distribution.log_prob(tf.zeros_like(latents))
         # === Calculate Log Probability ===
-        return self.flow.log_prob(latents) + zero_log_prob
+        return log_prob - cov_loss + zero_log_prob
 
     def u_to_z(self, inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         # If permute is True, then the incoming u_latents need to be permuted correctly
@@ -389,10 +426,10 @@ class TFNFlowModel(ks.Model):
         )
 
         # === Prep Data ===
-        _data = self.latents
-        train_data = self.train_latents
-        _test_data = self.test_latents
-        val_data = self.val_latents
+        _data = (self.latents, self.cov_latents)
+        train_data = (self.train_latents, self.train_cov_latents)
+        _test_data = (self.test_latents, self.test_cov_latents)
+        val_data = (self.val_latents, self.val_cov_latents)
 
         # === Train ===
         self._epoch = 0
@@ -431,6 +468,8 @@ class TFNFlowModel(ks.Model):
                 wl_mask=wl_mask,
             )
 
+            cov_latents = latents[:, 0, -2:]
+
             # Get the first n_z_latents + 1 latents
             # If there are no physical pae latents, this is all latents
             # If there are physical pae latents, this includes ΔAᵥ
@@ -439,6 +478,7 @@ class TFNFlowModel(ks.Model):
             if self.pae.physical_latents and (not self.physical_latents):
                 latents = latents[:, 1:]
             setattr(self, f"{dt}latents", latents)
+            setattr(self, f"{dt}cov_latents", cov_latents)
 
     def build_model(self) -> None:
         if not self.built:
@@ -468,7 +508,7 @@ class TFNFlowModel(ks.Model):
 
             self.built = True
 
-        train_data = self.train_latents
+        train_data = (self.train_latents, self.train_cov_latents)
         self(train_data)
         if self.debug:
             self.log.debug("Trainable variables:")

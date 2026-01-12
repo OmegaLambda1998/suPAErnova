@@ -347,8 +347,9 @@ class NFlow(ModelStep[NFlowConfig]):
             data.clear()
 
             z_latents = getattr(self.model, f"{dt}latents")
+            z_cov_latents = getattr(self.model, f"{dt}cov_latents")
 
-            nflow_inputs = z_latents
+            nflow_inputs = (z_latents, z_cov_latents)
             log_prob = self.model(nflow_inputs, training=False)
 
             u_latents = self.model.z_to_u(z_latents, permute=True)
@@ -359,6 +360,7 @@ class NFlow(ModelStep[NFlowConfig]):
                 "sn_name": input_sn_name,
                 "spectra_id": input_spectra_id,
                 "z_latents": z_latents.numpy(),
+                "z_cov_latents": z_cov_latents.numpy(),
                 "u_latents": u_latents.numpy(),
                 "u_to_z_latents": u_to_z_latents.numpy(),
                 "log_prob": -log_prob.numpy(),
@@ -459,7 +461,7 @@ class NFlow(ModelStep[NFlowConfig]):
         return not self.analysis.force
 
     def _plot_u_latents(
-        self, gaussian, z_to_u, dt, u_labels, n_latents, n_bins
+        self, gaussian, z_to_u, z_cov, dt, u_labels, n_latents, n_bins
     ) -> None:
         if self.analysis.plot_u_latents is not None:
             if not isinstance(self.analysis.plot_u_latents, list):
@@ -485,8 +487,8 @@ class NFlow(ModelStep[NFlowConfig]):
                 DistributionPlotter.plot_corner(
                     {
                         "gaussian": gaussian,
-                        "u_latents": z_to_u,
-                        "u_latents_smoothed": z_to_u,
+                        "u_latents": np.concatenate((z_to_u, z_cov), axis=-1),
+                        "u_latents_smoothed": np.concatenate((z_to_u, z_cov), axis=-1),
                     },
                     o,
                     statistics="cumulative" if o.reduce == "median" else o.reduce,
@@ -505,7 +507,7 @@ class NFlow(ModelStep[NFlowConfig]):
                 )
 
     def _plot_z_latents(
-        self, z, u_to_z, z_gaussian, dt, z_labels, n_latents, n_bins
+        self, z, u_to_z, z_cov, z_gaussian, dt, z_labels, n_latents, n_bins
     ) -> None:
         if self.analysis.plot_z_latents is not None:
             if not isinstance(self.analysis.plot_z_latents, list):
@@ -530,8 +532,8 @@ class NFlow(ModelStep[NFlowConfig]):
                     o.plot_kwargs = {"title": f"{dt}{self.name}"}
                 DistributionPlotter.plot_corner(
                     {
-                        "z_latents": z,
-                        "u_to_z_latents": u_to_z,
+                        "z_latents": np.concatenate((z, z_cov), axis=-1),
+                        "u_to_z_latents": np.concatenate((u_to_z, z_cov), axis=-1),
                         "z_gaussian": z_gaussian,
                     },
                     o,
@@ -545,7 +547,9 @@ class NFlow(ModelStep[NFlowConfig]):
                     },
                 )
 
-    def _plot_latents(self, z_to_u, u_to_z, dt, labels, n_latents, n_bins) -> None:
+    def _plot_latents(
+        self, z_to_u, u_to_z, z_cov, dt, labels, n_latents, n_bins
+    ) -> None:
         if self.analysis.plot_latents is not None:
             if not isinstance(self.analysis.plot_latents, list):
                 self.analysis.plot_latents = [self.analysis.plot_latents]
@@ -570,10 +574,10 @@ class NFlow(ModelStep[NFlowConfig]):
                     o.plot_kwargs = {"title": f"{dt}{self.name}"}
                 DistributionPlotter.plot_corner(
                     {
-                        "u_latents": z_to_u,
-                        "u_latents_smoothed": z_to_u,
-                        "z_latents": u_to_z,
-                        "z_latents_smoothed": u_to_z,
+                        "u_latents": np.concatenate((z_to_u, z_cov), axis=-1),
+                        "u_latents_smoothed": np.concatenate((z_to_u, z_cov), axis=-1),
+                        "z_latents": np.concatenate((u_to_z, z_cov), axis=-1),
+                        "z_latents_smoothed": np.concatenate((u_to_z, z_cov), axis=-1),
                     },
                     o,
                     statistics="cumulative" if o.reduce == "median" else o.reduce,
@@ -595,7 +599,7 @@ class NFlow(ModelStep[NFlowConfig]):
                 )
 
     def _plot_latent_steps(
-        self, gaussian, results, mask, labels, dt, n_latents, n_bins
+        self, gaussian, z_cov, results, mask, labels, dt, n_latents, n_bins
     ) -> None:
         if self.analysis.plot_latent_steps is not None:
             if not isinstance(self.analysis.plot_latent_steps, list):
@@ -635,8 +639,12 @@ class NFlow(ModelStep[NFlowConfig]):
                     DistributionPlotter.plot_corner(
                         {
                             "gaussian": gaussian,
-                            f"step_{step}_latents": step_u_latents,
-                            f"step_{step}_latents_smoothed": step_u_latents,
+                            f"step_{step}_latents": np.concatenate(
+                                (step_u_latents, z_cov), axis=-1
+                            ),
+                            f"step_{step}_latents_smoothed": np.concatenate(
+                                (step_u_latents, z_cov), axis=-1
+                            ),
                         },
                         o,
                         statistics="cumulative" if o.reduce == "median" else o.reduce,
@@ -674,6 +682,15 @@ class NFlow(ModelStep[NFlowConfig]):
             u_labels[ind] = f"μ{i + 1}"
             labels[ind] = f"z/μ{i + 1}"
             ind += 1
+        if self.model.physical_latents:
+            z_labels[ind] = "ΔM"
+            u_labels[ind] = "ΔM"
+            labels[ind] = "ΔM"
+            ind += 1
+            z_labels[ind] = "Δp"
+            u_labels[ind] = "Δp"
+            labels[ind] = "Δp"
+            ind += 1
 
         for dt in ["train_", "test_"]:
             results = self.results.models[dt[:-1]]
@@ -684,30 +701,37 @@ class NFlow(ModelStep[NFlowConfig]):
             z_latents = self.model.u_to_z(u_latents, permute=True).numpy()
 
             z = results.z_latents[mask]
+            z_cov = results.z_cov_latents[mask]
             z_to_u = u_latents[mask]
             u_to_z = z_latents[mask]
 
-            gaussian = self.rng.normal(0, 1, (z_to_u.size**2, ind)).astype(np.float32)
+            gaussian = self.rng.normal(0, 1, (z_to_u.size**2, ind - 2)).astype(
+                np.float32
+            )
             z_gaussian = self.model.u_to_z(
                 gaussian,
                 permute=True,
             ).numpy()
 
-            n_latents = z.shape[0]
+            n_latents = z.shape[0] + z_cov.shape[0]
             latents_num = np.log10(n_latents)
             latents_scale_min = np.floor(latents_num)
             latents_scale_max = np.ceil(latents_num)
             latents_scale = latents_scale_min if n_latents > 100 else latents_scale_max
             n_bins = int(np.sqrt(10**latents_scale))
 
-            self._plot_u_latents(gaussian, z_to_u, dt, u_labels, n_latents, n_bins)
+            self._plot_u_latents(
+                gaussian, z_to_u, z_cov, dt, u_labels, n_latents, n_bins
+            )
 
-            self._plot_z_latents(z, u_to_z, z_gaussian, dt, z_labels, n_latents, n_bins)
+            self._plot_z_latents(
+                z, u_to_z, z_cov, z_gaussian, dt, z_labels, n_latents, n_bins
+            )
 
-            self._plot_latents(z_to_u, u_to_z, dt, labels, n_latents, n_bins)
+            self._plot_latents(z_to_u, u_to_z, z_cov, dt, labels, n_latents, n_bins)
 
             self._plot_latent_steps(
-                gaussian, results, mask, labels, dt, n_latents, n_bins
+                gaussian, z_cov, results, mask, labels, dt, n_latents, n_bins
             )
 
     @override

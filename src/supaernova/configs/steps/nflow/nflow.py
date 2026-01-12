@@ -5,7 +5,14 @@ from collections.abc import Callable
 
 import numpy as np
 from numpy import typing as npt
-from pydantic import Field, PositiveInt, PositiveFloat, NonNegativeInt, model_validator
+from pydantic import (
+    Field,
+    PositiveInt,
+    PositiveFloat,
+    NonNegativeInt,
+    NonNegativeFloat,
+    model_validator,
+)
 
 from supaernova.configs.steps import StepResult, StepAnalysis
 from supaernova.configs.steps.pae import PAEStepConfig
@@ -19,6 +26,7 @@ class NFlowModelResult(StepResult):
     sn_name: "npt.NDArray[str]"
     spectra_id: "npt.NDArray[str]"
     z_latents: "npt.NDArray[float]"
+    z_cov_latents: "npt.NDArray[float]"
     u_latents: "npt.NDArray[float]"
     u_to_z_latents: "npt.NDArray[float]"
     log_prob: "npt.NDArray[float]"
@@ -89,13 +97,14 @@ class NFlowConfig(BackendConfig):
     save_best: bool = False
     repeats: PositiveInt = 1
 
-    epochs: PositiveInt = 10000
-    patience: PositiveFloat | PositiveInt = 0.125  # Run for 25%
-    lr: PositiveFloat = 0.0001
+    epochs: PositiveInt = 100000
+    patience: PositiveFloat | PositiveInt = 0.005  # Run for 1%
+    lr: PositiveFloat = 0.00001
     lr_decay_steps: PositiveInt | PositiveFloat = 1.0
     lr_decay_rate: PositiveFloat = 0.1
 
-    latent_offset_scale: PositiveFloat = 0.1
+    latent_offset_scale: PositiveFloat = 0.25
+    loss_covariance_penalty: NonNegativeFloat = 250000
 
     ema_steps: NonNegativeInt = 0
     ema_momentum: PositiveFloat = 0.999

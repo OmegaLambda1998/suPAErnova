@@ -22,7 +22,7 @@ class DispersionPlot(SpectraPlot):
     subset: Literal["train", "test"]
     legacy: tuple[Path, ...] | None = None
     twins: str | None = None
-    reduce: Literal["mean", "median", "max_central"] = "median"
+    reduce: Literal["mean", "median", "max_central"] = "max_central"
 
 
 class DispersionPlotter(Plotter):

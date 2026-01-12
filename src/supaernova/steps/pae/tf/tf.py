@@ -1562,13 +1562,13 @@ class TFPAEModel(ks.Model):
                 )
                 / n_unmasked_sn
             )
-            pp(latents_mean, "mean")
+            pp(latents_mean)
             latents_mean = tf.nn.weighted_moments(
                 encoded, [0], n_unmasked_spec * tf.cast(mask_sn, tf.float32)
             )[0]
-            pp(latents_mean, "weighted_mean")
+            pp(latents_mean)
             latents_mean = tfp.stats.percentile(encoded, 50.0, axis=0)
-            pp(latents_mean, "median")
+            pp(latents_mean)
 
             self.encoder.moving_means.assign(latents_mean)
             self.log.debug(self.encoder.moving_means)
