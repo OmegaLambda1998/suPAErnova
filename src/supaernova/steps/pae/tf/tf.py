@@ -249,17 +249,17 @@ class TFPAEEncoder(ks.layers.Layer):
         # Zero out latents of masked SNe
         latents = tf.where(mask_sn, latents, tf.zeros_like(latents))
 
-        if training or testing:
-            # latents_mean = (
-            #     tf.reduce_sum(
-            #         tf.where(mask_sn, latents, tf.zeros_like(latents)), axis=0
-            #     )
-            #     / n_unmasked_sn
-            # )
+        if training:
             # latents_mean = tf.nn.weighted_moments(
             #     latents, [0], n_unmasked_spec * tf.cast(mask_sn, tf.float32)
             # )[0]
-            latents_mean = tfp.stats.percentile(latents, 50.0, axis=0)
+            # latents_mean = tfp.stats.percentile(latents, 50.0, axis=0)
+            latents_mean = (
+                tf.reduce_sum(
+                    tf.where(mask_sn, latents, tf.zeros_like(latents)), axis=0
+                )
+                / n_unmasked_sn
+            )
         else:
             latents_mean = self.moving_means
 
@@ -1059,6 +1059,9 @@ class TFPAEModel(ks.Model):
     def test_step(
         self, data: tuple["TensorLike", ...]
     ) -> dict[str, tf.Tensor | dict[str, tf.Tensor]]:
+
+        self.get_moving_means()
+
         training = False
         testing = True
 
@@ -1101,6 +1104,56 @@ class TFPAEModel(ks.Model):
 
         # Return a dict mapping metric names to current value
         return {m.name: m.result() for m in self.metrics}
+
+    def get_moving_means(self) -> None:
+        phase = tf.convert_to_tensor(self.stage.train_data.time, dtype=tf.float32)
+        amplitude = tf.convert_to_tensor(
+            self.stage.train_data.amplitude, dtype=tf.float32
+        )
+
+        self.stage.train_data.clear()
+
+        mask = self.stage.train_mask
+        sn_mask = self.stage.train_sn_mask
+        spec_mask = self.stage.train_spec_mask
+        wl_mask = self.stage.train_wl_mask
+        pae_input = tf.concat((phase, amplitude), axis=-1)
+
+        self.encoder.moving_means.assign(tf.zeros(self.encoder.n_pae_latents))
+
+        encoded = self.encoder(
+            pae_input,
+            mask=mask,
+            sn_mask=sn_mask,
+            spec_mask=spec_mask,
+            wl_mask=wl_mask,
+        )[:, 0, :]
+
+        mask &= sn_mask & spec_mask & wl_mask
+        valid_wl_mask = tf.logical_not(tf.logical_and(tf.logical_not(mask), wl_mask))
+        mask_spec = tf.logical_and(
+            tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True), spec_mask
+        )
+        n_unmasked_spec = tf.math.count_nonzero(
+            mask_spec[..., 0], axis=-1, keepdims=True, dtype=tf.float32
+        )
+        n_unmasked_spec = tf.math.maximum(n_unmasked_spec, 1)
+        mask_sn = tf.logical_and(
+            tf.math.reduce_any(mask_spec, axis=-2, keepdims=True), sn_mask
+        )[..., 0]
+        n_unmasked_sn = tf.math.count_nonzero(mask_sn[:, 0], dtype=tf.float32)
+
+        # latents_mean = tf.nn.weighted_moments(
+        #     encoded, [0], n_unmasked_spec * tf.cast(mask_sn, tf.float32)
+        # )[0]
+        # latents_mean = tfp.stats.percentile(encoded, 50.0, axis=0)
+        latents_mean = (
+            tf.reduce_sum(tf.where(mask_sn, encoded, tf.zeros_like(encoded)), axis=0)
+            / n_unmasked_sn
+        )
+
+        self.encoder.moving_means.assign(latents_mean)
+        self.log.debug(self.encoder.moving_means)
 
     def train_model(self, stage: "PAEStage") -> None:
         self.stage = stage
@@ -1481,28 +1534,6 @@ class TFPAEModel(ks.Model):
         self.build_model()
         init_weights = self.encoder.encode_output_layer.get_weights()[0]
 
-        # phase = tf.convert_to_tensor(self.stage.data.time, dtype=tf.float32)
-        # amplitude = tf.convert_to_tensor(self.stage.data.amplitude, dtype=tf.float32)
-        #
-        # self.stage.data.clear()
-        #
-        # mask = self.stage.mask
-        # sn_mask = self.stage.sn_mask
-        # spec_mask = self.stage.spec_mask
-        # wl_mask = self.stage.wl_mask
-
-        phase = tf.convert_to_tensor(self.stage.train_data.time, dtype=tf.float32)
-        amplitude = tf.convert_to_tensor(
-            self.stage.train_data.amplitude, dtype=tf.float32
-        )
-
-        self.stage.train_data.clear()
-
-        mask = self.stage.train_mask
-        sn_mask = self.stage.train_sn_mask
-        spec_mask = self.stage.train_spec_mask
-        wl_mask = self.stage.train_wl_mask
-
         tf.train.Checkpoint(
             self,
         ).restore(
@@ -1526,52 +1557,10 @@ class TFPAEModel(ks.Model):
                 init_weights[:, self.stage.prev_stage : self.stage.stage] / 100
             )
             self.encoder.encode_output_layer.set_weights([weights])
-        # Normalise mean of physical latents to 0 across all batches
+
         if self.physical_latents:
-            pae_input = tf.concat((phase, amplitude), axis=-1)
+            self.get_moving_means()
 
-            self.encoder.moving_means.assign(tf.zeros(self.encoder.n_pae_latents))
-
-            encoded = self.encoder(
-                pae_input,
-                mask=mask,
-                sn_mask=sn_mask,
-                spec_mask=spec_mask,
-                wl_mask=wl_mask,
-            )[:, 0, :]
-
-            mask &= sn_mask & spec_mask & wl_mask
-            valid_wl_mask = tf.logical_not(
-                tf.logical_and(tf.logical_not(mask), wl_mask)
-            )
-            mask_spec = tf.logical_and(
-                tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True), spec_mask
-            )
-            n_unmasked_spec = tf.math.count_nonzero(
-                mask_spec[..., 0], axis=-1, keepdims=True, dtype=tf.float32
-            )
-            n_unmasked_spec = tf.math.maximum(n_unmasked_spec, 1)
-            mask_sn = tf.logical_and(
-                tf.math.reduce_any(mask_spec, axis=-2, keepdims=True), sn_mask
-            )[..., 0]
-            n_unmasked_sn = tf.math.count_nonzero(mask_sn[:, 0], dtype=tf.float32)
-
-            latents_mean = (
-                tf.reduce_sum(
-                    tf.where(mask_sn, encoded, tf.zeros_like(encoded)), axis=0
-                )
-                / n_unmasked_sn
-            )
-            pp(latents_mean)
-            latents_mean = tf.nn.weighted_moments(
-                encoded, [0], n_unmasked_spec * tf.cast(mask_sn, tf.float32)
-            )[0]
-            pp(latents_mean)
-            latents_mean = tfp.stats.percentile(encoded, 50.0, axis=0)
-            pp(latents_mean)
-
-            self.encoder.moving_means.assign(latents_mean)
-            self.log.debug(self.encoder.moving_means)
         clear_session()
 
     def prep_data_per_epoch(

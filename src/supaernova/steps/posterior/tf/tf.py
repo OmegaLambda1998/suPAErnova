@@ -1942,8 +1942,8 @@ class TFPosteriorModel(ks.Model):
         step_size_init = tf.where(
             tf.math.is_finite(step_size_init), step_size_init, step_size_std
         )
-        step_size_inner = tf.math.sqrt(step_size_init * step_size_std)
-        # step_size_inner = tf.maximum(step_size_init, step_size_std)
+        # step_size_inner = tf.math.sqrt(step_size_init * step_size_std)
+        step_size_inner = tf.maximum(step_size_init, step_size_std)
         # step_size_inner = tf.minimum(step_size_init, step_size_std)
         step_size_inner = self.map.unconstrain(step_size_inner)
         self.log.debug(f"Step Size: {step_size_inner}")
