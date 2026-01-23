@@ -108,6 +108,7 @@ ignore = [
     "TC008",   # Don't remove quotes from type aliases
     "F722",    # Ignore forward annotation syntax errors
     "PLR0904", # Too many public methods
+    "PLR1702", # Too many nested blocks
 ]
 per-file-ignores = { "src/supaernova/configs/**.py" = [
     "TC001", # Move first party typing-only imports into a TYPE_CHECKING block. Breaks pydantic

@@ -1,3 +1,4 @@
+import json
 import shutil
 from typing import TYPE_CHECKING, Any, Literal, ClassVar, override
 import importlib
@@ -9,6 +10,7 @@ from supaernova.utils import pp, max_central
 from supaernova.analysis import Plotter
 from supaernova.steps.models import Model, ModelStep
 from supaernova.analysis.spectra import SpectraPlotter
+from supaernova.configs.callbacks import callback
 from supaernova.configs.steps.data import DataStepResult
 from supaernova.analysis.dispersion import DispersionPlotter
 from supaernova.analysis.distribution import DistributionPlotter
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
     from supaernova.steps.pae import PAEModel, PAEStepResult
     from supaernova.steps.nflow import NFlowModel, NFlowStepResult
     from supaernova.configs.steps.data import LazySNPAEData, DataStepResult
+    from supaernova.analysis.distribution import DistributionPlot
 
     from .tf import TFPosteriorModel
 
@@ -677,6 +680,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
                 hmc_results = {
                     "samples": samples,
+                    "r_hat": model.r_hat.numpy(),
                     # "step_sizes_final": model.hmc.step_sizes_final.numpy(),
                     # "is_accepted": model.hmc.is_accepted.numpy(),
                     "delta_m": delta_m,
@@ -2258,7 +2262,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 if len(legacy) == 0:
                     legacy = None
 
-                DispersionPlotter.plot_dispersion(
+                stats = DispersionPlotter.plot_dispersion(
                     data,
                     list(self.results[subset].values()),
                     o,
@@ -2270,6 +2274,19 @@ class Posterior(ModelStep[PosteriorConfig]):
                     wl_mask=input_wl_mask,
                     force=force,
                 )
+                if stats is not None:
+                    statistics = {
+                        "no_mask": stats[0],
+                        "combined_mask": stats[-1],
+                    }
+                    if stats[1] is not None:
+                        statistics["sn_mask"] = stats[1]
+                    if stats[2] is not None:
+                        statistics["twins_mask"] = stats[2]
+                    if stats[3] is not None:
+                        statistics["salt_mask"] = stats[3]
+                    with (o.savepath / "stats.json").open("w") as io:
+                        json.dump(statistics, io)
 
     @override
     def _analyse(self, *args: Any, **kwargs: Any) -> None:
@@ -2523,6 +2540,11 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
         ),
     }
 
+    def __init__(self, config: "PosteriorStepConfig") -> None:
+        super().__init__(config)
+
+        self.plots: dict[str, dict[str, Any]] = {}
+
     @override
     def _model(
         self,
@@ -2542,6 +2564,281 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
             else:
                 model = variant.model
             variant.model = model
+
+    @override
+    def _analyse(
+        self,
+        *args: "Any",
+        variants: str | list[str] | None = None,
+        **kwargs: "Any",
+    ) -> None:
+        if variants is None:
+            return
+        if not isinstance(variants, list):
+            variants = [variants]
+
+        for variant_name in variants:
+            variant = self.variants[variant_name]
+
+            super()._analyse(*args, **{**kwargs, "variants": [variant_name]})
+
+            for subset in variant.subsets:
+                for seed in variant.seeds:
+                    model = variant.models[subset][str(seed)]
+                    results = variant.results[subset][str(seed)]
+
+                    self.r_hat[f"{subset}_{seed}_{model.name}"] = {}
+                    self.r_hat[f"{subset}_{seed}_{model.name}"]["min"] = np.min(
+                        results.hmc.r_hat, axis=0
+                    ).tolist()
+                    self.r_hat[f"{subset}_{seed}_{model.name}"]["median"] = np.median(
+                        results.hmc.r_hat, axis=0
+                    ).tolist()
+                    self.r_hat[f"{subset}_{seed}_{model.name}"]["max"] = np.max(
+                        results.hmc.r_hat, axis=0
+                    ).tolist()
+
+                    data = model.data
+                    input_mask = model.data_mask
+                    input_sn_mask = model.sn_mask
+                    input_spec_mask = model.spec_mask
+                    input_wl_mask = model.wl_mask
+
+                    map_init_results = []
+                    map_best_results = []
+                    variant_labels = {}
+                    ind = 0
+                    if model.map.train_delta_m:
+                        variant_labels[ind] = "Δℳ"
+                        map_init_results.append(results.map.init_delta_m)
+                        map_best_results.append(results.map.best_delta_m)
+                        ind += 1
+                    if model.map.train_delta_p:
+                        variant_labels[ind] = "Δp"
+                        map_init_results.append(results.map.init_delta_p)
+                        map_best_results.append(results.map.best_delta_p)
+                        ind += 1
+                    if variant.nflow.physical_latents:
+                        variant_labels[ind] = "μΔAᵥ"
+                        map_init_results.append(results.map.init_u_delta_av)
+                        map_best_results.append(results.map.best_u_delta_av)
+                        ind += 1
+                    for i in range(model.map.n_u_latents):
+                        variant_labels[ind + i] = f"μ{i + 1}"
+                    map_init_results.append(results.map.init_u_latents)
+                    map_best_results.append(results.map.best_u_latents)
+                    map_init_results = np.concatenate(map_init_results, axis=-1)
+                    map_best_results = np.concatenate(map_best_results, axis=-1)
+
+                    plot_chain_data, plot_labels, plot_weights, plot_opts = (
+                        self._plot_hmc(
+                            variant,
+                            subset,
+                            seed,
+                            data,
+                            results,
+                            input_mask,
+                            input_sn_mask,
+                            input_spec_mask,
+                            input_wl_mask,
+                            variant_labels,
+                        )
+                    )
+                    for n, v in plot_labels.items():
+                        if n not in self.plot_chain_data:
+                            self.plot_chain_data[n] = {}
+                        if n not in self.plot_labels:
+                            self.plot_labels[n] = {}
+                        if n not in self.plot_weights and n in plot_weights:
+                            self.plot_weights[n] = {}
+                        for t in v:
+                            self.plot_labels[n][t] = v[t]
+                            self.plot_chain_data[n][t] = plot_chain_data[n][t]
+                            if n in plot_weights:
+                                self.plot_weights[n][t] = plot_weights[n][t]
+                            self.plot_opts[n] = plot_opts[n]
+
+    @override
+    @callback
+    def analyse(self, *args: "Any", **kwargs: "Any") -> None:
+        self.r_hat = {}
+        self.plots = {}
+        self.plot_labels = {}
+        self.plot_chain_data = {}
+        self.plot_weights = {}
+        self.plot_opts = {}
+        super().analyse(*args, **kwargs)
+        r_hat_path = self.paths.plots / "r_hat.json"
+        with r_hat_path.open("w") as io:
+            json.dump(self.r_hat, io)
+        if len(self.variants) > 1:
+            for name in self.plot_labels:
+                o = self.plot_opts[name].model_copy(deep=True)
+                o.labels = self.plot_labels[name]
+                self.plots[name] = self.plots.get(name, {"fig": None, "ax": None})
+                fig = self.plots[name]["fig"]
+                ax = self.plots[name]["ax"]
+                fig, ax = DistributionPlotter.plot_corner(
+                    self.plot_chain_data[name],
+                    o,
+                    statistics="cumulative" if o.reduce == "median" else o.reduce,
+                    log_posterior=self.plot_weights.get(name),
+                    plot_point=self.plot_weights.get(name) is not None,
+                    fig=fig,
+                    ax=ax,
+                    marker_style="P",
+                    marker_size=100,
+                    save=False,
+                    force=True,
+                )
+                self.plots[name]["fig"] = fig
+                self.plots[name]["ax"] = ax
+            for name, opts in self.plots.items():
+                savepath = self.paths.plots / name
+                savepath.parent.mkdir(parents=True, exist_ok=True)
+                if savepath.exists():
+                    continue
+                fig = opts["fig"]
+                ax = opts["ax"]
+                if fig is None:
+                    continue
+                self.log.debug(f"plotting {name}")
+                fig = Plotter.save(fig, savepath)
+                Plotter.close(fig, ax)
+
+    def _plot_hmc(
+        self,
+        variant: Posterior,
+        subset: str,
+        seed: int,
+        data: "LazySNPAEData",
+        results: PosteriorStepResult,
+        input_mask: "npt.NDArray[bool]",
+        input_sn_mask: "npt.NDArray[bool]",
+        input_spec_mask: "npt.NDArray[bool]",
+        input_wl_mask: "npt.NDArray[bool]",
+        hmc_labels,
+    ) -> tuple[dict, dict, dict, dict]:
+        v_chain_data = {}
+        v_labels = {}
+        v_weights = {}
+        v_opts = {}
+        if variant.analysis.plot_hmc is not None:
+            for opts in variant.analysis.plot_hmc:
+                o = opts.model_copy(deep=True)
+                if o.name is None:
+                    o.name = "hmc"
+
+                if o.masked:
+                    o.name += "_masked"
+                if o.mean:
+                    o.name += "_mean"
+
+                name = f"{variant.seeds[0]}/{subset}/{seed}/{o.name}.{o.ext}"
+
+                self.log.debug(f"Plotting {o.name}")
+
+                (
+                    _wl,
+                    _amplitude,
+                    _sigma,
+                    _sn_name,
+                    _time,
+                    mask,
+                    _sn_mask,
+                    _spec_mask,
+                    _wl_mask,
+                ) = SpectraPlotter.prep(
+                    data,
+                    o,
+                )
+                # Determine which spectra to keep
+                # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+                mask_spec = np.any(mask, axis=-1)
+
+                # Determine which SNe to keep
+                # Will mask out any SN with *no* unmasked spectra
+                sn_mask = np.any(mask_spec, axis=-1)
+
+                if not np.any(sn_mask):
+                    continue
+
+                samples = results.hmc.samples
+                log_prob = results.hmc.log_prob
+
+                if o.masked:
+                    (
+                        _wl,
+                        _amplitude,
+                        _sigma,
+                        _sn_name,
+                        _time,
+                        mask,
+                        _sn_mask,
+                        _spec_mask,
+                        _wl_mask,
+                    ) = SpectraPlotter.prep(
+                        data,
+                        o,
+                        mask=input_mask,
+                        sn_mask=input_sn_mask,
+                        spec_mask=input_spec_mask,
+                        wl_mask=input_wl_mask,
+                    )
+
+                    # Determine which spectra to keep
+                    # Will mask out any spectrum with at least one masked wavelength within the valid wavelength range
+                    mask_spec = np.any(mask, axis=-1)
+
+                    # Determine which SNe to keep
+                    # Will mask out any SN with *no* unmasked spectra
+                    mask_sn = np.any(mask_spec, axis=-1)
+                    sn_mask &= mask_sn
+
+                samples = samples[..., sn_mask, :]
+                log_prob = log_prob[..., sn_mask]
+
+                weights = None
+                if o.mean:
+                    if o.reduce == "mean":
+                        chains = samples.mean(axis=0)
+                    elif o.reduce == "median":
+                        chains = np.median(samples, axis=0)
+                    elif o.reduce == "max_central":
+                        chains = np.array([
+                            np.array([
+                                max_central(
+                                    samples[..., sn, pos], weight=log_prob[:, sn]
+                                )[1]
+                                for pos in range(samples.shape[-1])
+                            ])
+                            for sn in range(samples.shape[-2])
+                        ])
+                elif samples.shape[-2] == 1:
+                    chains = samples[..., 0, :]
+                    weights = log_prob[..., 0]
+                else:
+                    chains = np.reshape(samples, (-1, samples.shape[-1]))
+                o.mean = False
+
+                if o.plot_kwargs is None:
+                    o.plot_kwargs = {"title": f"{subset}_{self.name}_{o.name}"}
+                if o.labels is None:
+                    o.labels = {}
+                title = variant.name
+                if name not in v_chain_data:
+                    v_chain_data[name] = {}
+                if name not in v_labels:
+                    v_labels[name] = {}
+                if name not in v_weights and weights is not None:
+                    v_weights[name] = {}
+
+                v_chain_data[name][title] = chains
+                v_labels[name][title] = hmc_labels
+                if weights is not None:
+                    v_weights[name][title] = weights
+                v_opts[name] = o
+        return v_chain_data, v_labels, v_weights, v_opts
 
 
 PosteriorStep.register_step(Posterior)

@@ -1,3 +1,4 @@
+import json
 from typing import TYPE_CHECKING, Any, Literal
 from pathlib import Path
 
@@ -41,7 +42,16 @@ class DispersionPlotter(Plotter):
         sn_mask: "npt.NDArray[float] | None" = None,
         spec_mask: "npt.NDArray[float] | None" = None,
         wl_mask: "npt.NDArray[float] | None" = None,
-    ) -> None:
+    ) -> (
+        tuple[
+            tuple[float, float, float, float],
+            tuple[float, float, float, float] | None,
+            tuple[float, float, float, float] | None,
+            tuple[float, float, float, float] | None,
+            tuple[float, float, float, float],
+        ]
+        | None
+    ):
         do_twins = twins is not None
         do_legacy = legacy is not None
 
@@ -287,7 +297,7 @@ class DispersionPlotter(Plotter):
 
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
-            return
+            return None
 
         pae_redshift = data.redshift[:, 0, 0]
 
@@ -457,6 +467,7 @@ class DispersionPlotter(Plotter):
                 "Axis",
                 "Axis",
             ],
+            tuple[float, float, float, float],
         ]:
             (
                 s_ax,
@@ -556,11 +567,15 @@ class DispersionPlotter(Plotter):
                 alpha=alpha,
             )
 
-            return fig, (
-                s_ax,
-                s_h_ax,
-                p_ax,
-                p_h_ax,
+            return (
+                fig,
+                (
+                    s_ax,
+                    s_h_ax,
+                    p_ax,
+                    p_h_ax,
+                ),
+                (w_rms, w_rms_std, w_nmad, w_nmad_std),
             )
 
         pae_x = pae_redshift
@@ -595,7 +610,7 @@ class DispersionPlotter(Plotter):
         )
 
         if residual_step == 0:
-            return
+            return None
 
         residual_bins = np.arange(
             -5 * residual_scale - 0.5 * residual_step,
@@ -711,7 +726,7 @@ class DispersionPlotter(Plotter):
             twins_x = twins_redshift
             twins_y = twins_weighted_amplitudes
             twins_yerr = twins_weighted_stds
-            fig, twins_ax = _plot(
+            fig, twins_ax, _ = _plot(
                 twins_x,
                 twins_y,
                 twins_yerr,
@@ -728,7 +743,7 @@ class DispersionPlotter(Plotter):
 
             if twins is not None:
                 # === SN Mask ===
-                fig, twins_ax = _plot(
+                fig, twins_ax, _ = _plot(
                     twins_x,
                     twins_y,
                     twins_yerr,
@@ -744,7 +759,7 @@ class DispersionPlotter(Plotter):
                 )
 
                 # === Twins Mask ===
-                fig, twins_ax = _plot(
+                fig, twins_ax, _ = _plot(
                     twins_x,
                     twins_y,
                     twins_yerr,
@@ -760,7 +775,7 @@ class DispersionPlotter(Plotter):
                 )
 
                 # === Salt Mask ===
-                fig, twins_ax = _plot(
+                fig, twins_ax, _ = _plot(
                     twins_x,
                     twins_y,
                     twins_yerr,
@@ -776,7 +791,7 @@ class DispersionPlotter(Plotter):
                 )
 
             # === Combined Mask ===
-            fig, twins_ax = _plot(
+            fig, twins_ax, _ = _plot(
                 twins_x,
                 twins_y,
                 twins_yerr,
@@ -845,7 +860,7 @@ class DispersionPlotter(Plotter):
             legacy_x = legacy_redshift
             legacy_y = legacy_weighted_amplitudes
             legacy_yerr = legacy_weighted_stds
-            fig, legacy_ax = _plot(
+            fig, legacy_ax, _ = _plot(
                 legacy_x,
                 legacy_y,
                 legacy_yerr,
@@ -861,7 +876,7 @@ class DispersionPlotter(Plotter):
 
             if twins is not None:
                 # === SN Mask ===
-                fig, legacy_ax = _plot(
+                fig, legacy_ax, _ = _plot(
                     legacy_x,
                     legacy_y,
                     legacy_yerr,
@@ -876,7 +891,7 @@ class DispersionPlotter(Plotter):
                 )
 
                 # === Twins Mask ===
-                fig, legacy_ax = _plot(
+                fig, legacy_ax, _ = _plot(
                     legacy_x,
                     legacy_y,
                     legacy_yerr,
@@ -891,7 +906,7 @@ class DispersionPlotter(Plotter):
                 )
 
                 # === Salt Mask ===
-                fig, legacy_ax = _plot(
+                fig, legacy_ax, _ = _plot(
                     legacy_x,
                     legacy_y,
                     legacy_yerr,
@@ -906,7 +921,7 @@ class DispersionPlotter(Plotter):
                 )
 
             # === Combined Mask ===
-            fig, legacy_ax = _plot(
+            fig, legacy_ax, _ = _plot(
                 legacy_x,
                 legacy_y,
                 legacy_yerr,
@@ -923,7 +938,7 @@ class DispersionPlotter(Plotter):
             legacy_pull_hist_ax.set_xlabel("PDF")
 
         # === No Mask ===
-        fig, pae_ax = _plot(
+        fig, pae_ax, no_mask_stats = _plot(
             pae_x,
             pae_y,
             pae_yerr,
@@ -939,9 +954,12 @@ class DispersionPlotter(Plotter):
             yerr_upper=pae_yerr_upper,
         )
 
+        sn_mask_stats = None
+        twins_mask_stats = None
+        salt_mask_stats = None
         if twins is not None:
             # === SN Mask ===
-            fig, pae_ax = _plot(
+            fig, pae_ax, sn_mask_stats = _plot(
                 pae_x,
                 pae_y,
                 pae_yerr,
@@ -958,7 +976,7 @@ class DispersionPlotter(Plotter):
             )
 
             # === Twins Mask ===
-            fig, pae_ax = _plot(
+            fig, pae_ax, twins_mask_stats = _plot(
                 pae_x,
                 pae_y,
                 pae_yerr,
@@ -975,7 +993,7 @@ class DispersionPlotter(Plotter):
             )
 
             # === Salt Mask ===
-            fig, pae_ax = _plot(
+            fig, pae_ax, salt_mask_stats = _plot(
                 pae_x,
                 pae_y,
                 pae_yerr,
@@ -992,7 +1010,7 @@ class DispersionPlotter(Plotter):
             )
 
         # === Combined Mask ===
-        fig, pae_ax = _plot(
+        fig, pae_ax, combined_mask_stats = _plot(
             pae_x,
             pae_y,
             pae_yerr,
@@ -1061,3 +1079,11 @@ class DispersionPlotter(Plotter):
 
         fig = Plotter.save(fig, savepath)
         Plotter.close(fig, [*ax[0], *ax[1], *ax[2]])
+
+        return (
+            no_mask_stats,
+            sn_mask_stats,
+            twins_mask_stats,
+            salt_mask_stats,
+            combined_mask_stats,
+        )

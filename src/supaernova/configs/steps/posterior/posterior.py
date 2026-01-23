@@ -116,6 +116,7 @@ class PosteriorStepHMCResult(StepResult):
     # === Field Variables ===
     # --- Required ---
     samples: npt.NDArray[float]
+    r_hat: npt.NDArray[float]
     # step_sizes_final: npt.NDArray[float]
     # is_accepted: npt.NDArray[float]
     u_delta_av: npt.NDArray[float]

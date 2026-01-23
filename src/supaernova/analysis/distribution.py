@@ -80,19 +80,25 @@ class DistributionPlotter(Plotter):
                     chain = DistributionPlotter.prep_from_array(d, config)
                 else:
                     chain = DistributionPlotter.prep_from_result(d, config)
-                if (
-                    "log_posterior" in chain_kwargs
-                    and chain_kwargs["log_posterior"] is not None
-                ):
-                    chain["log_posterior"] = chain_kwargs["log_posterior"]
                 chains.append(chain)
             if labels is None:
                 labels = range(len(chains))
             chains = {labels[i]: chain for (i, chain) in enumerate(chains)}
+            if (
+                "log_posterior" in chain_kwargs
+                and chain_kwargs["log_posterior"] is not None
+            ):
+                log_posterior = chain_kwargs["log_posterior"]
+                for name in chains:
+                    if isinstance(log_posterior, dict):
+                        chains[name]["log_posterior"] = log_posterior.get(name)
+                    else:
+                        chains[name]["log_posterior"] = log_posterior
 
         try:
             fig, ax = Plotter.corner(chains, fig=fig, ax=ax, chain_kwargs=chain_kwargs)
         except Exception as e:
+            print("ERROR:")
             print(e)
             return None, None
         fig.suptitle((config.plot_kwargs or {}).get("title", config.name.capitalize()))

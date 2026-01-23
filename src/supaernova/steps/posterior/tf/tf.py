@@ -162,6 +162,8 @@ class TFPosteriorModel(ks.Model):
 
         self.hmc: PosteriorHMCValue
 
+        self.r_hat: tf.Tensor
+
         self.set_seed()
 
     @override
@@ -615,22 +617,10 @@ class TFPosteriorModel(ks.Model):
         if load_hmc:
             samples = tf.boolean_mask(self.hmc.samples, self.sn_mask[:, 0, 0], axis=-2)
 
-            # @tf.function
-            # def _fn(state):
-            #     return tfp.mcmc.effective_sample_size(
-            #         state,
-            #         filter_beyond_positive_pairs=True,
-            #         cross_chain_dims=(1, 2) if self.n_walkers > 1 else (2,),
-            #     )
-            #
-            # ess = tf.map_fn(_fn, samples, swap_memory=True)
-            # if self.n_walkers == 1:
-            #     ess = ess[0, ...]
-            # self.log.info(f"Effective Sample Size: {ess}")
-
             r_hat = tfp.mcmc.potential_scale_reduction(
                 samples, independent_chain_ndims=1, split_chains=True
             )
+            self.r_hat = r_hat
             r_hat = tfp.stats.percentile(r_hat, 50.0, axis=0)
 
             self.log.info(f"R-Hat: {r_hat}")
