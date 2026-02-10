@@ -98,6 +98,12 @@ class TFPosteriorModel(ks.Model):
             n_walkers = int(NPROC * n_walkers)
         self.n_walkers = n_walkers
         self.n_chains = 1
+        self.log_likelihood_scale = self.options.log_likelihood_scale
+        self.log_likelihood_spec_sum = self.options.log_likelihood_spec_sum
+        self.log_likelihood_sum = self.options.log_likelihood_sum
+        self.step_size_scale = self.options.step_size_scale
+        self.fractional_error = self.options.fractional_error
+        self.weighted_error = self.options.weighted_error
 
         # MAP Variables
         self.map: PosteriorMap
@@ -300,7 +306,8 @@ class TFPosteriorModel(ks.Model):
         )
 
         synth_sigma = tf.sqrt(
-            ((synth_amp * sigma_recon) ** 2) + (input_sigma * input_sigma)
+            tf.square(sigma_recon * (synth_amp if self.fractional_error else 1))
+            + (input_sigma * input_sigma)
         )
 
         # Set missing values to 1 for all times
@@ -335,6 +342,8 @@ class TFPosteriorModel(ks.Model):
         )
 
         log_likelihood_spec = log_likelihood_spec_num  # / log_likelihood_spec_sum
+        if self.log_likelihood_spec_sum:
+            log_likelihood_spec /= log_likelihood_spec_sum
 
         log_likelihood_num = tf.reduce_sum(
             tf.where(
@@ -353,11 +362,9 @@ class TFPosteriorModel(ks.Model):
             1,
         )
 
-        log_likelihood_scale = 5e-2
-
-        log_likelihood = log_likelihood_scale * log_likelihood_num
-        # / log_likelihood_sum
-        # pp((log_likelihood_num, log_likelihood_scale, log_likelihood))
+        log_likelihood = self.log_likelihood_scale * log_likelihood_num
+        if self.log_likelihood_sum:
+            log_likelihood /= log_likelihood_sum
 
         # Ignore likelihood of fully masked SN
         log_likelihood = tf.where(
@@ -1932,10 +1939,12 @@ class TFPosteriorModel(ks.Model):
         step_size_init = tf.where(
             tf.math.is_finite(step_size_init), step_size_init, step_size_std
         )
-        # step_size_inner = tf.math.sqrt(step_size_init * step_size_std)
-        step_size_inner = tf.maximum(step_size_init, step_size_std)
-        # step_size_inner = tf.minimum(step_size_init, step_size_std)
+        if self.step_size_scale == "min":
+            step_size_inner = tf.minimum(step_size_init, step_size_std)
+        elif self.step_size_scale == "max":
+            step_size_inner = tf.maximum(step_size_init, step_size_std)
         step_size_inner = self.map.unconstrain(step_size_inner)
+
         self.log.debug(f"Step Size: {step_size_inner}")
 
         # step_size_inner currently has shape (n_params)

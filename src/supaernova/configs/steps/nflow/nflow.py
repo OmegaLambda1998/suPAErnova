@@ -103,8 +103,8 @@ class NFlowConfig(BackendConfig):
     lr_decay_steps: PositiveInt | PositiveFloat = 1.0
     lr_decay_rate: PositiveFloat = 0.1
 
-    latent_offset_scale: PositiveFloat = 0.25
-    loss_covariance_penalty: NonNegativeFloat = 250000
+    latent_offset_scale: PositiveFloat = 1.0
+    loss_covariance_penalty: NonNegativeFloat = 1
 
     ema_steps: NonNegativeInt = 0
     ema_momentum: PositiveFloat = 0.999

@@ -208,6 +208,14 @@ class PosteriorConfig(BackendConfig):
     n_adaption_steps: PositiveInt | PositiveFloat
     n_walkers: PositiveInt | PositiveFloat = 1.0
     n_thinning: NonNegativeInt = 0
+    log_likelihood_scale: PositiveFloat = 1.0
+    log_likelihood_spec_sum: bool = False
+    log_likelihood_sum: bool = False
+    step_size_scale: Literal["min", "max"] = "max"
+    fractional_error: bool = True
+    weighted_error: bool = True
+    measurement_error: bool = True
+    reconstruction_error: Literal["train", "test", "combined", "match"] = "combined"
     # --- Optional ---
     debug: bool = False
     profile: bool = False
@@ -246,8 +254,8 @@ class PosteriorConfig(BackendConfig):
 
     # - MAP -
     random_initial_positions: bool = False
-    tolerance: PositiveFloat = 1e-3
-    x_tolerance: NonNegativeFloat = 1e-3
+    tolerance: PositiveFloat = 5e-3
+    x_tolerance: NonNegativeFloat = 5e-3
     f_relative_tolerance: NonNegativeFloat = 0
     f_absolute_tolerance: NonNegativeFloat = 0
     max_iterations: PositiveInt = 2500
@@ -256,7 +264,7 @@ class PosteriorConfig(BackendConfig):
     # See [Betancourt et al (2014)](https://arxiv.org/abs/1411.6669).
     # Since we run MAP first, our initial guess is very good and we want small, precise steps.
     # So use a large acceptance rate.
-    target_acceptance_rate: PositiveFloat = 0.9
+    target_acceptance_rate: PositiveFloat = 0.85
 
     # u_delta_av_min: float | None = -10
     # u_delta_av_max: float | None = 10
@@ -276,8 +284,8 @@ class PosteriorConfig(BackendConfig):
     u_latents_std: float = 1
     u_latents_prior: bool = True
 
-    delta_av_start: float = -0.5
-    delta_av_end: float = 0.5
+    delta_av_start: float = -0.1
+    delta_av_end: float = 0.1
     delta_av_mean: float = 0
     delta_av_std: float = 1
 
@@ -285,8 +293,8 @@ class PosteriorConfig(BackendConfig):
     # delta_m_max: float | None = 10
     delta_m_min: float | None = None
     delta_m_max: float | None = None
-    delta_m_start: float = -1.5
-    delta_m_end: float = 1.5
+    delta_m_start: float = -0.1
+    delta_m_end: float = 0.1
     delta_m_mean: float = 0
     delta_m_std: float = 1
     delta_m_prior: bool = False
@@ -298,7 +306,7 @@ class PosteriorConfig(BackendConfig):
     delta_p_start: float = -0.5
     delta_p_end: float = 0.5
     delta_p_mean: float = 0
-    delta_p_std: float = 1
+    delta_p_std: float = 0.01
     delta_p_prior: bool = False
 
     # bias_min: float | None = -10

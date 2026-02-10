@@ -62,13 +62,20 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.profile: bool = self.options.profile
         self.kfold: int = self.options.kfold
         self.save_best: bool = self.options.save_best
-        self.subsets: list[Literal["train", "test"]] = (
-            ["train"] if self.options.train_subset else []
-        ) + (["test"] if self.options.test_subset else [])
+        self.subsets: list[Literal["test", "train"]] = (
+            ["test"] if self.options.test_subset else []
+        ) + (["train"] if self.options.train_subset else [])
         self.tolerance: float = self.options.tolerance
         self.target_acceptance_rate: float = self.options.target_acceptance_rate
         self.random_initial_positions: bool = self.options.random_initial_positions
         self.legacy_path: tuple[Path] | None = self.options.legacy
+
+        self.fractional_error: bool = self.options.fractional_error
+        self.weighted_error: bool = self.options.weighted_error
+        self.measurement_error: bool = self.options.measurement_error
+        self.reconstruction_error: Literal["train", "test", "combined", "match"] = (
+            self.options.reconstruction_error
+        )
 
         self.u_delta_av_min: float = self.options.u_delta_av_min
         self.u_delta_av_max: float = self.options.u_delta_av_max
@@ -385,8 +392,9 @@ class Posterior(ModelStep[PosteriorConfig]):
             u_latents_min = np.min(u_latents[mask_sn], axis=0)
             u_latents_max = np.max(u_latents[mask_sn], axis=0)
             u_latents_bounds = (u_latents_min, u_latents_max)
+            self.u_latent_bounds[subset] = u_latents_bounds
             self.u_latent_bounds[subset] = self.u_latent_bounds.get(
-                "train", u_latents_bounds
+                "test", u_latents_bounds
             )
 
             step_sizes = []
@@ -409,19 +417,28 @@ class Posterior(ModelStep[PosteriorConfig]):
                 step_sizes.append(bias_step_size)
             u_latent_step_size = np.std(u_latents[mask_sn], axis=0)
             step_sizes.append(u_latent_step_size)
+            step_sizes = np.concatenate(step_sizes, axis=-1)
 
-            self.step_sizes[subset] = np.concatenate(step_sizes, axis=-1)
+            self.step_sizes[subset] = step_sizes
+            self.step_sizes[subset] = self.step_sizes.get("test", step_sizes)
 
             stage = pae.model.stage
+            stage_subset = self.reconstruction_error
+            if stage_subset == "match":
+                stage_subset = subset
+            if stage_subset == "combined":
+                stage_subset = ""
+            else:
+                stage_subset += "_"
 
-            subset_data = getattr(stage, f"{subset}_data")
+            subset_data = getattr(stage, f"{stage_subset}data")
             time = subset_data.time
             amplitude = subset_data.amplitude
             sigma = subset_data.sigma
-            mask = getattr(stage, f"{subset}_mask")
-            sn_mask = getattr(stage, f"{subset}_sn_mask")
-            spec_mask = getattr(stage, f"{subset}_spec_mask")
-            wl_mask = getattr(stage, f"{subset}_wl_mask")
+            mask = getattr(stage, f"{stage_subset}mask")
+            sn_mask = getattr(stage, f"{stage_subset}sn_mask")
+            spec_mask = getattr(stage, f"{stage_subset}spec_mask")
+            wl_mask = getattr(stage, f"{stage_subset}wl_mask")
 
             # time = stage.data.time
             # amplitude = stage.data.amplitude
@@ -431,22 +448,23 @@ class Posterior(ModelStep[PosteriorConfig]):
             # spec_mask = stage.spec_mask
             # wl_mask = stage.wl_mask
 
-            recon_error, _, recon_error_centers = pae.model.recon_error((
-                time,
-                amplitude,
-                sigma,
-                mask,
-                sn_mask,
-                spec_mask,
-                wl_mask,
-            ))
+            recon_error, _, recon_error_centers = pae.model.recon_error(
+                (
+                    time,
+                    amplitude,
+                    sigma,
+                    mask,
+                    sn_mask,
+                    spec_mask,
+                    wl_mask,
+                ),
+                fractional_error=self.fractional_error,
+                weighted_error=self.weighted_error,
+                measurement_error=self.measurement_error,
+            )
 
             self.recon_error[subset] = recon_error
-            self.recon_error[subset] = self.recon_error.get("train", recon_error)
             self.recon_error_centers[subset] = recon_error_centers
-            self.recon_error_centers[subset] = self.recon_error_centers.get(
-                "train", recon_error_centers
-            )
 
         # --- Stages ---
         i = 0

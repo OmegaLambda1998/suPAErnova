@@ -263,14 +263,22 @@ class TFNFlowModel(ks.Model):
     @override
     def call(
         self,
-        inputs: tuple[tf.Tensor, tf.Tensor],
+        inputs: tuple[tf.Tensor, tf.Tensor, tf.Tensor],
         training: bool | None = None,
     ) -> tf.Tensor:
         training = False if training is None else training
 
         # === Unpack Inputs ===
+        mask = inputs[-1]
+
         latents = inputs[0]
+        # pp(latents, "latents")
+        latents = tf.boolean_mask(latents, mask)
+        # pp(latents, "latents")
         phys_latents = inputs[1]
+        # pp(phys_latents, "phys_latents")
+        phys_latents = tf.boolean_mask(phys_latents, mask)
+        # pp(phys_latents, "phys_latents")
 
         if training and self.latent_offset_scale > 0:
             latents_std = tf.math.reduce_std(latents, axis=0)
@@ -278,6 +286,7 @@ class TFNFlowModel(ks.Model):
                 tf.random.normal(tf.shape(latents))
                 * latents_std
                 * self.latent_offset_scale
+                * tf.pow(10.0, -(1 - (self.optimizer.learning_rate / self.lr)))
             )
             latents += latents_offset
 
@@ -289,20 +298,20 @@ class TFNFlowModel(ks.Model):
             cov_dim = tf.shape(latents_cov_norm)[0]
             cov_mask = 1.0 - tf.eye(cov_dim)
 
-            decorrelate_delta_av = tf.zeros((1, cov_dim))
-            decorrelate_flow_latents = tf.zeros((self.n_u_latents, cov_dim))
-            decorrelate_physical_latents = tf.ones((2, cov_dim))
-
-            decorrelate = tf.concat(
-                (
-                    decorrelate_delta_av,
-                    decorrelate_flow_latents,
-                    decorrelate_physical_latents,
-                ),
-                axis=0,
-            )
-            decorrelate *= -(tf.transpose(decorrelate) - 1)
-            cov_mask *= decorrelate
+            # decorrelate_delta_av = tf.zeros((1, cov_dim))
+            # decorrelate_flow_latents = tf.zeros((self.n_u_latents, cov_dim))
+            # decorrelate_physical_latents = tf.ones((2, cov_dim))
+            #
+            # decorrelate = tf.concat(
+            #     (
+            #         decorrelate_delta_av,
+            #         decorrelate_flow_latents,
+            #         decorrelate_physical_latents,
+            #     ),
+            #     axis=0,
+            # )
+            # decorrelate *= -(tf.transpose(decorrelate) - 1)
+            # cov_mask *= decorrelate
 
             loss_cov = tf.reduce_sum(
                 tf.square(
@@ -311,11 +320,15 @@ class TFNFlowModel(ks.Model):
             ) / tf.reduce_sum(cov_mask)
         else:
             loss_cov = tf.convert_to_tensor(0, dtype=latents.dtype)
+        pp(loss_cov, "loss_cov")
         cov_loss = loss_cov * self.loss_covariance_penalty
+        pp(cov_loss, "cov_loss")
         log_prob = self.flow.log_prob(latents)
-        zero_log_prob = self.flow.distribution.log_prob(tf.zeros_like(latents))
+        # pp(cov_loss, "cov_loss")
+        # pp(log_prob, "log_prob")
+        # pp(log_prob - cov_loss, "loss")
         # === Calculate Log Probability ===
-        return log_prob - cov_loss + zero_log_prob
+        return log_prob - cov_loss
 
     def u_to_z(self, inputs: tf.Tensor, *, permute: bool = False) -> tf.Tensor:
         # If permute is True, then the incoming u_latents need to be permuted correctly
@@ -427,9 +440,9 @@ class TFNFlowModel(ks.Model):
 
         # === Prep Data ===
         _data = (self.latents, self.cov_latents)
-        train_data = (self.train_latents, self.train_cov_latents)
-        _test_data = (self.test_latents, self.test_cov_latents)
-        val_data = (self.val_latents, self.val_cov_latents)
+        train_data = (self.train_latents, self.train_cov_latents, self.train_mask[:, 0])
+        _test_data = (self.test_latents, self.test_cov_latents, self.test_mask[:, 0])
+        val_data = (self.val_latents, self.val_cov_latents, self.val_mask[:, 0])
 
         # === Train ===
         self._epoch = 0
@@ -508,7 +521,7 @@ class TFNFlowModel(ks.Model):
 
             self.built = True
 
-        train_data = (self.train_latents, self.train_cov_latents)
+        train_data = (self.train_latents, self.train_cov_latents, self.train_mask[:, 0])
         self(train_data)
         if self.debug:
             self.log.debug("Trainable variables:")

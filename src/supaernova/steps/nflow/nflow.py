@@ -348,8 +348,9 @@ class NFlow(ModelStep[NFlowConfig]):
 
             z_latents = getattr(self.model, f"{dt}latents")
             z_cov_latents = getattr(self.model, f"{dt}cov_latents")
+            z_mask = getattr(self.model, f"{dt}mask")[:, 0]
 
-            nflow_inputs = (z_latents, z_cov_latents)
+            nflow_inputs = (z_latents, z_cov_latents, z_mask)
             log_prob = self.model(nflow_inputs, training=False)
 
             u_latents = self.model.z_to_u(z_latents, permute=True)

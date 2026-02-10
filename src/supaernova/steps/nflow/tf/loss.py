@@ -13,11 +13,11 @@ def NegLogLikelihood(
     y_true: "tf.Tensor", y_pred: "tf.Tensor", *, model: "ks.Model"
 ) -> "tf.Tensor":
 
-    y_pred = tf.where(
-        y_true,
-        y_pred,
-        -np.inf * tf.ones_like(y_pred),
-    )
+    # y_pred = tf.where(
+    #     y_true,
+    #     y_pred,
+    #     -np.inf * tf.ones_like(y_pred),
+    # )
 
     valid_loss = tf.math.is_finite(y_pred)
     loss_num = tf.reduce_sum(tf.where(valid_loss, y_pred, tf.zeros_like(y_pred)))
