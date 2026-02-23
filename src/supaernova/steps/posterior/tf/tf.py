@@ -56,6 +56,7 @@ class TFPosteriorModel(ks.Model):
         self.subset: Literal["train", "test"] = subset
         self.step_size = config.step_sizes[self.subset]
         self.u_latent_bounds = config.u_latent_bounds[self.subset]
+        self.generalised_u_latents: float = config.generalised_u_latents
 
         self.debug: bool = config.config.debug or self.options.debug
         self.profile: bool = self.options.profile
@@ -190,6 +191,7 @@ class TFPosteriorModel(ks.Model):
     ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         training = False if training is None else training
         testing = False if testing is None else testing
+        eps = ks.backend.epsilon()
 
         # === Inputs ===
         if input_phase is None:
@@ -202,9 +204,11 @@ class TFPosteriorModel(ks.Model):
         # --- Masks ---
         # Data Mask
         input_mask = tf.ones_like(input_amp, dtype=tf.bool) if mask is None else mask
+        # pp(tf.math.count_nonzero(input_mask), "input_mask")
 
         # Wavelength Range Mask
         input_wl_mask = tf.ones_like(input_mask) if wl_mask is None else wl_mask
+        # pp(tf.math.count_nonzero(input_wl_mask), "input_wl_mask")
 
         # Phase Range Mask
         input_spec_mask = (
@@ -212,6 +216,7 @@ class TFPosteriorModel(ks.Model):
             if spec_mask is None
             else spec_mask
         )
+        # pp(tf.math.count_nonzero(input_spec_mask), "input_spec_mask")
 
         # Redshift Range Mask
         input_sn_mask = (
@@ -219,13 +224,17 @@ class TFPosteriorModel(ks.Model):
             if sn_mask is None
             else sn_mask
         )
+        # pp(tf.math.count_nonzero(input_sn_mask), "input_sn_mask")
 
         posterior_mask = input_mask & input_sn_mask & input_spec_mask & input_wl_mask
+        # pp(tf.math.count_nonzero(posterior_mask), "posterior_mask")
 
         mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
+        # pp(tf.math.count_nonzero(mask_spec), "mask_spec")
 
         # Determine which sn to keep
         mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
+        # pp(tf.math.count_nonzero(mask_sn), "mask_sn")
 
         # Unconstrained -> Constrained
         input_position = self.map.constrain(input_position, full=True)
@@ -295,6 +304,8 @@ class TFPosteriorModel(ks.Model):
             delta_p = tf.expand_dims(delta_p, axis=-2)
             phase += delta_p
 
+        # pp(tf.boolean_mask(input_sigma, posterior_mask), "input_sigma")
+
         # Measured average AE reconstruction error at current times
         sigma_recon = tf.transpose(
             tfp.math.interp_regular_1d_grid(
@@ -305,16 +316,19 @@ class TFPosteriorModel(ks.Model):
             )
         )
 
+        synth_scale = (
+            tf.math.maximum(
+                tf.sqrt(synth_amp * synth_amp + input_sigma * input_sigma), eps
+            )
+            if self.fractional_error
+            else 1
+        )
         synth_sigma = tf.sqrt(
-            tf.square(sigma_recon * (synth_amp if self.fractional_error else 1))
-            + (input_sigma * input_sigma)
+            tf.square(synth_scale * sigma_recon) + (input_sigma * input_sigma)
         )
 
         # Set missing values to 1 for all times
         synth_sigma = tf.where(posterior_mask, synth_sigma, tf.ones_like(synth_sigma))
-
-        # Set missing values to 0 for all times
-        # synth_amp = tf.where(posterior_mask, synth_amp, tf.zeros_like(synth_amp))
 
         likelihood = tfd.Normal(loc=synth_amp, scale=synth_sigma)
 
@@ -622,14 +636,15 @@ class TFPosteriorModel(ks.Model):
         ).expect_partial()
 
         if load_hmc:
-            samples = tf.boolean_mask(self.hmc.samples, self.sn_mask[:, 0, 0], axis=-2)
-
+            mask = self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask
+            mask_spec = tf.math.reduce_any(mask, axis=-1)
+            mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
+            samples = tf.boolean_mask(self.hmc.samples, mask_sn, axis=-2)
             r_hat = tfp.mcmc.potential_scale_reduction(
                 samples, independent_chain_ndims=1, split_chains=True
             )
             self.r_hat = r_hat
             r_hat = tfp.stats.percentile(r_hat, 50.0, axis=0)
-
             self.log.info(f"R-Hat: {r_hat}")
         clear_session()
 
@@ -1926,71 +1941,54 @@ class TFPosteriorModel(ks.Model):
                 )
                 return
         self.log.debug("Running HMC")
-        step_size_init = self.step_size
+
         initial_position = self.map.position.best
 
-        step_size_std = tf.math.reduce_std(
-            tf.boolean_mask(initial_position, self.map.converged), axis=0
-        )
+        if self.step_size_scale == "shift":
+            original_position = self.map.position.original
+            step_size = tf.where(
+                self.map.converged[..., None],
+                tf.abs(original_position - initial_position),
+                tf.zeros_like(initial_position),
+            )[0, ...]
+            self.log.debug(f"Step Size: {tf.reduce_mean(step_size, axis=0)}")
+        else:
+            step_size_init = self.step_size
+            step_size_std = tf.math.reduce_std(
+                tf.boolean_mask(initial_position, self.map.converged), axis=0
+            )
+            step_size_std = tf.where(
+                tf.math.is_finite(step_size_std), step_size_std, step_size_init
+            )
+            step_size_init = tf.where(
+                tf.math.is_finite(step_size_init), step_size_init, step_size_std
+            )
 
-        step_size_std = tf.where(
-            tf.math.is_finite(step_size_std), step_size_std, step_size_init
-        )
-        step_size_init = tf.where(
-            tf.math.is_finite(step_size_init), step_size_init, step_size_std
-        )
-        if self.step_size_scale == "min":
-            step_size_inner = tf.minimum(step_size_init, step_size_std)
-        elif self.step_size_scale == "max":
-            step_size_inner = tf.maximum(step_size_init, step_size_std)
-        step_size_inner = self.map.unconstrain(step_size_inner)
+            if self.step_size_scale == "min":
+                step_size_inner = tf.minimum(step_size_init, step_size_std)
+            elif self.step_size_scale == "max":
+                step_size_inner = tf.maximum(step_size_init, step_size_std)
+            step_size_inner = self.map.unconstrain(step_size_inner)
 
-        self.log.debug(f"Step Size: {step_size_inner}")
+            self.log.debug(f"Step Size: {step_size_inner}")
 
-        # step_size_inner currently has shape (n_params)
-        # We have n_walkers * n_sn chains
-        # We want each sn to have their own step size, across their walkers
-        # So we need step_size to have shape (n_sn, n_params)
+            # step_size_inner currently has shape (n_params)
+            # We have n_walkers * n_sn chains
+            # We want each sn to have their own step size, across their walkers
+            # So we need step_size to have shape (n_sn, n_params)
 
-        # shape = (1, n_params)
-        step_size = tf.expand_dims(step_size_inner, axis=0)
+            # shape = (1, n_params)
+            step_size = tf.expand_dims(step_size_inner, axis=0)
 
-        # shape = (n_sn, n_params)
-        step_size = tf.repeat(
-            step_size,
-            repeats=initial_position.shape[-2],
-            axis=0,
-        )
-
-        # shape = (1, n_sn, n_params)
-        # step_size = tf.expand_dims(step_size, axis=0)
-
-        # shape = (n_walkers, n_sn, n_params)
-        # step_size = tf.repeat(step_size, repeats=self.n_walkers, axis=0)
+            # shape = (n_sn, n_params)
+            step_size = tf.repeat(
+                step_size,
+                repeats=initial_position.shape[-2],
+                axis=0,
+            )
 
         initial_position = self.map.unconstrain(initial_position)
         initial_position = tf.repeat(initial_position, repeats=self.n_walkers, axis=0)
-
-        # Draw from a 0-1 Gaussian then scale by step size squared to mimic drawing from a 0-step_size Gaussian
-        offsets = (
-            tf.random.normal(initial_position.shape)
-            * step_size[:1, ...]
-            * step_size[:1, ...]
-        )
-        # The first walker has no offset so it starts at the best position
-        offsets_mask = tf.cast(
-            tf.math.logical_not(
-                tf.sequence_mask(1, initial_position.shape[0], dtype=tf.bool)
-            ),
-            offsets.dtype,
-        )[:, None, None]
-        offsets *= offsets_mask
-        # offsets *= (
-        #     tf.range(initial_position.shape[0], dtype=offsets.dtype)
-        #     / initial_position.shape[0]
-        # )[:, None, None]
-
-        # initial_position += offsets
 
         self.log.debug(
             f"With {self.n_burnin_steps} [{self.max_tree_depth * self.n_burnin_steps}] burn-in steps [samples] ({self.n_adaption_steps} [{self.max_tree_depth * self.n_adaption_steps}] of which will be used for step-size adaption) and {self.n_run_steps} [{self.max_tree_depth * self.n_run_steps}] run steps [samples], a maximum of {(self.n_burnin_steps + self.n_run_steps)} [{self.max_samples}] steps [samples] will be drawn per-walker for a max leapfrog depth of {self.max_tree_depth}. Across all {self.n_walkers} walkers a maximum of {self.n_walkers * (self.n_burnin_steps + self.n_run_steps)} [{self.n_walkers * self.max_samples}] steps [samples] will be drawn."

@@ -162,6 +162,7 @@ class TFNFlowModel(ks.Model):
         self.n_hidden_units: int = self.options.n_hidden_units
         self.n_layers: int = self.options.n_layers
         self.batch_normalisation: bool = self.options.batch_normalisation
+        self.stablised: bool = self.options.stablised
         # Only include physical latents (ΔAᵥ) if the PAE includes physical latents
         self.physical_latents: bool = (
             self.options.physical_latents and self.pae.physical_latents
@@ -195,20 +196,22 @@ class TFNFlowModel(ks.Model):
         permute = tf.constant(tf.roll(tf.range(self.n_flow_latents), shift=1, axis=0))
         bijectors = []
         permuters = []
+
         for n in range(self.n_layers):
-            # First permute input dimensions
-            bijectors.append(
-                tfb.Permute(
-                    permutation=permute,
-                    name=f"NFlowPermute_{n}",
+            if n > 0:
+                # First permute input dimensions
+                bijectors.append(
+                    tfb.Permute(
+                        permutation=permute,
+                        name=f"NFlowPermute_{n}",
+                    )
                 )
-            )
-            permuters.append(
-                tfb.Permute(
-                    permutation=permute,
-                    name=f"NFlowPermute_{n}",
+                permuters.append(
+                    tfb.Permute(
+                        permutation=permute,
+                        name=f"NFlowPermute_{n}",
+                    )
                 )
-            )
 
             # Then (optionally) apply batch normalisation
             if self.batch_normalisation:
@@ -245,14 +248,11 @@ class TFNFlowModel(ks.Model):
                 )
             )
 
-        # The first element is a permutation, but we don't want to immediately permute the latents
-        # So remove the first element
         bijectors = tfb.Chain(
-            bijectors[1:],
+            bijectors,
             name="NFlowChain",
         )
-
-        self.permute = tfb.Chain(permuters[1:], name="NFlowPermute")
+        self.permute = tfb.Chain(permuters, name="NFlowPermute")
 
         self.flow = tfd.TransformedDistribution(
             distribution=gaussian,
@@ -297,22 +297,6 @@ class TFNFlowModel(ks.Model):
             latents_cov_norm = tfp.stats.covariance(cov_latents)
             cov_dim = tf.shape(latents_cov_norm)[0]
             cov_mask = 1.0 - tf.eye(cov_dim)
-
-            # decorrelate_delta_av = tf.zeros((1, cov_dim))
-            # decorrelate_flow_latents = tf.zeros((self.n_u_latents, cov_dim))
-            # decorrelate_physical_latents = tf.ones((2, cov_dim))
-            #
-            # decorrelate = tf.concat(
-            #     (
-            #         decorrelate_delta_av,
-            #         decorrelate_flow_latents,
-            #         decorrelate_physical_latents,
-            #     ),
-            #     axis=0,
-            # )
-            # decorrelate *= -(tf.transpose(decorrelate) - 1)
-            # cov_mask *= decorrelate
-
             loss_cov = tf.reduce_sum(
                 tf.square(
                     cov_mask * latents_cov_norm,

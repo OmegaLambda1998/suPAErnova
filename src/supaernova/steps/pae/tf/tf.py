@@ -493,8 +493,8 @@ class TFPAEDecoder(ks.layers.Layer):
             colourlaw = self.colourlaw_layer(delta_av_latent, training=training)
             amplitude *= tf.pow(10.0, -0.4 * (colourlaw + delta_m_latent))
 
-        # if not (training or testing):
-        #     amplitude = tf.nn.relu(amplitude)
+        if not (training or testing):
+            amplitude = tf.nn.relu(amplitude)
 
         return tf.where(input_mask, amplitude, tf.zeros_like(amplitude))
 
@@ -1757,16 +1757,19 @@ class TFPAEModel(ks.Model):
         d_amp = tf.reshape(d_amp, [-1, wl_dim])
         recon_mask = tf.reshape(recon_mask, [-1, wl_dim])
 
-        diff = tf.abs(amp_true - amp_pred)
+        error = tf.abs(amp_true - amp_pred)
         eps = ks.backend.epsilon()
 
-        error = tf.abs(diff)
         meas_error = d_amp
+        weights = tf.ones_like(error)
+        if weighted_error:
+            weights = 1 / tf.math.maximum(d_amp, eps)
         if fractional_error:
-            error /= tf.abs(amp_pred) + eps
-            meas_error /= tf.abs(amp_pred) + eps
-
-        weights = 1 / (d_amp * d_amp + eps)
+            scale = tf.math.maximum(tf.sqrt(amp_pred * amp_pred + d_amp * d_amp), eps)
+            error /= scale
+            meas_error /= scale
+            # if weighted_error:
+            #     weights *= scale
 
         bin_indices = tf.reshape(
             (
@@ -1788,54 +1791,41 @@ class TFPAEModel(ks.Model):
             in_bin_idx = tf.where(bin_indices == bin_id)[:, 0]
             bin_error = tf.gather(error, in_bin_idx)
             bin_meas_error = tf.gather(meas_error, in_bin_idx)
-            bin_weights = tf.gather(weights, in_bin_idx)
+            bin_weights = tf.square(tf.gather(weights, in_bin_idx))
             bin_mask = tf.gather(recon_mask, in_bin_idx)
 
             # Compute std of masked values
-            if weighted_error:
-                numerator = tf.reduce_sum(
-                    tf.where(
-                        bin_mask,
-                        bin_weights * bin_error * bin_error,
-                        tf.zeros_like(bin_error),
+            numerator = tf.reduce_sum(
+                tf.where(
+                    bin_mask,
+                    bin_weights
+                    * tf.math.maximum(
+                        bin_error * bin_error - bin_meas_error * bin_meas_error, 0
                     ),
+                    tf.zeros_like(bin_error),
+                ),
+                axis=0,
+            )
+            # meas_numerator = tf.reduce_sum(
+            #     tf.where(
+            #         bin_mask,
+            #         bin_weights * bin_meas_error * bin_meas_error,
+            #         tf.zeros_like(bin_meas_error),
+            #     ),
+            #     axis=0,
+            # )
+            denominator = tf.math.maximum(
+                tf.reduce_sum(
+                    tf.where(bin_mask, bin_weights, tf.zeros_like(bin_error)),
                     axis=0,
-                )
-                meas_numerator = tf.reduce_sum(
-                    tf.where(
-                        bin_mask,
-                        bin_weights * bin_meas_error * bin_meas_error,
-                        tf.zeros_like(bin_meas_error),
-                    ),
-                    axis=0,
-                )
-                denominator = tf.math.maximum(
-                    tf.reduce_sum(
-                        tf.where(bin_mask, bin_weights, tf.zeros_like(bin_error)),
-                        axis=0,
-                    ),
-                    1,
-                )
-            else:
-                numerator = tf.reduce_sum(
-                    tf.where(bin_mask, bin_error * bin_error, tf.zeros_like(bin_error)),
-                    axis=0,
-                )
-                meas_numerator = tf.reduce_sum(
-                    tf.where(
-                        bin_mask,
-                        bin_meas_error * bin_meas_error,
-                        tf.zeros_like(bin_meas_error),
-                    ),
-                    axis=0,
-                )
-                denominator = tf.math.maximum(
-                    tf.math.count_nonzero(bin_mask, axis=0, dtype=tf.float32), 1
-                )
+                ),
+                eps,
+            )
             var = numerator / denominator
-            meas_var = meas_numerator / denominator
-            total_var = tf.math.maximum(var - meas_var, 0) if measurement_error else var
-            rms_error = tf.sqrt(total_var)
+            # meas_var = (meas_numerator / denominator) if measurement_error else 0
+            # total_var = tf.math.maximum(var - meas_var, 0)
+            # rms_error = tf.sqrt(total_var)
+            rms_error = tf.sqrt(var)
             binned_error = binned_error.write(bin_id, rms_error)
 
         binned_error = tf.transpose(binned_error.stack())

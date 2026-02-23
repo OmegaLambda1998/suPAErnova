@@ -16,6 +16,59 @@ if TYPE_CHECKING:
     from supaernova.configs.steps.posterior import PosteriorMAPStage
 
 
+class MultivariateGeneralisedNormalDiag(tfd.Distribution):
+    def __init__(
+        self,
+        loc,
+        scale_diag,
+        power,
+        validate_args=False,
+        name="MultivariateGeneralisedNormalDiag",
+    ) -> None:
+        """Multivariate generalised normal with diagonal scale.
+        loc: [event_dims] tensor
+        scale_diag: scalar or [event_dims] tensor
+        power: scalar or [event_dims] tensor.
+        """
+        self.loc = tf.convert_to_tensor(loc, dtype=tf.float32)
+        self.scale_diag = tf.convert_to_tensor(scale_diag, dtype=tf.float32)
+        self.power = tf.convert_to_tensor(power, dtype=tf.float32)
+        self.event_dims = tf.shape(self.loc)[0]
+
+        super().__init__(
+            dtype=tf.float32,
+            reparameterization_type=tfd.FULLY_REPARAMETERIZED,
+            validate_args=validate_args,
+            allow_nan_stats=False,
+            name=name,
+        )
+
+        # Each dimension is independent, but we do not wrap with Independent here
+        self.components = tfd.GeneralizedNormal(
+            loc=self.loc, scale=self.scale_diag, power=self.power
+        )
+
+    def _event_shape_tensor(self):
+        return tf.convert_to_tensor([self.event_dims], dtype=tf.int32)
+
+    def _event_shape(self):
+        return tf.TensorShape([self.event_dims])
+
+    def _batch_shape_tensor(self):
+        return tf.constant([], dtype=tf.int32)
+
+    def _batch_shape(self):
+        return tf.TensorShape([])
+
+    def _log_prob(self, x):
+        # Sum log_probs over dimensions for multivariate event
+        return tf.reduce_sum(self.components.log_prob(x), axis=-1)
+
+    def _sample_n(self, n, seed=None):
+        # Sample shape [n, event_dims]
+        return self.components.sample(n, seed=seed)
+
+
 class PosteriorMapValue(tf.Module):
     map_keys: ClassVar[set[str]] = {"original", "initial", "current", "best"}
 
@@ -92,10 +145,11 @@ class PosteriorMap(tf.Module):
         )
 
         # === Priors ===
+        self.generalised_u_latents: float = config.generalised_u_latents
         self.u_min, self.u_max = config.u_latent_bounds
         self.use_u_delta_av_prior: bool = config.options.u_delta_av_prior
-        self.u_delta_av_min: float = config.options.u_delta_av_min or -np.inf
-        self.u_delta_av_max: float = config.options.u_delta_av_max or np.inf
+        self.u_delta_av_min: float = config.options.u_delta_av_min or self.u_min
+        self.u_delta_av_max: float = config.options.u_delta_av_max or self.u_max
         self.u_delta_av_start: float = config.options.u_delta_av_start
         self.u_delta_av_end: float = config.options.u_delta_av_end
         self.u_delta_av_mean: float = config.options.u_delta_av_mean
@@ -103,6 +157,13 @@ class PosteriorMap(tf.Module):
         self.u_delta_av_prior: tfd.Distribution = tfd.Normal(
             loc=self.u_delta_av_mean, scale=self.u_delta_av_std
         )
+        if self.generalised_u_latents > 2:
+            self.u_delta_av_prior = tfd.GeneralizedNormal(
+                loc=self.u_delta_av_mean,
+                scale=self.u_delta_av_std,
+                power=self.generalised_u_latents,
+            )
+
         self.u_delta_av_transform: tfb.Bijector = tfb.Identity()
         if np.isfinite(self.u_delta_av_min) and np.isfinite(self.u_delta_av_max):
             self.u_delta_av_transform = tfb.SoftClip(
@@ -112,14 +173,21 @@ class PosteriorMap(tf.Module):
             self.n_pos += 1
 
         self.use_u_latents_prior: bool = config.options.u_latents_prior
-        self.u_latents_min: float = config.options.u_latents_min or -np.inf
-        self.u_latents_max: float = config.options.u_latents_max or np.inf
+        self.u_latents_min: float = config.options.u_latents_min or self.u_min
+        self.u_latents_max: float = config.options.u_latents_max or self.u_max
         self.u_latents_mean: float = config.options.u_latents_mean
         self.u_latents_std: float = config.options.u_latents_std
         self.u_latents_prior: tfd.Distribution = tfd.MultivariateNormalDiag(
             loc=self.u_latents_mean * tf.ones(self.n_u_latents),
             scale_diag=self.u_latents_std * tf.ones(self.n_u_latents),
         )
+        if self.generalised_u_latents > 2:
+            self.u_latents_prior = MultivariateGeneralisedNormalDiag(
+                loc=self.u_latents_mean * tf.ones(self.n_u_latents),
+                scale_diag=self.u_latents_std * tf.ones(self.n_u_latents),
+                power=self.generalised_u_latents * tf.ones(self.n_u_latents),
+            )
+
         self.u_latents_transform: tfb.Bijector = tfb.Identity()
         if np.all(np.isfinite(self.u_latents_min)) and np.all(
             np.isfinite(self.u_latents_max)

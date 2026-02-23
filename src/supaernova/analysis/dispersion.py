@@ -585,9 +585,9 @@ class DispersionPlotter(Plotter):
         pae_yerr_upper = pae_weighted_amplitude_errs_upper
         no_plot_mask = None
         sn_plot_mask = pae_mask
-        twins_plot_mask = pae_twins_mask
-        salt_plot_mask = pae_salt_mask
-        combined_plot_mask = pae_mask & pae_twins_mask  # & pae_salt_mask
+        twins_plot_mask = pae_mask & pae_twins_mask
+        salt_plot_mask = pae_mask & pae_salt_mask
+        combined_plot_mask = pae_mask & pae_twins_mask & pae_salt_mask
 
         residual_max = np.log10(np.max(np.abs(pae_y[combined_plot_mask])))
         residual_scale_min = np.floor(residual_max)
@@ -800,7 +800,7 @@ class DispersionPlotter(Plotter):
                 twins_ax,
                 "green",
                 1,
-                "Twins Final",
+                "Twins All Masks",
                 residual_bins=residual_bins,
                 pull_bins=pull_bins,
                 names=twins_names,
@@ -930,7 +930,7 @@ class DispersionPlotter(Plotter):
                 legacy_ax,
                 "green",
                 1,
-                "Legacy Final",
+                "Legacy All Masks",
                 residual_bins=residual_bins,
                 pull_bins=pull_bins,
             )
@@ -1019,7 +1019,7 @@ class DispersionPlotter(Plotter):
             pae_ax,
             "green",
             1,
-            "Final",
+            "All Masks",
             residual_bins=residual_bins,
             pull_bins=pull_bins,
             yerr_lower=pae_yerr_lower,

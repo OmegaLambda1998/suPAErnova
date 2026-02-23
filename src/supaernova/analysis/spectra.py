@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 from numpy import typing as npt  # noqa: TC002
 from pydantic import PositiveInt  # noqa: TC002
+from matplotlib.colors import to_rgba
 
 from supaernova.utils import pp
 
@@ -217,8 +218,7 @@ class SpectraPlotter(Plotter):
                             ax=ax,
                             yerr=yerr,
                             linestyle="-",
-                            c=c,
-                            alpha=0.25,
+                            c=to_rgba(c, alpha=0.25),
                         )
 
         if decorate:
@@ -231,9 +231,10 @@ class SpectraPlotter(Plotter):
         ax.set_xlabel("Wavelength [Å]")
         ax.set_ylabel("Amplitude")
         ax.set_title((config.plot_kwargs or {}).get("title", config.name.capitalize()))
-        symlog_max = 1
+        symlog_max = 10
+        symlog_scale = 2
         if y_max > symlog_max:
-            ax.set_yscale("symlog", linthresh=symlog_max, linscale=2)
+            ax.set_yscale("symlog", linthresh=symlog_max, linscale=symlog_scale)
         leg = ax.legend(bbox_to_anchor=(1.0, 1.0))
         leg.set_in_layout(False)
         # Trigger a draw so that constrained layout is executed once
@@ -312,11 +313,12 @@ class SpectraPlotter(Plotter):
         yerr = np.ma.masked_array(sigma, summary_mask)
 
         # Mean
-        y_mean = y.mean(axis=(0, 1))
-        y_std = y.std(axis=(0, 1))
-        yerr_mean = np.sqrt(
-            (yerr * yerr).mean(axis=(0, 1)) / np.ones_like(yerr).sum(axis=(0, 1))
-        )
+        scale = (~y.mask).sum(axis=(0, 1))
+        y_mean = y.sum(axis=(0, 1)) / scale
+        yerr_mean = np.ma.sqrt((yerr * yerr).sum(axis=(0, 1))) / scale
+        y_var = ((y - y_mean) ** 2).sum(axis=(0, 1)) / scale
+        y_std = np.sqrt(y_var)
+        y_sem = np.sqrt(y_var / scale)
 
         order = np.argsort(x)
         x = x[order]
@@ -331,9 +333,22 @@ class SpectraPlotter(Plotter):
             ax=ax,
             yerr=yerr_mean,
             linestyle="-",
+            zorder=10,
             **kwargs,
         )
         c = ebar.lines[0].get_color()
+        fig, ax, _fill = Plotter.fill_between(
+            x,
+            y_mean - y_sem,
+            y_mean + y_sem,
+            *args,
+            fig=fig,
+            ax=ax,
+            facecolor=to_rgba(c, alpha=0.5),
+            edgecolor="none",
+            zorder=5,
+            **kwargs,
+        )
         fig, ax, _fill = Plotter.fill_between(
             x,
             y_mean - y_std,
@@ -341,8 +356,9 @@ class SpectraPlotter(Plotter):
             *args,
             fig=fig,
             ax=ax,
-            color=c,
-            alpha=0.2,
+            facecolor=to_rgba(c, alpha=0.25),
+            edgecolor=to_rgba(c, alpha=0.75),
+            zorder=1,
             **kwargs,
         )
         label = (config.plot_kwargs or {}).get("label")
@@ -362,8 +378,13 @@ class SpectraPlotter(Plotter):
         ax.set_xlabel("Wavelength [Å]")
         ax.set_ylabel("Amplitude")
         ax.set_title((config.plot_kwargs or {}).get("title", config.name.capitalize()))
-        if np.abs(y_mean + y_std).max() > 1 or np.abs(y_mean - y_std).max() > 1:
-            ax.set_yscale("symlog", linthresh=1, linscale=2)
+        symlog_max = 10
+        symlog_scale = 2
+        if (
+            np.abs(y_mean + y_std).max() > symlog_max
+            or np.abs(y_mean - y_std).max() > symlog_max
+        ):
+            ax.set_yscale("symlog", linthresh=symlog_max, linscale=symlog_scale)
         leg = ax.legend(bbox_to_anchor=(1.0, 1.0))
         leg.set_in_layout(False)
         # Trigger a draw so that constrained layout is executed once
@@ -456,22 +477,29 @@ class SpectraPlotter(Plotter):
         x = x[order]
         y = y[..., order]
         yerr = yerr[..., order]
-        y_mean = y.mean(axis=(0, 1))
-        y_std = y.std(axis=(0, 1))
-        yerr_mean = np.sqrt(
-            (yerr * yerr).mean(axis=(0, 1)) / np.ones_like(yerr).sum(axis=(0, 1))
-        )
+
+        # Mean
+        scale = (~y.mask).sum(axis=(0, 1))
+        y_mean = y.sum(axis=(0, 1)) / scale
+        yerr_mean = np.ma.sqrt((yerr * yerr).sum(axis=(0, 1))) / scale
+        y_var = ((y - y_mean) ** 2).sum(axis=(0, 1)) / scale
+        y_std = np.sqrt(y_var)
+        y_sem = np.sqrt(y_var / scale)
 
         order_prime = np.argsort(x_prime)
         x_prime = x_prime[order_prime]
         y_prime = y_prime[..., order_prime]
         yerr_prime = yerr_prime[..., order_prime]
-        y_prime_mean = y_prime.mean(axis=(0, 1))
-        y_prime_std = y_prime.std(axis=(0, 1))
-        yerr_prime_mean = np.sqrt(
-            (yerr_prime * yerr_prime).mean(axis=(0, 1))
-            / np.ones_like(yerr_prime).sum(axis=(0, 1))
+
+        # Weighted Mean
+        scale_prime = (~y_prime.mask).sum(axis=(0, 1))
+        y_prime_mean = y_prime.sum(axis=(0, 1)) / scale_prime
+        yerr_prime_mean = (
+            np.ma.sqrt((yerr_prime * yerr_prime).sum(axis=(0, 1))) / scale_prime
         )
+        y_prime_var = ((y_prime - y_prime_mean) ** 2).sum(axis=(0, 1)) / scale_prime
+        y_prime_std = np.sqrt(y_prime_var)
+        y_prime_sem = np.sqrt(y_prime_var / scale_prime)
 
         if config.plot_base:
             fig, spectra_ax, _ebar = Plotter.errorbar(
@@ -483,6 +511,19 @@ class SpectraPlotter(Plotter):
                 yerr=yerr_prime_mean,
                 linestyle="-",
                 color="black",
+                zorder=10,
+                **kwargs,
+            )
+            fig, spectra_ax, _fill = Plotter.fill_between(
+                x_prime,
+                y_prime_mean - y_prime_sem,
+                y_prime_mean + y_prime_sem,
+                *args,
+                fig=fig,
+                ax=spectra_ax,
+                facecolor=to_rgba("black", alpha=0.5),
+                edgecolor="none",
+                zorder=5,
                 **kwargs,
             )
             fig, spectra_ax, _fill = Plotter.fill_between(
@@ -492,8 +533,9 @@ class SpectraPlotter(Plotter):
                 *args,
                 fig=fig,
                 ax=spectra_ax,
-                color="black",
-                alpha=0.2,
+                facecolor=to_rgba("black", alpha=0.25),
+                edgecolor=to_rgba("black", alpha=0.75),
+                zorder=1,
                 **kwargs,
             )
             base_label = (config.plot_kwargs or {}).get("base_label", "Base")
@@ -518,9 +560,22 @@ class SpectraPlotter(Plotter):
             ax=spectra_ax,
             yerr=yerr_mean,
             linestyle="-",
+            zorder=10,
             **kwargs,
         )
         c = ebar.lines[0].get_color()
+        fig, spectra_ax, _fill = Plotter.fill_between(
+            x,
+            y_mean - y_sem,
+            y_mean + y_sem,
+            *args,
+            fig=fig,
+            ax=spectra_ax,
+            facecolor=to_rgba(c, alpha=0.5),
+            edgecolor="none",
+            zorder=5,
+            **kwargs,
+        )
         fig, spectra_ax, _fill = Plotter.fill_between(
             x,
             y_mean - y_std,
@@ -528,8 +583,9 @@ class SpectraPlotter(Plotter):
             *args,
             fig=fig,
             ax=spectra_ax,
-            color=c,
-            alpha=0.2,
+            facecolor=to_rgba(c, alpha=0.25),
+            edgecolor=to_rgba(c, alpha=0.75),
+            zorder=1,
             **kwargs,
         )
         label = (config.plot_kwargs or {}).get("label")
@@ -561,25 +617,32 @@ class SpectraPlotter(Plotter):
         x_common = x[mask_overlap]
         y_common = y[..., mask_overlap]
         yerr_common = yerr[..., mask_overlap]
-        y_common_mean = y_common.mean(axis=(0, 1))
-        yerr_common_mean = np.sqrt(
-            (yerr_common * yerr_common).mean(axis=(0, 1))
-            / np.ones_like(yerr_common).sum(axis=(0, 1))
+        scale_common = (~y_common.mask).sum(axis=(0, 1))
+        y_common_mean = y_common.sum(axis=(0, 1)) / scale_common
+        yerr_common_mean = (
+            np.ma.sqrt((yerr_common * yerr_common).sum(axis=(0, 1))) / scale_common
         )
+        y_common_var = ((y_common - y_common_mean) ** 2).sum(axis=(0, 1)) / scale_common
+        y_common_std = np.sqrt(y_common_var)
+        y_common_sem = np.sqrt(y_common_var / scale_common)
 
         x_prime_common = x_prime[mask_overlap_prime]
         y_prime_common = y_prime[..., mask_overlap_prime]
         yerr_prime_common = yerr_prime[..., mask_overlap_prime]
-        y_prime_common_mean = y_prime_common.mean(axis=(0, 1))
-        yerr_prime_common_mean = yerr_prime_common.mean(axis=(0, 1))
-        yerr_prime_common_mean = np.sqrt(
-            (yerr_prime_common * yerr_prime_common).mean(axis=(0, 1))
-            / np.ones_like(yerr_prime_common).sum(axis=(0, 1))
+
+        scale_prime_common = (~y_prime_common.mask).sum(axis=(0, 1))
+        y_prime_common_mean = y_prime_common.sum(axis=(0, 1)) / scale_prime_common
+        yerr_prime_common_mean = (
+            np.ma.sqrt((yerr_prime_common * yerr_prime_common).sum(axis=(0, 1)))
+            / scale_prime_common
         )
+        y_prime_common_var = ((y_prime_common - y_prime_common_mean) ** 2).sum(
+            axis=(0, 1)
+        ) / scale_prime_common
+        y_prime_common_std = np.sqrt(y_prime_common_var)
+        y_prime_common_sem = np.sqrt(y_prime_common_var / scale_prime_common)
 
         # Residual with masks respected
-        # y_residual = y_common - y_prime_common
-        # y_residual_mean = y_residual.mean(axis=(0, 1))
         y_residual_mean = y_common_mean - y_prime_common_mean
         yerr_residual_mean = np.sqrt(
             yerr_common_mean * yerr_common_mean
@@ -597,11 +660,15 @@ class SpectraPlotter(Plotter):
             **kwargs,
         )
 
+        symlog_max = 10
+        symlog_scale = 2
         if (
-            np.abs(y_residual_mean + yerr_residual_mean).max() > 0.01
-            or np.abs(y_residual_mean - yerr_residual_mean).max() > 0.01
+            np.abs(y_residual_mean + yerr_residual_mean).max() > symlog_max
+            or np.abs(y_residual_mean - yerr_residual_mean).max() > symlog_max
         ):
-            residual_ax.set_yscale("symlog", linthresh=0.01, linscale=2)
+            residual_ax.set_yscale(
+                "symlog", linthresh=symlog_max, linscale=symlog_scale
+            )
 
         fig, pull_ax, _hline = Plotter.axhline(1, color="black", fig=fig, ax=pull_ax)
 
@@ -617,16 +684,24 @@ class SpectraPlotter(Plotter):
             **kwargs,
         )
 
-        if y_pull_mean.max() > 25:
-            pull_ax.set_yscale("symlog", linthresh=25, linscale=2)
+        symlog_max = 10
+        symlog_scale = 2
+        if y_pull_mean.max() > symlog_max:
+            pull_ax.set_yscale("symlog", linthresh=symlog_max, linscale=symlog_scale)
 
+        symlog_max = 10
+        symlog_scale = 2
         if (
-            np.abs(y_mean + yerr_mean).max() > 0.1
-            or np.abs(y_mean - yerr_mean).max() > 0.1
-            or np.abs(y_mean + y_std).max() > 0.1
-            or np.abs(y_mean - y_std).max() > 0.1
+            np.abs(y_mean + yerr_mean).max() > symlog_max
+            or np.abs(y_mean - yerr_mean).max() > symlog_max
+            or np.abs(y_mean + y_std).max() > symlog_max
+            or np.abs(y_mean - y_std).max() > symlog_max
+            or np.abs(y_prime_mean + yerr_prime_mean).max() > symlog_max
+            or np.abs(y_prime_mean - yerr_prime_mean).max() > symlog_max
+            or np.abs(y_prime_mean + y_prime_std).max() > symlog_max
+            or np.abs(y_prime_mean - y_prime_std).max() > symlog_max
         ):
-            spectra_ax.set_yscale("symlog", linthresh=0.1, linscale=2)
+            spectra_ax.set_yscale("symlog", linthresh=symlog_max, linscale=symlog_scale)
 
         fig.align_ylabels(ax)
 

@@ -110,6 +110,7 @@ class NFlowConfig(BackendConfig):
     ema_momentum: PositiveFloat = 0.999
 
     batch_normalisation: bool = False
+    stablised: bool = False
 
     min_redshift: float | None = None
     max_redshift: float | None = None

@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from supaernova.steps.pae import PAEModel, PAEStepResult
     from supaernova.steps.nflow import NFlowModel, NFlowStepResult
     from supaernova.configs.steps.data import LazySNPAEData, DataStepResult
-    from supaernova.analysis.distribution import DistributionPlot
 
     from .tf import TFPosteriorModel
 
@@ -73,10 +72,12 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.fractional_error: bool = self.options.fractional_error
         self.weighted_error: bool = self.options.weighted_error
         self.measurement_error: bool = self.options.measurement_error
-        self.reconstruction_error: Literal["train", "test", "combined", "match"] = (
+        self.reconstruction_error: Literal["train", "test", "match", "combined"] = (
             self.options.reconstruction_error
         )
 
+        self.bounded_u_latents: bool = self.options.bounded_u_latents
+        self.generalised_u_latents: float = self.options.generalised_u_latents
         self.u_delta_av_min: float = self.options.u_delta_av_min
         self.u_delta_av_max: float = self.options.u_delta_av_max
         self.u_delta_av_start: float = self.options.u_delta_av_start
@@ -375,28 +376,56 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.recon_error = {}
         self.recon_error_centers = {}
         for subset in self.subsets:
-            stage = pae.stages[subset][str(list(pae.stages[subset].keys())[-1])]
-            z_latents = stage.latents
-            zs = z_latents[..., :-2] if pae.model.physical_latents else z_latents
+            # --- ULatent Bounds ---
+            if self.bounded_u_latents:
+                nearest = 5
+                nflow_subset = nflow.models[subset]
+                z_latents = nflow_subset.z_latents
+                u_latents = nflow_subset.u_latents
+                mask = getattr(self.nflow, f"{subset}_mask")[..., None]
+                sn_mask = getattr(self.nflow, f"{subset}_sn_mask")
+                spec_mask = getattr(self.nflow, f"{subset}_spec_mask")
+                wl_mask = getattr(self.nflow, f"{subset}_wl_mask")
+                mask_sn = np.any(
+                    np.any(mask & wl_mask & spec_mask & sn_mask, axis=-1), axis=-1
+                )
+                u_latents_min = np.min(u_latents[mask_sn], axis=0) / nearest
+                u_latents_max = np.max(u_latents[mask_sn], axis=0) / nearest
+                u_latents_min = (
+                    np.where(
+                        u_latents_min > 0,
+                        np.ceil(u_latents_min),
+                        np.floor(u_latents_min),
+                    )
+                    * nearest
+                )
+                u_latents_max = (
+                    np.where(
+                        u_latents_max > 0,
+                        np.ceil(u_latents_max),
+                        np.floor(u_latents_max),
+                    )
+                    * nearest
+                )
+                u_latents_min = np.min(u_latents_min)
+                u_latents_max = np.max(u_latents_max)
+                u_latents_bounds = (u_latents_min, u_latents_max)
+            else:
+                u_latents_bounds = (-np.inf, np.inf)
+            self.u_latent_bounds[subset] = u_latents_bounds
+
+            # --- Step Sizes ---
+            pae_subset = pae.stages[subset][str(pae.model.stage.stage)]
+            z_latents = pae_subset.latents
+            zs = z_latents[..., :-2] if self.pae.physical_latents else z_latents
             u_latents = self.nflow.z_to_u(zs, permute=True)
-
-            mask = getattr(self, f"{subset}_mask")
-            sn_mask = getattr(self, f"{subset}_sn_mask")
-            spec_mask = getattr(self, f"{subset}_spec_mask")
-            wl_mask = getattr(self, f"{subset}_wl_mask")
-
+            mask = getattr(self.pae.stage, f"{subset}_mask")
+            sn_mask = getattr(self.pae.stage, f"{subset}_sn_mask")
+            spec_mask = getattr(self.pae.stage, f"{subset}_spec_mask")
+            wl_mask = getattr(self.pae.stage, f"{subset}_wl_mask")
             mask_sn = np.any(
                 np.any(mask & wl_mask & spec_mask & sn_mask, axis=-1), axis=-1
             )
-
-            u_latents_min = np.min(u_latents[mask_sn], axis=0)
-            u_latents_max = np.max(u_latents[mask_sn], axis=0)
-            u_latents_bounds = (u_latents_min, u_latents_max)
-            self.u_latent_bounds[subset] = u_latents_bounds
-            self.u_latent_bounds[subset] = self.u_latent_bounds.get(
-                "test", u_latents_bounds
-            )
-
             step_sizes = []
             if self.train_delta_m:
                 if pae.model.physical_latents:
@@ -418,11 +447,10 @@ class Posterior(ModelStep[PosteriorConfig]):
             u_latent_step_size = np.std(u_latents[mask_sn], axis=0)
             step_sizes.append(u_latent_step_size)
             step_sizes = np.concatenate(step_sizes, axis=-1)
-
             self.step_sizes[subset] = step_sizes
-            self.step_sizes[subset] = self.step_sizes.get("test", step_sizes)
 
-            stage = pae.model.stage
+            # --- Reconstruction Error ---
+            stage = self.pae.stage
             stage_subset = self.reconstruction_error
             if stage_subset == "match":
                 stage_subset = subset
@@ -439,14 +467,6 @@ class Posterior(ModelStep[PosteriorConfig]):
             sn_mask = getattr(stage, f"{stage_subset}sn_mask")
             spec_mask = getattr(stage, f"{stage_subset}spec_mask")
             wl_mask = getattr(stage, f"{stage_subset}wl_mask")
-
-            # time = stage.data.time
-            # amplitude = stage.data.amplitude
-            # sigma = stage.data.sigma
-            # mask = stage.mask
-            # sn_mask = stage.sn_mask
-            # spec_mask = stage.spec_mask
-            # wl_mask = stage.wl_mask
 
             recon_error, _, recon_error_centers = pae.model.recon_error(
                 (
@@ -465,6 +485,8 @@ class Posterior(ModelStep[PosteriorConfig]):
 
             self.recon_error[subset] = recon_error
             self.recon_error_centers[subset] = recon_error_centers
+
+        print(self.u_latent_bounds)
 
         # --- Stages ---
         i = 0
@@ -1101,6 +1123,12 @@ class Posterior(ModelStep[PosteriorConfig]):
                     decorate=decorate,
                 )
                 o.plot_base = False
+                # print("pae")
+                # pp(
+                #     pae_position.numpy()[:, np.any(np.any(mask, axis=-1), axis=-1), :][
+                #         0, 0, :
+                #     ]
+                # )
 
                 # === MAP ===
                 # --- PAE ---
@@ -1203,6 +1231,12 @@ class Posterior(ModelStep[PosteriorConfig]):
                     force=force,
                     decorate=decorate,
                 )
+                # print("map")
+                # pp(
+                #     map_position.numpy()[:, np.any(np.any(mask, axis=-1), axis=-1), :][
+                #         0, 0, :
+                #     ]
+                # )
 
                 # === Posterior ===
                 # --- PAE ---
@@ -1325,6 +1359,12 @@ class Posterior(ModelStep[PosteriorConfig]):
                         decorate=decorate,
                     )
                 )
+                # print("pos")
+                # pp(
+                #     pos_position.numpy()[:, np.any(np.any(mask, axis=-1), axis=-1), :][
+                #         0, 0, :
+                #     ]
+                # )
         return rtn
 
     def _plot_comparison_spectra(
@@ -2687,8 +2727,9 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
         self.plot_opts = {}
         super().analyse(*args, **kwargs)
         r_hat_path = self.paths.plots / "r_hat.json"
-        with r_hat_path.open("w") as io:
-            json.dump(self.r_hat, io)
+        if not r_hat_path.exists() or self.force:
+            with r_hat_path.open("w") as io:
+                json.dump(self.r_hat, io)
         if len(self.variants) > 1:
             for name in self.plot_labels:
                 o = self.plot_opts[name].model_copy(deep=True)

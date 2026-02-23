@@ -211,11 +211,13 @@ class PosteriorConfig(BackendConfig):
     log_likelihood_scale: PositiveFloat = 1.0
     log_likelihood_spec_sum: bool = False
     log_likelihood_sum: bool = False
-    step_size_scale: Literal["min", "max"] = "max"
+    step_size_scale: Literal["min", "max", "shift"] = "shift"
     fractional_error: bool = True
     weighted_error: bool = True
     measurement_error: bool = True
     reconstruction_error: Literal["train", "test", "combined", "match"] = "combined"
+    bounded_u_latents: bool = False
+    generalised_u_latents: float = 2
     # --- Optional ---
     debug: bool = False
     profile: bool = False
@@ -284,8 +286,8 @@ class PosteriorConfig(BackendConfig):
     u_latents_std: float = 1
     u_latents_prior: bool = True
 
-    delta_av_start: float = -0.1
-    delta_av_end: float = 0.1
+    delta_av_start: float = -0.3
+    delta_av_end: float = 0.3
     delta_av_mean: float = 0
     delta_av_std: float = 1
 
@@ -306,7 +308,7 @@ class PosteriorConfig(BackendConfig):
     delta_p_start: float = -0.5
     delta_p_end: float = 0.5
     delta_p_mean: float = 0
-    delta_p_std: float = 0.01
+    delta_p_std: float = 1
     delta_p_prior: bool = False
 
     # bias_min: float | None = -10
