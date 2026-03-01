@@ -31,8 +31,11 @@ class MultivariateGeneralisedNormalDiag(tfd.Distribution):
         power: scalar or [event_dims] tensor.
         """
         self.loc = tf.convert_to_tensor(loc, dtype=tf.float32)
-        self.scale_diag = tf.convert_to_tensor(scale_diag, dtype=tf.float32)
         self.power = tf.convert_to_tensor(power, dtype=tf.float32)
+        self.scale_diag = tf.convert_to_tensor(
+            MultivariateGeneralisedNormalDiag.gn_scale(scale_diag, self.power),
+            dtype=tf.float32,
+        )
         self.event_dims = tf.shape(self.loc)[0]
 
         super().__init__(
@@ -46,6 +49,19 @@ class MultivariateGeneralisedNormalDiag(tfd.Distribution):
         # Each dimension is independent, but we do not wrap with Independent here
         self.components = tfd.GeneralizedNormal(
             loc=self.loc, scale=self.scale_diag, power=self.power
+        )
+
+    @staticmethod
+    def gn_scale(std, power):
+        """Convert desired stddev → GeneralizedNormal scale.
+
+        Ensures Var = std^2 for any power p.
+        """
+        std = tf.convert_to_tensor(std, tf.float32)
+        power = tf.convert_to_tensor(power, tf.float32)
+
+        return std * tf.exp(
+            0.5 * (tf.math.lgamma(1.0 / power) - tf.math.lgamma(3.0 / power))
         )
 
     def _event_shape_tensor(self):
@@ -157,7 +173,8 @@ class PosteriorMap(tf.Module):
         self.u_delta_av_prior: tfd.Distribution = tfd.Normal(
             loc=self.u_delta_av_mean, scale=self.u_delta_av_std
         )
-        if self.generalised_u_latents > 2:
+        print(self.generalised_u_latents)
+        if self.generalised_u_latents >= 2:
             self.u_delta_av_prior = tfd.GeneralizedNormal(
                 loc=self.u_delta_av_mean,
                 scale=self.u_delta_av_std,
@@ -181,7 +198,7 @@ class PosteriorMap(tf.Module):
             loc=self.u_latents_mean * tf.ones(self.n_u_latents),
             scale_diag=self.u_latents_std * tf.ones(self.n_u_latents),
         )
-        if self.generalised_u_latents > 2:
+        if self.generalised_u_latents >= 2:
             self.u_latents_prior = MultivariateGeneralisedNormalDiag(
                 loc=self.u_latents_mean * tf.ones(self.n_u_latents),
                 scale_diag=self.u_latents_std * tf.ones(self.n_u_latents),
@@ -223,6 +240,10 @@ class PosteriorMap(tf.Module):
         if self.train_delta_m:
             self.n_pos += 1
 
+        min_phase = config.min_phase
+        max_phase = config.max_phase
+        phase_to_time = lambda phase: (phase - min_phase) / (max_phase - min_phase)
+
         self.use_delta_p_prior: bool = config.options.delta_p_prior
         self.train_delta_p: bool = config.options.train_delta_p
         self.delta_p_min: float = config.options.delta_p_min or -np.inf
@@ -231,6 +252,14 @@ class PosteriorMap(tf.Module):
         self.delta_p_end: float = config.options.delta_p_end
         self.delta_p_mean: float = config.options.delta_p_mean
         self.delta_p_std: float = config.options.delta_p_std
+
+        # self.delta_p_min = phase_to_time(self.delta_p_min)
+        # self.delta_p_max = phase_to_time(self.delta_p_max)
+        # self.delta_p_start = phase_to_time(self.delta_p_start)
+        # self.delta_p_end = phase_to_time(self.delta_p_end)
+        # self.delta_p_mean = phase_to_time(self.delta_p_mean)
+        # self.delta_p_std = phase_to_time(self.delta_p_std + min_phase)
+
         self.delta_p_prior: tfd.Distribution = tfd.Normal(
             loc=self.delta_p_mean, scale=self.delta_p_std
         )

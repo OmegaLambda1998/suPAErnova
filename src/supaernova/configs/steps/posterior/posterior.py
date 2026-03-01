@@ -217,7 +217,7 @@ class PosteriorConfig(BackendConfig):
     measurement_error: bool = True
     reconstruction_error: Literal["train", "test", "combined", "match"] = "combined"
     bounded_u_latents: bool = False
-    generalised_u_latents: float = 2
+    generalised_u_latents: float = 1
     # --- Optional ---
     debug: bool = False
     profile: bool = False

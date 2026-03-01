@@ -58,6 +58,9 @@ class TFPosteriorModel(ks.Model):
         self.u_latent_bounds = config.u_latent_bounds[self.subset]
         self.generalised_u_latents: float = config.generalised_u_latents
 
+        self.min_phase = config.min_phase
+        self.max_phase = config.max_phase
+
         self.debug: bool = config.config.debug or self.options.debug
         self.profile: bool = self.options.profile
 

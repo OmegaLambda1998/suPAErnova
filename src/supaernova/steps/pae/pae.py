@@ -257,6 +257,7 @@ class PAE(ModelStep[PAEConfig]):
         self.min_val_redshift = self.options.min_val_redshift or self.min_redshift
         self.max_val_redshift = self.options.max_val_redshift or self.max_redshift
 
+        print("PAE")
         self.min_phase = self.options.min_phase or data.min_phase
         self.max_phase = self.options.max_phase or data.max_phase
         self.min_train_phase = self.options.min_train_phase or self.min_phase

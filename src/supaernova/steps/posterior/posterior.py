@@ -460,7 +460,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 stage_subset += "_"
 
             subset_data = getattr(stage, f"{stage_subset}data")
-            time = subset_data.time
+            phase = subset_data.phase
             amplitude = subset_data.amplitude
             sigma = subset_data.sigma
             mask = getattr(stage, f"{stage_subset}mask")
@@ -470,7 +470,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
             recon_error, _, recon_error_centers = pae.model.recon_error(
                 (
-                    time,
+                    phase,
                     amplitude,
                     sigma,
                     mask,
@@ -478,6 +478,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                     spec_mask,
                     wl_mask,
                 ),
+                pae.min_phase,
+                pae.max_phase,
                 fractional_error=self.fractional_error,
                 weighted_error=self.weighted_error,
                 measurement_error=self.measurement_error,
@@ -485,8 +487,6 @@ class Posterior(ModelStep[PosteriorConfig]):
 
             self.recon_error[subset] = recon_error
             self.recon_error_centers[subset] = recon_error_centers
-
-        print(self.u_latent_bounds)
 
         # --- Stages ---
         i = 0
@@ -1123,12 +1123,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                     decorate=decorate,
                 )
                 o.plot_base = False
-                # print("pae")
-                # pp(
-                #     pae_position.numpy()[:, np.any(np.any(mask, axis=-1), axis=-1), :][
-                #         0, 0, :
-                #     ]
-                # )
 
                 # === MAP ===
                 # --- PAE ---
@@ -1231,12 +1225,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                     force=force,
                     decorate=decorate,
                 )
-                # print("map")
-                # pp(
-                #     map_position.numpy()[:, np.any(np.any(mask, axis=-1), axis=-1), :][
-                #         0, 0, :
-                #     ]
-                # )
 
                 # === Posterior ===
                 # --- PAE ---
@@ -1359,12 +1347,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                         decorate=decorate,
                     )
                 )
-                # print("pos")
-                # pp(
-                #     pos_position.numpy()[:, np.any(np.any(mask, axis=-1), axis=-1), :][
-                #         0, 0, :
-                #     ]
-                # )
         return rtn
 
     def _plot_comparison_spectra(
@@ -1383,6 +1365,10 @@ class Posterior(ModelStep[PosteriorConfig]):
         axes: "list[Axis] | None" = None,
         save: bool = True,
         force: bool = False,
+        shift: float = 20.0,
+        phase: bool = True,
+        base: bool = True,
+        offset: int = 0,
     ) -> list[tuple["Figure | None", "list[Axis] | None"]]:
         rtn = []
         if self.analysis.plot_comparison_spectra is not None:
@@ -1417,7 +1403,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     _amplitude,
                     _sigma,
                     _sn_name,
-                    _time,
+                    time,
                     mask,
                     _sn_mask,
                     _spec_mask,
@@ -1429,24 +1415,34 @@ class Posterior(ModelStep[PosteriorConfig]):
                     sn_mask=input_sn_mask,
                     spec_mask=input_spec_mask,
                     wl_mask=input_wl_mask,
+                    phase=True,
                 )
                 if not np.any(mask):
                     continue
 
+                shift_min = time[np.any(mask, axis=(-1), keepdims=True)].min()
+                shift_max = time[np.any(mask, axis=(-1), keepdims=True)].max()
+                shift_max = time[np.isfinite(time)].max()
                 o.plot_kwargs["label"] = "Base"
-                fig, ax = SpectraPlotter.plot_spectra(
-                    data,
-                    o,
-                    mask=input_mask,
-                    sn_mask=input_sn_mask,
-                    spec_mask=input_spec_mask,
-                    wl_mask=input_wl_mask,
-                    fig=fig,
-                    ax=ax,
-                    save=False,
-                    force=force,
-                    decorate=True,
-                )
+                if base:
+                    fig, ax = SpectraPlotter.plot_spectra(
+                        data,
+                        o,
+                        mask=input_mask,
+                        sn_mask=input_sn_mask,
+                        spec_mask=input_spec_mask,
+                        wl_mask=input_wl_mask,
+                        fig=fig,
+                        ax=ax,
+                        offset=offset,
+                        save=False,
+                        force=force,
+                        decorate=True,
+                        phase=phase,
+                        shift=shift,
+                        shift_min=shift_min,
+                        shift_max=shift_max,
+                    )
 
                 # === PAE ===
                 # --- PAE ---
@@ -1459,7 +1455,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     spec_mask=input_spec_mask,
                     wl_mask=input_wl_mask,
                 )
-                pae_pae_latents = pae_pae_latents[:, 0, :]
+                pae_pae_latents = pae_pae_latents[:, 0, :][None, ...]
 
                 # --- NFlow ---
                 pae_delta_m = pae_pae_latents[..., -2:-1]
@@ -1495,6 +1491,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                     wl_mask=input_wl_mask,
                     additional_outputs=True,
                 )
+                pae_amplitude = pae_amplitude[0, ...]
+                pae_sigma = pae_sigma[0, ...]
 
                 if not force:
                     pae_log_prob = pae_log_prob.numpy()
@@ -1563,28 +1561,33 @@ class Posterior(ModelStep[PosteriorConfig]):
                     )
 
                 data.amplitude = pae_amplitude.numpy()
-                data.sigma = pae_sigma.numpy()
+                # data.sigma = pae_sigma.numpy()
 
-                fig, ax = SpectraPlotter.plot_spectra(
-                    data,
-                    o,
-                    mask=input_mask,
-                    sn_mask=input_sn_mask,
-                    spec_mask=input_spec_mask,
-                    wl_mask=input_wl_mask,
-                    fig=fig,
-                    ax=ax,
-                    save=False,
-                    force=force,
-                    decorate=False,
-                    offset=1,
-                )
+                # fig, ax = SpectraPlotter.plot_spectra(
+                #     data,
+                #     o,
+                #     mask=input_mask,
+                #     sn_mask=input_sn_mask,
+                #     spec_mask=input_spec_mask,
+                #     wl_mask=input_wl_mask,
+                #     fig=fig,
+                #     ax=ax,
+                #     save=False,
+                #     force=force,
+                #     decorate=False,
+                #     offset=1,
+                #     shift=shift,
+                #     shift_min=shift_min,
+                #     shift_max=shift_max,
+                # )
 
                 # === MAP ===
                 # --- PAE ---
                 # --- NFlow ---
                 # --- Posterior ---
-                map_position = model.map.get_position(model.map.position.best)
+                map_position = model.map.unconstrain(
+                    model.map.get_position(model.map.position.best), full=True
+                )
                 (
                     map_log_prob,
                     map_log_like,
@@ -1603,6 +1606,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                     wl_mask=input_wl_mask,
                     additional_outputs=True,
                 )
+                map_amplitude = map_amplitude[0, ...]
+                map_sigma = map_sigma[0, ...]
 
                 if not force:
                     map_log_prob = map_log_prob.numpy()
@@ -1661,22 +1666,25 @@ class Posterior(ModelStep[PosteriorConfig]):
                     )
 
                 data.amplitude = map_amplitude.numpy()
-                data.sigma = map_sigma.numpy()
+                # data.sigma = map_sigma.numpy()
 
-                fig, ax = SpectraPlotter.plot_spectra(
-                    data,
-                    o,
-                    mask=input_mask,
-                    sn_mask=input_sn_mask,
-                    spec_mask=input_spec_mask,
-                    wl_mask=input_wl_mask,
-                    fig=fig,
-                    ax=ax,
-                    save=False,
-                    force=force,
-                    decorate=False,
-                    offset=2,
-                )
+                # fig, ax = SpectraPlotter.plot_spectra(
+                #     data,
+                #     o,
+                #     mask=input_mask,
+                #     sn_mask=input_sn_mask,
+                #     spec_mask=input_spec_mask,
+                #     wl_mask=input_wl_mask,
+                #     fig=fig,
+                #     ax=ax,
+                #     save=False,
+                #     force=force,
+                #     decorate=False,
+                #     offset=2,
+                #     shift=shift,
+                #     shift_min=shift_min,
+                #     shift_max=shift_max,
+                # )
 
                 # === Posterior ===
                 # --- PAE ---
@@ -1685,17 +1693,19 @@ class Posterior(ModelStep[PosteriorConfig]):
                 samples = results.hmc.samples
                 log_prob = results.hmc.log_prob
                 if o.reduce == "mean":
-                    reduce_samples = samples.mean(axis=0)
+                    reduce_samples = samples.mean(axis=0, keepdims=True)
                 elif o.reduce == "median":
-                    reduce_samples = np.median(samples, axis=0)
+                    reduce_samples = np.median(samples, axis=0, keepdims=True)
                 else:
                     reduce_samples = np.array([
                         np.array([
-                            max_central(samples[:, sn, pos], weight=log_prob[:, sn])[1]
+                            max_central(
+                                samples[..., sn, pos], weight=log_prob[..., sn]
+                            )[1]
                             for pos in range(samples.shape[-1])
                         ])
                         for sn in range(samples.shape[-2])
-                    ])
+                    ])[None, ...]
                 pos_position = model.map.unconstrain(
                     model.map.get_position(reduce_samples), full=True
                 )
@@ -1706,7 +1716,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     pos_amplitude,
                     pos_sigma,
                 ) = model(
-                    model.map.unconstrain(pos_position),
+                    pos_position,
                     training=False,
                     input_phase=data.time,
                     input_amp=data.amplitude,
@@ -1717,6 +1727,9 @@ class Posterior(ModelStep[PosteriorConfig]):
                     wl_mask=input_wl_mask,
                     additional_outputs=True,
                 )
+
+                pos_amplitude = pos_amplitude[0, ...]
+                pos_sigma = pos_sigma[0, ...]
 
                 if not force:
                     pos_log_prob = pos_log_prob.numpy()
@@ -1777,7 +1790,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     )
 
                 data.amplitude = pos_amplitude.numpy()
-                data.sigma = pos_sigma.numpy()
+                # data.sigma = pos_sigma.numpy()
 
                 rtn.append(
                     SpectraPlotter.plot_spectra(
@@ -1791,8 +1804,12 @@ class Posterior(ModelStep[PosteriorConfig]):
                         ax=ax,
                         save=save,
                         force=force,
-                        decorate=False,
-                        offset=3,
+                        decorate=not base,
+                        offset=offset + (3 if base else 1),
+                        phase=phase and not base,
+                        shift=shift,
+                        shift_min=shift_min,
+                        shift_max=shift_max,
                     )
                 )
         return rtn
@@ -1996,6 +2013,8 @@ class Posterior(ModelStep[PosteriorConfig]):
                         sn_mask = (random_log_prob_dist == random_log_prob_dist.min())[
                             :, None, None
                         ]
+
+                    print(plot_type, names[sn_mask])
 
                     fig, ax = self._plot_comparison(
                         subset,

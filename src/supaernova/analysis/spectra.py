@@ -5,6 +5,7 @@ import numpy as np
 from numpy import typing as npt  # noqa: TC002
 from pydantic import PositiveInt  # noqa: TC002
 from matplotlib.colors import to_rgba
+from matplotlib.transforms import blended_transform_factory
 
 from supaernova.utils import pp
 
@@ -69,6 +70,7 @@ class SpectraPlotter(Plotter):
         sn_mask: "npt.NDArray[float] | None" = None,
         spec_mask: "npt.NDArray[float] | None" = None,
         wl_mask: "npt.NDArray[float] | None" = None,
+        phase: bool = False,
     ) -> tuple[
         "npt.NDArray[float]",
         "npt.NDArray[float]",
@@ -84,7 +86,7 @@ class SpectraPlotter(Plotter):
         amplitude = data.amplitude.copy()
         sigma = data.sigma.copy()
         sn_name = data.sn_name.copy()
-        time = data.time.copy()
+        time = data.phase.copy() if phase else data.time.copy()
         input_mask = (
             np.ones_like(data.mask, dtype=np.bool) if mask is None else mask.copy()
         )
@@ -145,6 +147,10 @@ class SpectraPlotter(Plotter):
         wl_mask: "npt.NDArray[bool] | None" = None,
         decorate: bool = True,
         offset: int = 0,
+        phase: bool = True,
+        shift: float = 0.0,
+        shift_min: float | None = None,
+        shift_max: float | None = None,
         **kwargs: "Any",
     ) -> tuple["Figure", "Axis"] | tuple[None, None]:
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
@@ -168,7 +174,16 @@ class SpectraPlotter(Plotter):
             sn_mask=sn_mask,
             spec_mask=spec_mask,
             wl_mask=wl_mask,
+            phase=True,
         )
+
+        if shift_max is None:
+            shift_max = time[np.isfinite(time)].max()
+        if shift_min is None:
+            shift_min = time[np.isfinite(time)].min()
+
+        def phase_shift(phase):
+            return shift * (1 - ((phase - shift_min) / (shift_max - shift_min)))
 
         n_sn, n_spec, _n_wl = input_mask.shape
 
@@ -176,6 +191,7 @@ class SpectraPlotter(Plotter):
 
         i = 0 + offset
         for sn in range(n_sn):
+            t_last = -np.inf
             if input_sn_mask[sn, 0, 0]:
                 colours = Plotter.colour_maps[i % len(Plotter.colour_maps)]
                 i += 1
@@ -187,15 +203,17 @@ class SpectraPlotter(Plotter):
                     ax=ax,
                     linestyle="-",
                     c=colours(0.5),
-                    label=sn_name[sn, 0, 0] + config.plot_kwargs.get("label", ""),
+                    label=sn_name[sn, 0, 0]
+                    if decorate
+                    else None,  # + config.plot_kwargs.get("label", ""),
                     **kwargs,
                 )
                 for spec in range(n_spec):
                     if input_spec_mask[sn, spec, 0]:
-                        c = colours(time[sn, spec, 0])
+                        c = colours(0.5)
                         ma = input_mask[sn, spec, :].astype(bool)
                         x = wl[sn, spec, :][ma]
-                        y = amplitude[sn, spec, :][ma]
+                        y = amplitude[sn, spec, :][ma] + phase_shift(time[sn, spec, 0])
                         yerr = sigma[sn, spec, :][ma]
                         order = np.argsort(x)
                         x = x[order]
@@ -206,32 +224,45 @@ class SpectraPlotter(Plotter):
                                 y_max, np.abs(y + yerr).max(), np.abs(y - yerr).max()
                             )
 
-                        (
-                            fig,
-                            ax,
-                            _ebar,
-                        ) = Plotter.errorbar(
-                            x,
-                            y,
-                            *args,
-                            fig=fig,
-                            ax=ax,
-                            yerr=yerr,
-                            linestyle="-",
-                            c=to_rgba(c, alpha=0.25),
-                        )
+                            (
+                                fig,
+                                ax,
+                                _ebar,
+                            ) = Plotter.errorbar(
+                                x,
+                                y,
+                                *args,
+                                fig=fig,
+                                ax=ax,
+                                yerr=yerr,
+                                linestyle="-",
+                                marker="",
+                                c=c,
+                            )
+                            # Last point
+                            x_last, y_last = x[-1], y[-1]
 
-        if decorate:
-            fig, ax, cbar = Plotter.colourbar(
-                fig=fig,
-                ax=ax,
-                cmap=colours,
-            )
-            cbar.set_label("Normalised Phase")
+                            # Blend: x in axes coords, y in data coords
+                            trans = blended_transform_factory(
+                                ax.transAxes, ax.transData
+                            )
+
+                            t = np.round(time[sn, spec, 0], decimals=1)
+
+                            if phase and np.abs(t - t_last) > 0.5:
+                                ax.text(
+                                    1.02,
+                                    y_last,
+                                    f"{time[sn, spec, 0]:+.2f} Days",  # 1.02 puts it just outside right spine
+                                    transform=trans,
+                                    va="center",
+                                )
+                            t_last = t
+
         ax.set_xlabel("Wavelength [Å]")
-        ax.set_ylabel("Amplitude")
+        ax.set_ylabel("Amplitude + offset")
         ax.set_title((config.plot_kwargs or {}).get("title", config.name.capitalize()))
-        symlog_max = 10
+        symlog_max = 10 + shift
         symlog_scale = 2
         if y_max > symlog_max:
             ax.set_yscale("symlog", linthresh=symlog_max, linscale=symlog_scale)

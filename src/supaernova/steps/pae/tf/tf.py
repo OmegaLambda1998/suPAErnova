@@ -1702,6 +1702,8 @@ class TFPAEModel(ks.Model):
         data: tuple[
             tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor
         ],
+        min_phase: float,
+        max_phase: float,
         *,
         fractional_error: bool = False,
         weighted_error: bool = False,
@@ -1716,8 +1718,10 @@ class TFPAEModel(ks.Model):
         spec_mask = tf.convert_to_tensor(spec_mask, dtype=tf.bool)
         wl_mask = tf.convert_to_tensor(wl_mask, dtype=tf.bool)
 
+        time = (phase - min_phase) / (max_phase - min_phase)
+
         _, amp_pred = self(
-            (phase, amp_true),
+            (time, amp_true),
             training=False,
             mask=mask,
             sn_mask=sn_mask,
@@ -1750,7 +1754,7 @@ class TFPAEModel(ks.Model):
         amp_pred = tf.boolean_mask(amp_pred, has_valid_data)
         d_amp = tf.boolean_mask(d_amp, has_valid_data)
         recon_mask = tf.boolean_mask(recon_mask, has_valid_data)
-        phase = tf.boolean_mask(phase, has_valid_data)
+        time = tf.boolean_mask(time, has_valid_data)
 
         amp_true = tf.reshape(amp_true, [-1, wl_dim])
         amp_pred = tf.reshape(amp_pred, [-1, wl_dim])
@@ -1774,7 +1778,7 @@ class TFPAEModel(ks.Model):
         bin_indices = tf.reshape(
             (
                 tf.raw_ops.Bucketize(
-                    input=phase, boundaries=time_bin_edges.numpy().tolist()
+                    input=time, boundaries=time_bin_edges.numpy().tolist()
                 )
                 - 1
             ),

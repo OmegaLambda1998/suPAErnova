@@ -346,7 +346,12 @@ class Data(Step[DataConfig]):
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {"title": self.name}
                 SpectraPlotter.plot_spectra(
-                    self.results.data, o, mask=self.results.data.mask
+                    self.results.data,
+                    o,
+                    mask=self.results.data.mask,
+                    sn_mask=self.results.data.sn_mask,
+                    spec_mask=self.results.data.spec_mask,
+                    wl_mask=self.results.data.wl_mask,
                 )
 
     def _plot_summary(self) -> None:
@@ -366,7 +371,12 @@ class Data(Step[DataConfig]):
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {"label": self.name}
                 SpectraPlotter.plot_summary(
-                    self.results.data, o, mask=self.results.data.mask
+                    self.results.data,
+                    o,
+                    mask=self.results.data.mask,
+                    sn_mask=self.results.data.sn_mask,
+                    spec_mask=self.results.data.spec_mask,
+                    wl_mask=self.results.data.wl_mask,
                 )
 
     def _plot_comparison(self) -> None:
@@ -386,7 +396,12 @@ class Data(Step[DataConfig]):
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {"label": self.name}
                 SpectraPlotter.plot_comparison(
-                    self.results.data, o, mask=self.results.data.mask
+                    self.results.data,
+                    o,
+                    mask=self.results.data.mask,
+                    sn_mask=self.results.data.sn_mask,
+                    spec_mask=self.results.data.spec_mask,
+                    wl_mask=self.results.data.wl_mask,
                 )
 
     @override
@@ -988,6 +1003,9 @@ class DataStep(Variant[DataStepConfig, Data]):
                         self.results[opts.base].data,
                         opts,
                         mask=self.results[opts.base].data.mask,
+                        sn_mask=self.results[opts.base].data.sn_mask,
+                        spec_mask=self.results[opts.base].data.spec_mask,
+                        wl_mask=self.results[opts.base].data.wl_mask,
                     )
                     base_wl = wl
                     base_amp = amplitude
@@ -1019,6 +1037,9 @@ class DataStep(Variant[DataStepConfig, Data]):
                     variant.results.data,
                     o,
                     mask=variant.results.data.mask,
+                    sn_mask=variant.results.data.sn_mask,
+                    spec_mask=variant.results.data.spec_mask,
+                    wl_mask=variant.results.data.wl_mask,
                     fig=fig,
                     ax=ax,
                     save=False,
@@ -1046,6 +1067,9 @@ class DataStep(Variant[DataStepConfig, Data]):
                     variant.results.data,
                     o,
                     mask=variant.results.data.mask,
+                    sn_mask=variant.results.data.sn_mask,
+                    spec_mask=variant.results.data.spec_mask,
+                    wl_mask=variant.results.data.wl_mask,
                     fig=fig,
                     ax=ax,
                     save=False,
