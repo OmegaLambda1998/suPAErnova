@@ -173,7 +173,6 @@ class PosteriorMap(tf.Module):
         self.u_delta_av_prior: tfd.Distribution = tfd.Normal(
             loc=self.u_delta_av_mean, scale=self.u_delta_av_std
         )
-        print(self.generalised_u_latents)
         if self.generalised_u_latents >= 2:
             self.u_delta_av_prior = tfd.GeneralizedNormal(
                 loc=self.u_delta_av_mean,
@@ -258,7 +257,7 @@ class PosteriorMap(tf.Module):
         # self.delta_p_start = phase_to_time(self.delta_p_start)
         # self.delta_p_end = phase_to_time(self.delta_p_end)
         # self.delta_p_mean = phase_to_time(self.delta_p_mean)
-        # self.delta_p_std = phase_to_time(self.delta_p_std + min_phase)
+        self.delta_p_std = phase_to_time(self.delta_p_std + min_phase)
 
         self.delta_p_prior: tfd.Distribution = tfd.Normal(
             loc=self.delta_p_mean, scale=self.delta_p_std
