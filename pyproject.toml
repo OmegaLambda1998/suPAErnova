@@ -33,7 +33,10 @@ tf-rocm = ["tensorflow_rocm>=2.19,<2.20"]
 tf-cuda = ["tensorflow[and-cuda]>=2.19,<2.20"]
 
 [dependency-groups]
-dev = ["pandas_stubs", "types_tensorflow"]
+dev = [
+    "pandas_stubs",
+    "types_tensorflow",
+]
 docs = ["mkapi", "mkdocs_jupyter", "mkdocs_material", "mkdocs"]
 jupyter = ["ipykernel", "jupyter"]
 tests = ["pytest", "pytest_json_ctrf", "pytest_richer"]

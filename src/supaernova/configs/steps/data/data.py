@@ -136,9 +136,10 @@ class DataConfig(StepConfig):
     meta: Path
     idr: Path
     mask: Path
-    train_frac: Annotated[float, Field(ge=0, le=1)]
 
     # --- Optional ---
+    data_splits: Path | None = None
+    train_frac: float = Field(ge=0, le=1, default=0.75)
     n_kfolds: PositiveInt | None = None
     colourlaw: Path | None = None
     analysis: DataStepAnalysis | None = None
@@ -183,7 +184,14 @@ class DataConfig(StepConfig):
             err = f"`data_dir` resolved to {self.data_dir}, which does not exist."
             self._raise(err)
 
-        for field, ext in {"meta": ".csv", "idr": ".txt", "mask": ".txt"}.items():
+        for field, ext in {
+            "meta": ".csv",
+            "idr": ".txt",
+            "mask": ".txt",
+            "data_splits": ".toml",
+        }.items():
+            if getattr(self, field) is None:
+                continue
             setattr(
                 self,
                 field,

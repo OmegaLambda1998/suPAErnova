@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, ClassVar, cast, override
+import tomllib
+from typing import TYPE_CHECKING, ClassVar, cast, override, Literal
 from pathlib import Path
 
 import numpy as np
@@ -42,7 +43,6 @@ class Data(Step[DataConfig]):
         self.meta: Path = self.options.meta
         self.idr: Path = self.options.idr
         self.mask: Path = self.options.mask
-        self.train_frac: float = self.options.train_frac
 
         # --- Optional ---
         self.min_redshift: float = self.options.min_redshift
@@ -52,6 +52,9 @@ class Data(Step[DataConfig]):
         self.min_wavelength: float = self.options.min_wavelength
         self.max_wavelength: float = self.options.max_wavelength
         self.seed: int = self.options.seed
+
+        self.data_splits: Path | None = self.options.data_splits
+        self.train_frac: float = self.options.train_frac
 
         # Output Paths
         self.out_data: Path = self.paths.results / "data.npz"
@@ -78,6 +81,7 @@ class Data(Step[DataConfig]):
         self.salt_model: sncosmo.SALT2Source | sncosmo.SALT3Source
 
         # Train / Test Split
+        self.splits: dict[str, dict[Literal["train | test | validate"], list[str]]]
         self.test_frac: float
         self.n_kfolds: int
         if self.options.n_kfolds is not None:
@@ -147,6 +151,14 @@ class Data(Step[DataConfig]):
         # === Config Variables ===
 
         # Train / Test Split
+        if self.data_splits is not None:
+            with self.data_splits.open("rb") as io:
+                self.splits = tomllib.load(io)
+            nfold_0 = self.splits.get("0", {})
+            n_train = len(nfold_0.get("train", []))
+            n_test = len(nfold_0.get("test", []))
+            self.train_frac = n_train / (n_train + n_test)
+
         self.test_frac = 1 - self.train_frac
         self.n_kfolds = (
             int(1 / self.test_frac)
@@ -359,50 +371,59 @@ class Data(Step[DataConfig]):
             if not isinstance(self.analysis.plot_summary, list):
                 self.analysis.plot_summary = [self.analysis.plot_summary]
             for opts in self.analysis.plot_summary:
-                o = opts.model_copy(deep=True)
-                if o.name is None:
-                    o.name = "summary"
-                if o.savepath is None:
-                    o.savepath = self.paths.plots / str(self.seed)
-                o.savepath.mkdir(parents=True, exist_ok=True)
-                if (o.savepath / f"{o.name}.{o.ext}").exists():
-                    continue
-                self.log.debug(f"Plotting {o.name}")
-                if o.plot_kwargs is None:
-                    o.plot_kwargs = {"label": self.name}
-                SpectraPlotter.plot_summary(
-                    self.results.data,
-                    o,
-                    mask=self.results.data.mask,
-                    sn_mask=self.results.data.sn_mask,
-                    spec_mask=self.results.data.spec_mask,
-                    wl_mask=self.results.data.wl_mask,
-                )
+                for dataset in ["", "train_", "test_"]:
+                    o = opts.model_copy(deep=True)
+                    if o.name is None:
+                        o.name = f"{dataset}summary"
+                    if o.savepath is None:
+                        o.savepath = self.paths.plots / str(self.seed)
+                    o.savepath.mkdir(parents=True, exist_ok=True)
+                    if (o.savepath / f"{o.name}.{o.ext}").exists():
+                        continue
+                    self.log.debug(f"Plotting {o.name}")
+                    if o.plot_kwargs is None:
+                        o.plot_kwargs = {"label": f"{dataset}{self.name}"}
+                    data = getattr(self.results, f"{dataset}data")
+                    if dataset:
+                        data = data[0]
+                    data.load()
+                    SpectraPlotter.plot_summary(
+                        data,
+                        o,
+                        mask=data.mask,
+                        sn_mask=data.sn_mask,
+                        spec_mask=data.spec_mask,
+                        wl_mask=data.wl_mask,
+                    )
 
     def _plot_comparison(self) -> None:
         if self.analysis.plot_comparison is not None:
             if not isinstance(self.analysis.plot_comparison, list):
                 self.analysis.plot_comparison = [self.analysis.plot_comparison]
             for opts in self.analysis.plot_comparison:
-                o = opts.model_copy(deep=True)
-                if o.name is None:
-                    o.name = "comparison"
-                if o.savepath is None:
-                    o.savepath = self.paths.plots / str(self.seed)
-                o.savepath.mkdir(parents=True, exist_ok=True)
-                if (o.savepath / f"{o.name}.{o.ext}").exists():
-                    continue
-                self.log.debug(f"Plotting {o.name}")
-                if o.plot_kwargs is None:
-                    o.plot_kwargs = {"label": self.name}
-                SpectraPlotter.plot_comparison(
-                    self.results.data,
-                    o,
-                    mask=self.results.data.mask,
-                    sn_mask=self.results.data.sn_mask,
-                    spec_mask=self.results.data.spec_mask,
-                    wl_mask=self.results.data.wl_mask,
-                )
+                for dataset in ["", "train_", "test_"]:
+                    o = opts.model_copy(deep=True)
+                    if o.name is None:
+                        o.name = f"{dataset}comparison"
+                    if o.savepath is None:
+                        o.savepath = self.paths.plots / str(self.seed)
+                    o.savepath.mkdir(parents=True, exist_ok=True)
+                    if (o.savepath / f"{o.name}.{o.ext}").exists():
+                        continue
+                    self.log.debug(f"Plotting {o.name}")
+                    if o.plot_kwargs is None:
+                        o.plot_kwargs = {"label": f"{dataset}{self.name}"}
+                    data = getattr(self.results, f"{dataset}data")
+                    if dataset:
+                        data = data[0]
+                    SpectraPlotter.plot_comparison(
+                        data,
+                        o,
+                        mask=data.mask,
+                        sn_mask=data.sn_mask,
+                        spec_mask=data.spec_mask,
+                        wl_mask=data.wl_mask,
+                    )
 
     @override
     def _analyse(self, *args: "Any", **kwargs: "Any") -> None:
@@ -929,19 +950,45 @@ class Data(Step[DataConfig]):
         return unmasked_sn_dim, unmasked_spec_dim, unmasked_wl_dim
 
     def split_train_test(self) -> None:
-        # Train test split
-        ind_split = int(self.sn_dim * self.train_frac)
+        if not hasattr(self, "splits"):
+            self.splits = {
+                str(i): {"train": [], "test": [], "validate": []}
+                for i in range(self.n_kfolds)
+            }
 
-        # Select train_frac for training, the rest for testing
-        inds = np.arange(0, self.sn_dim)
-        self.rng.shuffle(inds)
+            # Train test split
+            ind_split = int(self.sn_dim * self.train_frac)
+
+            # Select train_frac for training, the rest for testing
+            inds = np.arange(0, self.sn_dim)
+            self.rng.shuffle(inds)
+
+            # Split into k cross validation sets
+            for kfold in range(self.n_kfolds):
+                inds_k = np.roll(inds, kfold * inds.shape[0] // self.n_kfolds)
+                inds_train = inds_k[:ind_split]
+                inds_test = inds_k[ind_split:]
+                self.splits[str(kfold)]["train"] = self.data.model_dump()["sn_name"][
+                    inds_train, 0, 0
+                ]
+                self.splits[str(kfold)]["test"] = self.data.model_dump()["sn_name"][
+                    inds_test, 0, 0
+                ]
 
         # Split into k cross validation sets
         for kfold in range(self.n_kfolds):
-            inds_k = np.roll(inds, kfold * inds.shape[0] // self.n_kfolds)
-
-            inds_train = inds_k[:ind_split]
-            inds_test = inds_k[ind_split:]
+            inds_train = np.nonzero(
+                np.isin(
+                    self.data.model_dump()["sn_name"][:, 0, 0],
+                    self.splits[str(kfold)]["train"],
+                )
+            )[0]
+            inds_test = np.nonzero(
+                np.isin(
+                    self.data.model_dump()["sn_name"][:, 0, 0],
+                    self.splits[str(kfold)]["test"],
+                )
+            )[0]
 
             n_axes = 3
             self.train_data[kfold].model_validate({
@@ -949,11 +996,13 @@ class Data(Step[DataConfig]):
                 for key, val in self.data.model_dump().items()
                 if isinstance(val, np.ndarray)
             })
+
             self.test_data[kfold].model_validate({
                 key: val[inds_test, :, :] if val.ndim == n_axes else val[inds_test, :]
                 for key, val in self.data.model_dump().items()
                 if isinstance(val, np.ndarray)
             })
+
         n_train_sn = self.train_data[0].amplitude.shape[0]
         n_test_sn = self.test_data[0].amplitude.shape[0]
         self.log.debug(
@@ -977,112 +1026,130 @@ class DataStep(Variant[DataStepConfig, Data]):
             if not isinstance(variant.analysis.plot_comparison, list):
                 variant.analysis.plot_comparison = [variant.analysis.plot_comparison]
             for opts in variant.analysis.plot_comparison:
-                self._setup(*args, **{**kwargs, "variants": [opts.base]})
-                if opts.name is None:
-                    opts.name = "comparison"
-                name = f"{opts.name}.{opts.ext}"
-                self.bases[name] = self.bases.get(
-                    name, {"wl": None, "amp": None, "sigma": None, "mask": None}
-                )
-                base_wl = self.bases[name]["wl"]
-                base_amp = self.bases[name]["amp"]
-                base_sigma = self.bases[name]["sigma"]
-                base_mask = self.bases[name]["mask"]
-                if base_amp is None:
-                    (
-                        wl,
-                        amplitude,
-                        sigma,
-                        _sn_name,
-                        _time,
-                        mask,
-                        _sn_mask,
-                        _spec_mask,
-                        _wl_mask,
-                    ) = SpectraPlotter.prep(
-                        self.results[opts.base].data,
-                        opts,
-                        mask=self.results[opts.base].data.mask,
-                        sn_mask=self.results[opts.base].data.sn_mask,
-                        spec_mask=self.results[opts.base].data.spec_mask,
-                        wl_mask=self.results[opts.base].data.wl_mask,
+                for dataset in ["", "train_", "test_"]:
+                    self._setup(*args, **{**kwargs, "variants": [opts.base]})
+                    if opts.name is None:
+                        opts.name = f"{dataset}comparison"
+                    name = f"{opts.name}.{opts.ext}"
+                    self.bases[name] = self.bases.get(
+                        name, {"wl": None, "amp": None, "sigma": None, "mask": None}
                     )
-                    base_wl = wl
-                    base_amp = amplitude
-                    base_sigma = sigma
-                    base_mask = np.logical_not(mask)
-                self.bases[name]["wl"] = base_wl
-                self.bases[name]["amp"] = base_amp
-                self.bases[name]["sigma"] = base_sigma
-                self.bases[name]["mask"] = base_mask
-                opts.base_wl = base_wl
-                opts.base_amp = base_amp
-                opts.base_sigma = base_sigma
-                opts.base_mask = base_mask
-                opts.plot_base = True
+                    base_wl = self.bases[name]["wl"]
+                    base_amp = self.bases[name]["amp"]
+                    base_sigma = self.bases[name]["sigma"]
+                    base_mask = self.bases[name]["mask"]
+                    if base_amp is None:
+                        data = getattr(self.results[opts.base], f"{dataset}data")
+                        if dataset:
+                            data = data[0]
+                        data.load()
+                        (
+                            wl,
+                            amplitude,
+                            sigma,
+                            _sn_name,
+                            _time,
+                            mask,
+                            _sn_mask,
+                            _spec_mask,
+                            _wl_mask,
+                        ) = SpectraPlotter.prep(
+                            data,
+                            opts,
+                            mask=data.mask,
+                            sn_mask=data.sn_mask,
+                            spec_mask=data.spec_mask,
+                            wl_mask=data.wl_mask,
+                        )
+                        base_wl = wl
+                        base_amp = amplitude
+                        base_sigma = sigma
+                        base_mask = np.logical_not(mask)
+                    self.bases[name]["wl"] = base_wl
+                    self.bases[name]["amp"] = base_amp
+                    self.bases[name]["sigma"] = base_sigma
+                    self.bases[name]["mask"] = base_mask
+                    if not dataset:
+                        opts.base_wl = base_wl
+                        opts.base_amp = base_amp
+                        opts.base_sigma = base_sigma
+                        opts.base_mask = base_mask
+                        opts.plot_base = True
 
     def _plot_summary(self, variant: Data) -> None:
         if variant.analysis.plot_summary is not None:
             for opts in variant.analysis.plot_summary:
-                o = opts.model_copy(deep=True)
-                if o.name is None:
-                    o.name = "summary"
-                name = f"{o.name}.{o.ext}"
-                self.plots[name] = self.plots.get(name, {"fig": None, "ax": None})
-                fig = self.plots[name]["fig"]
-                ax = self.plots[name]["ax"]
-                if o.plot_kwargs is None:
-                    o.plot_kwargs = {"label": variant.name}
-                fig, ax = SpectraPlotter.plot_summary(
-                    variant.results.data,
-                    o,
-                    mask=variant.results.data.mask,
-                    sn_mask=variant.results.data.sn_mask,
-                    spec_mask=variant.results.data.spec_mask,
-                    wl_mask=variant.results.data.wl_mask,
-                    fig=fig,
-                    ax=ax,
-                    save=False,
-                    force=True,
-                )
-                self.plots[name]["fig"] = fig
-                self.plots[name]["ax"] = ax
+                for dataset in ["", "train_", "test_"]:
+                    o = opts.model_copy(deep=True)
+                    if o.name is None:
+                        o.name = f"{dataset}summary"
+                    name = f"{o.name}.{o.ext}"
+                    self.plots[name] = self.plots.get(name, {"fig": None, "ax": None})
+                    fig = self.plots[name]["fig"]
+                    ax = self.plots[name]["ax"]
+                    if o.plot_kwargs is None:
+                        o.plot_kwargs = {"label": f"{dataset}{variant.name}"}
+                    data = getattr(variant.results, f"{dataset}data")
+                    if dataset:
+                        data = data[0]
+                    data.load()
+                    fig, ax = SpectraPlotter.plot_summary(
+                        data,
+                        o,
+                        mask=data.mask,
+                        sn_mask=data.sn_mask,
+                        spec_mask=data.spec_mask,
+                        wl_mask=data.wl_mask,
+                        fig=fig,
+                        ax=ax,
+                        save=False,
+                        force=True,
+                    )
+                    self.plots[name]["fig"] = fig
+                    self.plots[name]["ax"] = ax
 
     def _plot_comparison_post(self, variant: Data) -> None:
         if variant.analysis.plot_comparison is not None:
             for opts in variant.analysis.plot_comparison:
-                o = opts.model_copy(deep=True)
-                if o.name is None:
-                    o.name = "comparison"
-                name = f"{o.name}.{o.ext}"
-                self.plots[name] = self.plots.get(
-                    name, {"fig": None, "ax": None, "base": True}
-                )
-                fig = self.plots[name]["fig"]
-                ax = self.plots[name]["ax"]
-                o.plot_base = self.plots[name]["base"]
-                if o.plot_kwargs is None:
-                    o.plot_kwargs = {"label": variant.name}
-                fig, ax = SpectraPlotter.plot_comparison(
-                    variant.results.data,
-                    o,
-                    mask=variant.results.data.mask,
-                    sn_mask=variant.results.data.sn_mask,
-                    spec_mask=variant.results.data.spec_mask,
-                    wl_mask=variant.results.data.wl_mask,
-                    fig=fig,
-                    ax=ax,
-                    save=False,
-                    force=True,
-                )
-                self.plots[name]["fig"] = fig
-                self.plots[name]["ax"] = ax
-                self.plots[name]["base"] = False
+                for dataset in ["", "train_", "test_"]:
+                    o = opts.model_copy(deep=True)
 
-                opts.base_wl = None
-                opts.base_amp = None
-                opts.base_sigma = None
-                opts.base_mask = None
+                    if o.name is None:
+                        o.name = f"{dataset}comparison"
+                    name = f"{o.name}.{o.ext}"
+                    self.plots[name] = self.plots.get(
+                        name, {"fig": None, "ax": None, "base": True}
+                    )
+                    fig = self.plots[name]["fig"]
+                    ax = self.plots[name]["ax"]
+                    o.plot_base = self.plots[name]["base"]
+                    if o.plot_kwargs is None:
+                        o.plot_kwargs = {"label": f"{dataset}{variant.name}"}
+                    data = getattr(variant.results, f"{dataset}data")
+                    if dataset:
+                        data = data[0]
+                    data.load()
+
+                    o.base_wl = self.bases[name]["wl"]
+                    o.base_amp = self.bases[name]["amp"]
+                    o.base_sigma = self.bases[name]["sigma"]
+                    o.base_mask = self.bases[name]["mask"]
+
+                    fig, ax = SpectraPlotter.plot_comparison(
+                        data,
+                        o,
+                        mask=data.mask,
+                        sn_mask=data.sn_mask,
+                        spec_mask=data.spec_mask,
+                        wl_mask=data.wl_mask,
+                        fig=fig,
+                        ax=ax,
+                        save=False,
+                        force=True,
+                    )
+                    self.plots[name]["fig"] = fig
+                    self.plots[name]["ax"] = ax
+                    self.plots[name]["base"] = False
 
     @override
     def _analyse(
