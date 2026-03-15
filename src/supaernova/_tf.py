@@ -4,7 +4,6 @@ NPROC = str(os.cpu_count())
 
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["KERAS_BACKEND"] = "tensorflow"
-os.environ["TF_DETERMINISTIC_OPS"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
@@ -30,6 +29,9 @@ from tensorflow_probability import (
     bijectors as tfb,
     distributions as tfd,
 )
+
+ks.utils.set_random_seed(1)
+tf.config.experimental.enable_op_determinism()
 
 GPUS = tf.config.list_physical_devices("GPU")
 tf.config.set_soft_device_placement(True)

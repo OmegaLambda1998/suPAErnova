@@ -543,6 +543,7 @@ class TFPAEModel(ks.Model):
         self.verbose: bool = config.config.verbose
         self.force: bool = config.config.force
         self.seed: int = config.options.seed
+        self.rng: tf.random.Generator = tf.random.Generator.from_seed(self.seed)
         self.set_seed()
 
         # --- Latent Dimensions ---
@@ -647,7 +648,7 @@ class TFPAEModel(ks.Model):
     @override
     def set_seed(self, seed: int = 0) -> None:
         seed = self.seed + seed
-        tf.random.set_seed(seed)
+        self.rng.reset_from_seed(seed)
 
     @property
     @override
@@ -704,6 +705,8 @@ class TFPAEModel(ks.Model):
     ) -> tuple[tf.Tensor, tf.Tensor]:
         training = False if training is None else training
         testing = False if testing is None else testing
+
+        self.set_seed(self._epoch)
 
         input_phase = inputs[..., :1]
         encoded = self.encoder(
@@ -1442,6 +1445,7 @@ class TFPAEModel(ks.Model):
         clear_session()
 
     def build_model(self, *, update: bool = False) -> None:
+        self.set_seed()
         if not self.built or update:
             # Mask tensors to select specific latents
             if self.physical_latents:
@@ -1527,6 +1531,7 @@ class TFPAEModel(ks.Model):
         *,
         reset_weights: bool | None = None,
     ) -> None:
+        self.set_seed()
         stage_num = self.stage.stage
         if self.stage.prev_stage is not None:
             self.stage.stage = self.stage.prev_stage
@@ -1589,13 +1594,13 @@ class TFPAEModel(ks.Model):
                 phase_offset = (
                     abs(self.phase_offset_scale)
                     * d_phase
-                    * tf.random.normal(d_phase_shape)
+                    * self.rng.normal(d_phase_shape)
                 )
             else:
                 phase_offset = (
                     tf.ones_like(d_phase)
                     * self.phase_offset_scale
-                    * tf.random.normal(d_phase_shape)
+                    * self.rng.normal(d_phase_shape)
                 )
 
             phase += phase_offset
@@ -1605,7 +1610,7 @@ class TFPAEModel(ks.Model):
             amplitude_offset = (
                 self.amplitude_offset_scale
                 * d_amplitude
-                * tf.random.normal(tf.shape(d_amplitude))
+                * self.rng.normal(tf.shape(d_amplitude))
             )
             amplitude += amplitude_offset
 
@@ -1663,9 +1668,7 @@ class TFPAEModel(ks.Model):
 
             # 1) Generate batched random priorities and get a batched permutation:
             #    priorities: [batch, n_total]
-            priorities = tf.random.stateless_uniform(
-                [batch, n_total], seed=(self._epoch, self._epoch), dtype=tf.float32
-            )
+            priorities = self.rng.uniform([batch, n_total], dtype=tf.float32)
 
             # shuffled_inds: for each row, gives a permutation of original indices in shuffled order.
             shuffled_inds = tf.argsort(priorities, axis=1, direction="ASCENDING")
