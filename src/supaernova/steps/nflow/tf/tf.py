@@ -42,6 +42,7 @@ class TFNFlowModel(ks.Model):
         self.seed: int = config.options.seed
         self.debug: bool = config.config.debug or self.options.debug
         self.profile: bool = self.options.profile
+        self.rng: tf.random.Generator = tf.random.Generator.from_seed(self.seed)
         self.set_seed()
 
         # Data Dimensions
@@ -268,6 +269,8 @@ class TFNFlowModel(ks.Model):
     ) -> tf.Tensor:
         training = False if training is None else training
 
+        self.set_seed(int(100 * (1 - self.optimizer.learning_rate / self.lr)))
+
         # === Unpack Inputs ===
         mask = inputs[-1]
 
@@ -283,7 +286,7 @@ class TFNFlowModel(ks.Model):
         if training and self.latent_offset_scale > 0:
             latents_std = tf.math.reduce_std(latents, axis=0)
             latents_offset = (
-                tf.random.normal(tf.shape(latents))
+                self.rng.normal(tf.shape(latents))
                 * latents_std
                 * self.latent_offset_scale
                 * tf.pow(10.0, -(1 - (self.optimizer.learning_rate / self.lr)))
@@ -550,4 +553,4 @@ class TFNFlowModel(ks.Model):
     @override
     def set_seed(self, seed: int = 0) -> None:
         seed = self.seed + seed
-        tf.random.set_seed(seed)
+        self.rng.reset_from_seed(seed)
