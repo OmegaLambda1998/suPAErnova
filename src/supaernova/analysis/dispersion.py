@@ -1,4 +1,3 @@
-import json
 from typing import TYPE_CHECKING, Any, Literal
 from pathlib import Path
 
@@ -352,7 +351,7 @@ class DispersionPlotter(Plotter):
                 lower, center, upper = max_central(delta_m, weight=log_prob)
                 amplitudes.append(center)
                 amplitude_errs_lower.append(lower)
-                amplitude_stds.append(np.sqrt(np.abs(lower * upper)))
+                amplitude_stds.append(0.5 * (upper - lower))
                 amplitude_errs_upper.append(upper)
             pae_amplitudes.append(np.array(amplitudes))
             pae_amplitude_errs_lower.append(np.array(amplitude_errs_lower))
@@ -508,6 +507,12 @@ class DispersionPlotter(Plotter):
             w_rms = np.mean(w_rms_jackknife)
             w_rms_std = np.std(w_rms_jackknife)
 
+            n = len(w_rms_jackknife)
+            w_rms = np.mean(w_rms_jackknife)
+            w_rms_std = np.sqrt(np.sum((y - w_rms) ** 2 * pull_yerr**2)) / (
+                (n - 1) * w_rms
+            )
+
             k = 1.4826
             w_nmad_jackknife = k * jackknife_resample(
                 y, lambda a: np.median(np.abs(a - np.median(a, axis=0)))
@@ -523,6 +528,10 @@ class DispersionPlotter(Plotter):
                 pp(nmad_)
             w_nmad = np.mean(w_nmad_jackknife)
             w_nmad_std = np.std(w_nmad_jackknife)
+
+            n = len(w_nmad_jackknife)
+            w_nmad = np.mean(w_nmad_jackknife)
+            w_nmad_std = 1.253 * w_nmad / np.sqrt(n)
 
             fig, s_ax, ebar = Plotter.errorbar(
                 x,
