@@ -1777,6 +1777,8 @@ class TFPAEModel(ks.Model):
             meas_error /= scale
             # if weighted_error:
             #     weights *= scale
+        if not measurement_error:
+            meas_error *= 0
 
         bin_indices = tf.reshape(
             (
