@@ -816,7 +816,7 @@ class Data(Step[DataConfig]):
         valid_redshift_mask = (self.min_redshift <= data["redshift"]) & (
             self.max_redshift >= data["redshift"]
         )
-        data["sn_mask"] = sn_mask = valid_redshift_mask
+        data["sn_mask"] = sn_mask = valid_redshift_mask[:, :1, :]
         data["mask"] &= sn_mask
 
         self.log.debug(
