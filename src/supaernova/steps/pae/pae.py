@@ -486,6 +486,7 @@ class PAE(ModelStep[PAEConfig]):
         final_loadpath = self.paths.results / self.model_name
         self.log.debug(f"Loading final PAE model weights from {final_loadpath}")
         self.model.load_checkpoint(final_loadpath, reset_weights=False)
+        print("xxx", self.model.encoder.moving_means)
         self._run_flag = True
 
     @override
