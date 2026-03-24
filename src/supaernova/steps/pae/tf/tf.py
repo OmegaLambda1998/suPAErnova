@@ -1110,9 +1110,11 @@ class TFPAEModel(ks.Model):
 
     def get_moving_means(self) -> None:
         phase = tf.convert_to_tensor(self.stage.train_data.time, dtype=tf.float32)
+        print("phase", tf.reduce_mean(phase))
         amplitude = tf.convert_to_tensor(
             self.stage.train_data.amplitude, dtype=tf.float32
         )
+        print("amplitude", tf.reduce_mean(amplitude))
 
         self.stage.train_data.clear()
 
@@ -1131,6 +1133,7 @@ class TFPAEModel(ks.Model):
             spec_mask=spec_mask,
             wl_mask=wl_mask,
         )[:, 0, :]
+        print("encoded", tf.reduce_mean(encoded))
 
         mask &= sn_mask & spec_mask & wl_mask
         valid_wl_mask = tf.logical_not(tf.logical_and(tf.logical_not(mask), wl_mask))
