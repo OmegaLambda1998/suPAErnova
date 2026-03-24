@@ -119,6 +119,7 @@ class TFNFlowModel(ks.Model):
         self.pae.trainable = False
         self.pae.encoder.trainable = False
         self.pae.decoder.trainable = False
+        print(self.pae.encoder.moving_means)
 
         # --- Training ---
         self.built: bool = False
