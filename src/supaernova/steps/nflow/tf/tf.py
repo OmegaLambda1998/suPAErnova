@@ -459,6 +459,7 @@ class TFNFlowModel(ks.Model):
             spec_mask = getattr(self, f"{dt}spec_mask")
             wl_mask = getattr(self, f"{dt}wl_mask")
             pae_inputs = tf.concat((phase, amplitude), axis=-1)
+            print(tf.reduce_mean(pae_inputs))
             latents = self.pae.encoder(
                 pae_inputs,
                 training=False,
@@ -467,6 +468,7 @@ class TFNFlowModel(ks.Model):
                 spec_mask=spec_mask,
                 wl_mask=wl_mask,
             )
+            print(tf.reduce_mean(latents))
 
             cov_latents = latents[:, 0, -2:]
 
