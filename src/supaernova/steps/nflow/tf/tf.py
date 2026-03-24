@@ -455,23 +455,11 @@ class TFNFlowModel(ks.Model):
             amplitude = tf.convert_to_tensor(data.amplitude, dtype=tf.float32)
             data.clear()
             data_mask = getattr(self, f"{dt}data_mask")
-            print("data_mask", tf.math.count_nonzero(data_mask))
             sn_mask = getattr(self, f"{dt}sn_mask")
-            print("sn_mask", tf.math.count_nonzero(sn_mask))
             spec_mask = getattr(self, f"{dt}spec_mask")
-            print("spec_mask", tf.math.count_nonzero(spec_mask))
             wl_mask = getattr(self, f"{dt}wl_mask")
-            print("wl_mask", tf.math.count_nonzero(wl_mask))
             pae_inputs = tf.concat((phase, amplitude), axis=-1)
-            print(
-                tf.reduce_mean(
-                    tf.where(
-                        tf.math.is_finite(pae_inputs),
-                        pae_inputs,
-                        tf.zeros_like(pae_inputs),
-                    )
-                )
-            )
+            print(self.pae.encoder.moving_means)
             latents = self.pae.encoder(
                 pae_inputs,
                 training=False,
