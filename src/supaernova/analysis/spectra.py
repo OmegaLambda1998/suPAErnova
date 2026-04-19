@@ -27,6 +27,7 @@ class SpectraPlot(AbstractPlot):
         ]
         | None
     ) = None
+    stack: bool = False
 
 
 class ComparisonPlot(SpectraPlot):
@@ -148,6 +149,7 @@ class SpectraPlotter(Plotter):
         decorate: bool = True,
         offset: int = 0,
         phase: bool = True,
+        stack: bool = False,
         shift: float = 0.0,
         shift_min: float | None = None,
         shift_max: float | None = None,
@@ -177,6 +179,11 @@ class SpectraPlotter(Plotter):
             phase=True,
         )
 
+        if stack:
+            stacked_x = None
+            stacked_y = None
+            stacked_yerr = None
+
         if shift_max is None:
             shift_max = time[np.isfinite(time)].max()
         if shift_min is None:
@@ -188,6 +195,7 @@ class SpectraPlotter(Plotter):
         n_sn, n_spec, _n_wl = input_mask.shape
 
         y_max = -np.inf
+        y_min = np.inf
 
         i = 0 + offset
         for sn in range(n_sn):
@@ -212,6 +220,10 @@ class SpectraPlotter(Plotter):
                     if input_spec_mask[sn, spec, 0]:
                         c = colours(0.5)
                         ma = input_mask[sn, spec, :].astype(bool)
+                        if np.count_nonzero(ma) != np.count_nonzero(
+                            input_mask[sn, 0, :]
+                        ):
+                            continue
                         x = wl[sn, spec, :][ma]
                         y = amplitude[sn, spec, :][ma] + phase_shift(time[sn, spec, 0])
                         yerr = sigma[sn, spec, :][ma]
@@ -223,6 +235,23 @@ class SpectraPlotter(Plotter):
                             y_max = max(
                                 y_max, np.abs(y + yerr).max(), np.abs(y - yerr).max()
                             )
+                            y_min = min(
+                                y_min, np.abs(y + yerr).min(), np.abs(y - yerr).min()
+                            )
+                            if stack:
+                                if stacked_x is None:
+                                    stacked_x = x
+                                if stacked_y is None:
+                                    stacked_y = y - phase_shift(time[sn, spec, 0])
+                                else:
+                                    stacked_y += y - phase_shift(time[sn, spec, 0])
+                                if stacked_yerr is None:
+                                    stacked_yerr = yerr
+                                else:
+                                    stacked_yerr = np.sqrt(
+                                        stacked_yerr * stacked_yerr + yerr * yerr
+                                    )
+                                continue
 
                             (
                                 fig,
@@ -234,7 +263,7 @@ class SpectraPlotter(Plotter):
                                 *args,
                                 fig=fig,
                                 ax=ax,
-                                yerr=yerr,
+                                yerr=None if save else yerr,
                                 linestyle="-",
                                 marker="",
                                 c=c,
@@ -258,6 +287,24 @@ class SpectraPlotter(Plotter):
                                     va="center",
                                 )
                             t_last = t
+                if stack:
+                    (
+                        fig,
+                        ax,
+                        _ebar,
+                    ) = Plotter.errorbar(
+                        stacked_x,
+                        stacked_y,
+                        *args,
+                        fig=fig,
+                        ax=ax,
+                        yerr=None if save else stacked_yerr,
+                        linestyle="-",
+                        marker="",
+                        c=c,
+                    )
+                    y_min = stacked_y.min()
+                    y_max = stacked_y.max()
 
         ax.set_xlabel("Wavelength [Å]")
         ax.set_ylabel("Amplitude + offset")
@@ -266,6 +313,8 @@ class SpectraPlotter(Plotter):
         symlog_scale = 2
         if y_max > symlog_max:
             ax.set_yscale("symlog", linthresh=symlog_max, linscale=symlog_scale)
+        if save:
+            ax.set_ylim(0.95 * y_min, 1.05 * y_max)
         leg = ax.legend(bbox_to_anchor=(1.0, 1.0))
         leg.set_in_layout(False)
         # Trigger a draw so that constrained layout is executed once

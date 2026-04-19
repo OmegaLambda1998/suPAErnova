@@ -1365,7 +1365,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         axes: "list[Axis] | None" = None,
         save: bool = True,
         force: bool = False,
-        shift: float = 20.0,
+        shift: float = 25.0,
         phase: bool = True,
         base: bool = True,
         offset: int = 0,
@@ -1440,6 +1440,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                         decorate=True,
                         phase=phase,
                         shift=shift,
+                        stack=o.stack,
                         shift_min=shift_min,
                         shift_max=shift_max,
                     )
@@ -1808,6 +1809,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                         offset=offset + (3 if base else 1),
                         phase=phase and not base,
                         shift=shift,
+                        stack=o.stack,
                         shift_min=shift_min,
                         shift_max=shift_max,
                     )
