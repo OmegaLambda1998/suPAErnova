@@ -228,7 +228,6 @@ class PAE(ModelStep[PAEConfig]):
 
     @override
     def _setup(self, *args: Any, data: "DataStepResult", **kwargs: Any) -> None:
-        super()._setup()
         # --- Previous Step Variables ---
         self.data = data.data
         self.colourlaw = data.colourlaw
@@ -1074,17 +1073,6 @@ class PAE(ModelStep[PAEConfig]):
 
         if analyse:
             self.analysis = self.options.analysis or PAEStepAnalysis()
-
-        super()._clear(
-            *args,
-            setup=setup,
-            run=run,
-            save=save,
-            load=load,
-            result=result,
-            analyse=analyse,
-            **kwargs,
-        )
 
     # === Instance Methods ===
 

@@ -435,14 +435,14 @@ class PosteriorMap(tf.Module):
             if stage.init_latents == "z_data":
                 # Generate z_latents directly from data
                 pae_input = tf.concat((self.data_time, self.data_amplitude), axis=-1)
-                z_latents = self.pae(
+                z_latents = self.pae.encoder(
                     pae_input,
                     training=False,
                     mask=self.data_mask,
                     sn_mask=self.sn_mask,
                     spec_mask=self.spec_mask,
                     wl_mask=self.wl_mask,
-                )[0][:, 0, :]
+                )[:, 0, :]
 
                 z_latents = tf.repeat(
                     tf.expand_dims(z_latents, axis=0),

@@ -128,7 +128,6 @@ class Data(Step[DataConfig]):
 
     @override
     def _setup(self, *args: "Any", **kwargs: "Any") -> None:
-        super()._setup()
         colourlaw = self.options.colourlaw
         if colourlaw is not None:
             _, colourlaw = np.loadtxt(colourlaw, unpack=True)
@@ -464,17 +463,6 @@ class Data(Step[DataConfig]):
 
         if analyse:
             self.analysis = self.options.analysis or DataStepAnalysis()
-
-        super()._clear(
-            *args,
-            setup=setup,
-            run=run,
-            save=save,
-            load=load,
-            result=result,
-            analyse=analyse,
-            **kwargs,
-        )
 
     #
     # === Instance Methods ===

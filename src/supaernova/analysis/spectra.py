@@ -387,7 +387,6 @@ class SpectraPlotter(Plotter):
         )
 
         summary_mask = np.logical_not(input_mask & mask_spec & mask_sn)
-
         x = np.ma.masked_array(wl, summary_mask).mean(axis=(0, 1))
         y = np.ma.masked_array(amplitude, summary_mask)
         yerr = np.ma.masked_array(sigma, summary_mask)

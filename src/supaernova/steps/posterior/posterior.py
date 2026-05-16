@@ -289,11 +289,9 @@ class Posterior(ModelStep[PosteriorConfig]):
         nflow: "NFlowStepResult",
         **kwargs: Any,
     ) -> None:
-        super()._setup()
         # === Previous Step Variables ===
         self.nflow = nflow.model
         self.pae = pae.model
-
         self.data = data.data
         self.train_data = data.train_data[self.kfold % len(data.train_data)]
         self.test_data = data.test_data[self.kfold % len(data.test_data)]
@@ -981,6 +979,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     spec_mask=input_spec_mask,
                     wl_mask=input_wl_mask,
                 )
+
                 if not np.any(mask) and not force:
                     continue
 
@@ -992,7 +991,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 # === PAE ===
                 # --- PAE ---
                 pae_pae_input = np.concatenate((data.time, data.amplitude), axis=-1)
-                pae_pae_latents, _ = model.pae(
+                pae_pae_latents = model.pae.encoder(
                     pae_pae_input,
                     training=False,
                     mask=input_mask,
@@ -2024,10 +2023,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                         results,
                         model,
                         data,
-                        input_mask,
-                        sn_mask,
-                        input_spec_mask,
-                        input_wl_mask,
+                        input_mask.copy(),
+                        sn_mask.copy(),
+                        input_spec_mask.copy(),
+                        input_wl_mask.copy(),
                         figs=[subfig],
                         save=False,
                         force=True,
@@ -2375,10 +2374,15 @@ class Posterior(ModelStep[PosteriorConfig]):
                 results = self.results[subset][str(seed)]
 
                 data = model.data
-                input_mask = model.data_mask
-                input_sn_mask = model.sn_mask
-                input_spec_mask = model.spec_mask
-                input_wl_mask = model.wl_mask
+                input_mask = model.data_mask.copy()
+                input_sn_mask = model.sn_mask.copy()
+                input_spec_mask = model.spec_mask.copy()
+                input_wl_mask = model.wl_mask.copy()
+
+                pp(np.count_nonzero(input_mask))
+                pp(np.count_nonzero(input_sn_mask))
+                pp(np.count_nonzero(input_spec_mask))
+                pp(np.count_nonzero(input_wl_mask))
 
                 map_init_results = []
                 map_best_results = []
@@ -2412,10 +2416,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                     results,
                     model,
                     data,
-                    input_mask,
-                    input_sn_mask,
-                    input_spec_mask,
-                    input_wl_mask,
+                    input_mask.copy(),
+                    input_sn_mask.copy(),
+                    input_spec_mask.copy(),
+                    input_wl_mask.copy(),
                 )
 
                 self._plot_comparison_spectra(
@@ -2424,10 +2428,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                     results,
                     model,
                     data,
-                    input_mask,
-                    input_sn_mask,
-                    input_spec_mask,
-                    input_wl_mask,
+                    input_mask.copy(),
+                    input_sn_mask.copy(),
+                    input_spec_mask.copy(),
+                    input_wl_mask.copy(),
                 )
 
                 self._plot_comparison_array(
@@ -2436,20 +2440,20 @@ class Posterior(ModelStep[PosteriorConfig]):
                     model,
                     results,
                     data,
-                    input_mask,
-                    input_sn_mask,
-                    input_spec_mask,
-                    input_wl_mask,
+                    input_mask.copy(),
+                    input_sn_mask.copy(),
+                    input_spec_mask.copy(),
+                    input_wl_mask.copy(),
                 )
 
                 self._plot_map(
                     subset,
                     seed,
                     data,
-                    input_mask,
-                    input_sn_mask,
-                    input_spec_mask,
-                    input_wl_mask,
+                    input_mask.copy(),
+                    input_sn_mask.copy(),
+                    input_spec_mask.copy(),
+                    input_wl_mask.copy(),
                     map_init_results,
                     labels,
                     is_init=True,
@@ -2459,10 +2463,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                     subset,
                     seed,
                     data,
-                    input_mask,
-                    input_sn_mask,
-                    input_spec_mask,
-                    input_wl_mask,
+                    input_mask.copy(),
+                    input_sn_mask.copy(),
+                    input_spec_mask.copy(),
+                    input_wl_mask.copy(),
                     map_best_results,
                     labels,
                     is_init=False,
@@ -2473,10 +2477,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                     seed,
                     data,
                     results,
-                    input_mask,
-                    input_sn_mask,
-                    input_spec_mask,
-                    input_wl_mask,
+                    input_mask.copy(),
+                    input_sn_mask.copy(),
+                    input_spec_mask.copy(),
+                    input_wl_mask.copy(),
                     labels,
                 )
 
@@ -2484,10 +2488,10 @@ class Posterior(ModelStep[PosteriorConfig]):
                     subset,
                     seed,
                     data,
-                    input_mask,
-                    input_sn_mask,
-                    input_spec_mask,
-                    input_wl_mask,
+                    input_mask.copy(),
+                    input_sn_mask.copy(),
+                    input_spec_mask.copy(),
+                    input_wl_mask.copy(),
                 )
 
     @override
@@ -2558,17 +2562,6 @@ class Posterior(ModelStep[PosteriorConfig]):
 
         if analyse:
             self.analysis = self.options.analysis or PosteriorStepAnalysis()
-
-        super()._clear(
-            *args,
-            setup=setup,
-            run=run,
-            save=save,
-            load=load,
-            result=result,
-            analyse=analyse,
-            **kwargs,
-        )
 
     # === Instance Methods ===
 

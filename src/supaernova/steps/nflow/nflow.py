@@ -203,7 +203,6 @@ class NFlow(ModelStep[NFlowConfig]):
         pae: "PAEStepResult",
         **kwargs: Any,
     ) -> None:
-        super()._setup()
         # --- Previous Step Variables ---
         self.data = data.data
         self.pae = pae.model
@@ -789,17 +788,6 @@ class NFlow(ModelStep[NFlowConfig]):
 
         if analyse:
             self.analysis = self.options.analysis or NFlowStepAnalysis()
-
-        super()._clear(
-            *args,
-            setup=setup,
-            run=run,
-            save=save,
-            load=load,
-            result=result,
-            analyse=analyse,
-            **kwargs,
-        )
 
     # === Instance Methods ===
 

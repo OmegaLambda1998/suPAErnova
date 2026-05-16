@@ -50,6 +50,7 @@ class StepConfig(CallbackConfig):
     # === Class Variables ===
     model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="allow")
     steps: ClassVar[dict[str, type["StepConfig"]]] = {}
+    proxies: ClassVar[dict[str, list[type["StepConfig"]]]] = {}
     required_steps: ClassVar[list[str]] = []
     id: ClassVar[str] = ""
 
@@ -57,6 +58,12 @@ class StepConfig(CallbackConfig):
     @classmethod
     def register_step(cls) -> None:
         cls.steps[cls.id] = cls
+
+    @classmethod
+    def register_proxy(cls, proxy: type["StepConfig"]) -> None:
+        if cls.id not in cls.proxies:
+            cls.proxies[cls.id] = []
+        cls.proxies[cls.id].append(proxy)
 
     # === Field Variables ===
     # --- Required ---

@@ -22,12 +22,19 @@ if TYPE_CHECKING:
 class Step[C: StepConfig]:
     # === Class Variables ===
     steps: ClassVar[dict[str, type["Step[C]"]]] = {}
+    proxies: ClassVar[dict[str, list[type["Step"]]]] = {}
     id: ClassVar[str]
 
     # === Class Methods ===
     @classmethod
     def register_step(cls) -> None:
         cls.steps[cls.id] = cls
+
+    @classmethod
+    def register_proxy(cls, proxy: type["Step"]) -> None:
+        if cls.id not in cls.proxies:
+            cls.proxies[cls.id] = []
+        cls.proxies[cls.id].append(proxy)
 
     @staticmethod
     def register_steps() -> None:
@@ -68,6 +75,7 @@ class Step[C: StepConfig]:
         self.analysis: StepAnalysis
 
     def _is_setup(self, *args: "Any", **kwargs: "Any") -> bool:
+        self.log.warning(f"{self.__class__} has no _is_setup implementation")
         return False
 
     @callback
@@ -78,6 +86,7 @@ class Step[C: StepConfig]:
         return is_setup
 
     def _setup(self, *args: "Any", **kwargs: "Any") -> None:
+        self.log.warning(f"{self.__class__} has no _setup implementation")
         pass
 
     @callback
@@ -89,6 +98,7 @@ class Step[C: StepConfig]:
             self.log.info(f"Finished setting up {self.name}")
 
     def _has_run(self, *args: "Any", **kwargs: "Any") -> bool:
+        self.log.warning(f"{self.__class__} has no _has_run implementation")
         return False
 
     @callback
@@ -99,6 +109,7 @@ class Step[C: StepConfig]:
         return has_run
 
     def _run(self, *args: "Any", **kwargs: "Any") -> None:
+        self.log.warning(f"{self.__class__} has no _run implementation")
         pass
 
     @callback
@@ -111,6 +122,7 @@ class Step[C: StepConfig]:
             self.log.info(f"Finished running {self.name}")
 
     def _is_saved(self, *args: "Any", **kwargs: "Any") -> bool:
+        self.log.warning(f"{self.__class__} has no _is_saved implementation")
         return False
 
     @callback
@@ -121,6 +133,7 @@ class Step[C: StepConfig]:
         return is_saved
 
     def _save(self, *args: "Any", **kwargs: "Any") -> None:
+        self.log.warning(f"{self.__class__} has no _save implementation")
         pass
 
     @callback
@@ -143,6 +156,7 @@ class Step[C: StepConfig]:
         return is_loaded
 
     def _load(self, *args: "Any", **kwargs: "Any") -> None:
+        self.log.warning(f"{self.__class__} has no _load implementation")
         pass
 
     @callback
@@ -158,6 +172,7 @@ class Step[C: StepConfig]:
                 self.save(*args, **kwargs)
 
     def _has_results(self, *args: "Any", **kwargs: "Any") -> bool:
+        self.log.warning(f"{self.__class__} has no _has_results implementation")
         return False
 
     @callback
@@ -168,6 +183,7 @@ class Step[C: StepConfig]:
         return has_results
 
     def _result(self, *args: "Any", **kwargs: "Any") -> None:
+        self.log.warning(f"{self.__class__} has no _results implementation")
         pass
 
     @callback
@@ -180,6 +196,7 @@ class Step[C: StepConfig]:
             self.log.info(f"Finished gathering {self.name} results")
 
     def _was_analysed(self, *args: "Any", **kwargs: "Any") -> bool:
+        self.log.warning(f"{self.__class__} has no _was_analysed implementation")
         return False
 
     @callback
@@ -192,6 +209,7 @@ class Step[C: StepConfig]:
         return was_analysed
 
     def _analyse(self, *args: "Any", **kwargs: "Any") -> None:
+        self.log.warning(f"{self.__class__} has no _analyse implementation")
         pass
 
     @callback
@@ -204,6 +222,7 @@ class Step[C: StepConfig]:
             self.log.info(f"Finished analysing {self.name}")
 
     def _is_cleaned(self, *args: "Any", **kwargs: "Any") -> bool:
+        self.log.warning(f"{self.__class__} has no _is_cleaned implementation")
         return False
 
     @callback
@@ -214,6 +233,7 @@ class Step[C: StepConfig]:
         return is_cleaned
 
     def _clean(self, *args: "Any", **kwargs: "Any") -> None:
+        self.log.warning(f"{self.__class__} has no _clean implementation")
         pass
 
     @callback
@@ -246,6 +266,7 @@ class Step[C: StepConfig]:
         analyse: bool = False,
         **kwargs: "Any",
     ) -> None:
+        self.log.warning(f"{self.__class__} has no _clear implementation")
         pass
 
     @callback

@@ -14,7 +14,7 @@ dependencies = [
     "chainconsumer",
     "click",
     "coloredlogs",
-    "matplotlib",
+    "matplotlib<3.11",
     "pandas",
     "pydantic",
     "sncosmo",
@@ -33,10 +33,7 @@ tf-rocm = ["tensorflow_rocm>=2.19,<2.20"]
 tf-cuda = ["tensorflow[and-cuda]>=2.19,<2.20"]
 
 [dependency-groups]
-dev = [
-    "pandas_stubs",
-    "types_tensorflow",
-]
+dev = ["pandas_stubs", "types_tensorflow"]
 docs = ["mkapi", "mkdocs_jupyter", "mkdocs_material", "mkdocs"]
 jupyter = ["ipykernel", "jupyter"]
 tests = ["pytest", "pytest_json_ctrf", "pytest_richer"]
@@ -63,7 +60,7 @@ tensorflow_rocm = [{ index = "rocm" }]
 
 [[tool.uv.index]]
 name = "rocm"
-url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2/"
+url = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.3/"
 format = "flat"
 explicit = true
 

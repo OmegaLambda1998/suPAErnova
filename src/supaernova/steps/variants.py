@@ -88,13 +88,23 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             self.variant_required_steps[name] = {}
             for key, val in kwargs.items():
                 k = cast("int | str", variant.options.get(key))
+                rstep = None
                 if k is not None:
-                    n = list(val.results.keys())[k] if isinstance(k, int) else k
-                    val._setup(*args, **{**kwargs, "variants": [n]})
-                    v = val.results[n]
-                    variant_kwargs[key] = v
-                    val.clear(*args, **{**kwargs, "variants": [n]})
-                    self.variant_required_steps[name][key] = (val, n)
+                    n = list(val.variants.keys())[k] if isinstance(k, int) else k
+                    if n in val.variants:
+                        rstep = val
+                    elif len(val.proxies[val.id]) > 0:
+                        for p in val.proxies[val.id]:
+                            proxy = kwargs.get(p.id)
+                            if proxy is not None and n in proxy.variants:
+                                rstep = proxy
+                                break
+                    if rstep:
+                        rstep._setup(*args, **{**kwargs, "variants": [n]})
+                        v = rstep.results[n]
+                        variant_kwargs[key] = v
+                        rstep.clear(*args, **{**kwargs, "variants": [n]})
+                        self.variant_required_steps[name][key] = (rstep, n)
             variant.setup(*args, **variant_kwargs)
 
     @override
@@ -363,16 +373,6 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
                 analyse=analyse,
                 **kwargs,
             )
-        super()._clear(
-            *args,
-            setup=setup,
-            run=run,
-            save=save,
-            load=load,
-            result=result,
-            analyse=analyse,
-            **kwargs,
-        )
 
     @override
     @callback

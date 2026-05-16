@@ -8,6 +8,7 @@ from supaernova.steps import Step
 from supaernova.steps.pae import PAEStep
 from supaernova.steps.data import DataStep
 from supaernova.steps.nflow import NFlowStep
+from supaernova.steps.sim import SimStep
 from supaernova.steps.posterior import PosteriorStep
 
 from .input import InputConfig
@@ -15,6 +16,7 @@ from .steps import StepConfig
 from .steps.pae import PAEStepConfig
 from .steps.data import DataStepConfig
 from .steps.nflow import NFlowStepConfig
+from .steps.sim import SimStepConfig
 from .steps.posterior import PosteriorStepConfig
 
 
@@ -28,6 +30,7 @@ class RunConfig(InputConfig):
     data: DataStepConfig | None = None
     pae: PAEStepConfig | None = None
     nflow: NFlowStepConfig | None = None
+    sim: SimStepConfig | None = None
     posterior: PosteriorStepConfig | None = None
 
     @computed_field
@@ -39,6 +42,7 @@ class RunConfig(InputConfig):
                 self.data,
                 self.pae,
                 self.nflow,
+                self.sim,
                 self.posterior,
             ]
             if step_config is not None
@@ -48,6 +52,7 @@ class RunConfig(InputConfig):
     data_step: DataStep | None = None
     pae_step: PAEStep | None = None
     nflow_step: NFlowStep | None = None
+    sim_step: SimStep | None = None
     posterior_step: PosteriorStep | None = None
 
     @computed_field
@@ -70,8 +75,13 @@ class RunConfig(InputConfig):
                     err = f"{step_config.id} requires that {required_step} is run first, but {required_step} has not been defined!"
                     self._raise(err)
                 step = getattr(self, required_step)
-                step_variants = step.variants
+                step_variants = step.variants[:]
                 variants = step_config.variants
+                if len(step.proxies.get(step.id, [])) > 0:
+                    for proxy in step.proxies[step.id]:
+                        proxy_step = getattr(self, proxy.id)
+                        proxy_variants = proxy_step.variants
+                        step_variants += proxy_variants
                 for i, variant in enumerate(variants):
                     if not hasattr(variant, required_step):
                         setattr(variant, required_step, i)
@@ -90,12 +100,25 @@ class RunConfig(InputConfig):
     # --- Before ---
     # --- After ---
     # === Instance Methods ===
-    def require(self, step_name: str) -> Step:
+    def require(self, step_name: str, *, is_proxy: bool = False) -> Step:
         step = getattr(self, step_name + "_step")
-        if step is None:
+        if step is None and not is_proxy:
             err = f"{step_name} has not yet run"
             self._raise(err)
         return step
+
+    def requirements(self, required_steps: list[str]) -> dict[str, Step]:
+        steps = {}
+        for required_step in required_steps:
+            steps[required_step] = self.require(required_step)
+            required = getattr(self, required_step)
+            steps = {**self.requirements(required.required_steps), **steps}
+            if len(required.proxies.get(required.id, [])) > 0:
+                for proxy_step in required.proxies[required.id]:
+                    proxy_require = self.require(proxy_step.id, is_proxy=True)
+                    if proxy_require is not None:
+                        steps[proxy_step.id] = proxy_require
+        return steps
 
     def run(self) -> None:
         for step in self.steps:
@@ -103,10 +126,7 @@ class RunConfig(InputConfig):
                 self.log.info(f"Executing {step.name}")
                 start_time = time()
                 args = []
-                kwargs = {
-                    required_step: self.require(required_step)
-                    for required_step in step.options.required_steps
-                }
+                kwargs = self.requirements(step.options.required_steps)
                 step.analyse(*args, **kwargs)
                 setattr(self, step.id + "_step", step)
                 step.clear(*args, **kwargs)
