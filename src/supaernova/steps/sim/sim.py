@@ -234,7 +234,7 @@ class Sim(Step[SimConfig]):
             t_mask = np.logical_and(data_time >= tlo, data_time < thi)
             t_snr = np.where(t_mask, data_snr, np.zeros_like(data_snr))
             t_snr = np.sum(t_snr, axis=(0, 1), keepdims=True) / np.count_nonzero(
-                t_mask, axis=(0, 1), keepdims=True
+                t_mask & data_mask, axis=(0, 1), keepdims=True
             )
             t_snr[~np.isfinite(t_snr)] = 0
             t_snr.repeat(self.sn_dim, axis=0).repeat(self.spec_dim, axis=1)
@@ -245,15 +245,21 @@ class Sim(Step[SimConfig]):
         snr_per_time[snr_per_time == 0] = 1
         synth_sigma = np.abs(synth_amp / snr_per_time)
         synth_amp += self.rng.normal(np.zeros_like(synth_amp), synth_sigma)
+        synth_amp = np.clip(synth_amp, 0, np.inf)
+        synth_redshift = np.clip(
+            self.rng.normal(
+                self.real_data.data.redshift.mean() + np.zeros((self.sn_dim, 1, 1)),
+                self.real_data.data.redshift.std() + np.zeros((self.sn_dim, 1, 1)),
+            ),
+            self.min_redshift,
+            self.max_redshift,
+        )
 
         data["ind"] = np.arange(self.sn_dim)[:, None, None]
         data["nspectra"] = np.ones((self.sn_dim, self.spec_dim)) * self.spec_dim
         data["sn_name"] = synth_names[:, None, None]
         data["dphase"] = np.zeros((self.sn_dim, self.spec_dim))
-        data["redshift"] = self.rng.normal(
-            self.real_data.data.redshift.mean() + np.zeros((self.sn_dim, 1, 1)),
-            self.real_data.data.redshift.std() + np.zeros((self.sn_dim, 1, 1)),
-        )
+        data["redshift"] = synth_redshift
         data["x0"] = np.zeros((self.sn_dim, 1, 1))
         data["x1"] = np.zeros((self.sn_dim, 1, 1))
         data["c"] = np.zeros((self.sn_dim, 1, 1))
@@ -278,11 +284,23 @@ class Sim(Step[SimConfig]):
         data["sigma"] = synth_sigma
         data["salt_flux"] = synth_amp
         data["wavelength"] = synth_wl
-        data["mask"] = synth_mask
+        data["wl_mask"] = (
+            synth_wl_mask
+            & (synth_wl >= self.min_wavelength)
+            & (synth_wl <= self.max_wavelength)
+        )
+        data["spec_mask"] = (
+            synth_spec_mask
+            & (synth_phase >= self.min_phase)
+            & (synth_phase <= self.max_phase)
+        )
+        data["sn_mask"] = (
+            synth_sn_mask
+            & (synth_redshift >= self.min_redshift)
+            & (synth_redshift <= self.max_redshift)
+        )
         data["laser_mask"] = synth_mask
-        data["sn_mask"] = synth_sn_mask
-        data["spec_mask"] = synth_spec_mask
-        data["wl_mask"] = synth_wl_mask
+        data["mask"] = synth_mask
         data["time"] = synth_time
 
         self.data.model_validate(data)

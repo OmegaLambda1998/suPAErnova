@@ -1104,6 +1104,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     o.plot_kwargs["label"] = (
                         f"PAE\n(log prob: {mean_pae_log_prior:.2E} + {mean_pae_log_like:.2E} = {mean_pae_log_prob:.2E})"
                     )
+                    pp(pae_position[0, ...][np.any(mask, axis=(-2, -1))])
 
                 data.amplitude = pae_amplitude.numpy()
                 data.sigma = pae_sigma.numpy()
@@ -1207,6 +1208,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     o.plot_kwargs["label"] = (
                         f"MAP\n(log prob: {mean_map_log_prior:.2E} + {mean_map_log_like:.2E} = {mean_map_log_prob:.2E})"
                     )
+                    pp(map_position[0, ...][np.any(mask, axis=(-2, -1))])
 
                 data.amplitude = map_amplitude.numpy()
                 data.sigma = map_sigma.numpy()
@@ -1327,6 +1329,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                     o.plot_kwargs["label"] = (
                         f"Posterior\n(log prob: {mean_pos_log_prior:.2E} + {mean_pos_log_like:.2E} = {mean_pos_log_prob:.2E})"
                     )
+                    pp(pos_position[0, ...][np.any(mask, axis=(-2, -1))])
 
                 data.amplitude = pos_amplitude.numpy()
                 data.sigma = pos_sigma.numpy()
@@ -2378,11 +2381,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                 input_sn_mask = model.sn_mask.copy()
                 input_spec_mask = model.spec_mask.copy()
                 input_wl_mask = model.wl_mask.copy()
-
-                pp(np.count_nonzero(input_mask))
-                pp(np.count_nonzero(input_sn_mask))
-                pp(np.count_nonzero(input_spec_mask))
-                pp(np.count_nonzero(input_wl_mask))
 
                 map_init_results = []
                 map_best_results = []

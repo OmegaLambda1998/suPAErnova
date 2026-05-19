@@ -207,11 +207,11 @@ class TFPosteriorModel(ks.Model):
         # --- Masks ---
         # Data Mask
         input_mask = tf.ones_like(input_amp, dtype=tf.bool) if mask is None else mask
-        pp(tf.math.count_nonzero(input_mask), "input_mask")
+        # pp(tf.math.count_nonzero(input_mask), "input_mask")
 
         # Wavelength Range Mask
         input_wl_mask = tf.ones_like(input_mask) if wl_mask is None else wl_mask
-        pp(tf.math.count_nonzero(input_wl_mask), "input_wl_mask")
+        # pp(tf.math.count_nonzero(input_wl_mask), "input_wl_mask")
 
         # Phase Range Mask
         input_spec_mask = (
@@ -219,7 +219,7 @@ class TFPosteriorModel(ks.Model):
             if spec_mask is None
             else spec_mask
         )
-        pp(tf.math.count_nonzero(input_spec_mask), "input_spec_mask")
+        # pp(tf.math.count_nonzero(input_spec_mask), "input_spec_mask")
 
         # Redshift Range Mask
         input_sn_mask = (
@@ -227,17 +227,17 @@ class TFPosteriorModel(ks.Model):
             if sn_mask is None
             else sn_mask
         )
-        pp(tf.math.count_nonzero(input_sn_mask), "input_sn_mask")
+        # pp(tf.math.count_nonzero(input_sn_mask), "input_sn_mask")
 
         posterior_mask = input_mask & input_sn_mask & input_spec_mask & input_wl_mask
-        pp(tf.math.count_nonzero(posterior_mask), "posterior_mask")
+        # pp(tf.math.count_nonzero(posterior_mask), "posterior_mask")
 
         mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
-        pp(tf.math.count_nonzero(mask_spec), "mask_spec")
+        # pp(tf.math.count_nonzero(mask_spec), "mask_spec")
 
         # Determine which sn to keep
         mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
-        pp(tf.math.count_nonzero(mask_sn), "mask_sn")
+        # pp(tf.math.count_nonzero(mask_sn), "mask_sn")
 
         # Unconstrained -> Constrained
         input_position = self.map.constrain(input_position, full=True)
