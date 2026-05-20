@@ -300,7 +300,9 @@ class Sim(Step[SimConfig]):
             & (synth_redshift <= self.max_redshift)
         )
         data["laser_mask"] = synth_mask
-        data["mask"] = synth_mask
+        data["mask"] = (
+            synth_mask & data["sn_mask"] & data["spec_mask"] & data["wl_mask"]
+        )
         data["time"] = synth_time
 
         self.data.model_validate(data)
