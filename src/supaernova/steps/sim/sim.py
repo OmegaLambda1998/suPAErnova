@@ -220,30 +220,36 @@ class Sim(Step[SimConfig]):
             training=False,
         ).numpy()
 
-        snr_per_time = np.zeros((self.sn_dim, self.spec_dim, self.wl_dim))
-        data_mask = self.real_data.data.mask
+        data_mask = (
+            self.real_data.data.mask
+            & self.real_data.data.sn_mask
+            & self.real_data.data.spec_mask
+            & self.real_data.data.wl_mask
+        )
         data_amp = self.real_data.data.amplitude
         data_sigma = self.real_data.data.sigma
         data_time = self.real_data.data.time
-        data_snr = np.abs(data_amp / data_sigma)
-        data_snr[~data_mask] = 0
+        data_snr = np.abs(data_amp) / data_sigma
+        data_mask &= np.isfinite(data_snr)
+        data_snr = np.where(data_mask, data_snr, np.zeros_like(data_snr))
 
-        for t in synth_time[0, :, 0]:
-            tlo = max(0, t - cadence_time)
-            thi = min(1, t + cadence_time)
-            t_mask = np.logical_and(data_time >= tlo, data_time < thi)
-            t_snr = np.where(t_mask, data_snr, np.zeros_like(data_snr))
-            t_snr = np.sum(t_snr, axis=(0, 1), keepdims=True) / np.count_nonzero(
-                t_mask & data_mask, axis=(0, 1), keepdims=True
-            )
-            t_snr[~np.isfinite(t_snr)] = 0
-            t_snr.repeat(self.sn_dim, axis=0).repeat(self.spec_dim, axis=1)
-            synth_t_mask = np.logical_and(synth_time >= tlo, synth_time < thi).repeat(
-                self.wl_dim, axis=-1
-            )
-            snr_per_time += np.where(synth_t_mask, t_snr, np.zeros_like(t_snr))
-        snr_per_time[snr_per_time == 0] = 1
-        synth_sigma = np.abs(synth_amp / snr_per_time)
+        synth_t = synth_time[0, :, 0]
+        data_t = data_time[..., 0]
+        tlo = np.maximum(0, synth_t[:, None, None] - cadence_time)
+        thi = np.minimum(1, synth_t[:, None, None] + cadence_time)
+        window_mask = (data_t[None, :, :] >= tlo) & (data_t[None, :, :] < thi)
+        snr_expanded = data_snr[None, ...]
+        mask_expanded = window_mask[..., None]
+        masked_snr = np.where(mask_expanded, snr_expanded, 0)
+        counts = mask_expanded.sum(axis=(1, 2))
+        mean_snr = masked_snr.sum(axis=(1, 2)) / np.maximum(counts, 1)
+        synth_snr = np.broadcast_to(
+            mean_snr[None, :, :],
+            (synth_time.shape[0],) + mean_snr.shape,
+        ).copy()
+
+        synth_snr[synth_snr == 0] = 1
+        synth_sigma = np.sqrt(np.abs(synth_amp / synth_snr))
         synth_amp += self.rng.normal(np.zeros_like(synth_amp), synth_sigma)
         synth_amp = np.clip(synth_amp, 0, np.inf)
         synth_redshift = np.clip(
@@ -348,9 +354,6 @@ class Sim(Step[SimConfig]):
             )[0]
 
             n_axes = 3
-            for key, val in self.data.model_dump().items():
-                if isinstance(val, np.ndarray):
-                    print(key, val.shape)
             self.train_data[kfold].model_validate({
                 key: val[inds_train, :, :] if val.ndim == n_axes else val[inds_train, :]
                 for key, val in self.data.model_dump().items()
