@@ -248,8 +248,8 @@ class Sim(Step[SimConfig]):
             (synth_time.shape[0],) + mean_snr.shape,
         ).copy()
 
-        synth_snr[synth_snr == 0] = 1
         synth_sigma = np.sqrt(np.abs(synth_amp / synth_snr))
+        synth_sigma[synth_snr == 0] = 1
         synth_amp += self.rng.normal(np.zeros_like(synth_amp), synth_sigma)
         synth_amp = np.clip(synth_amp, 0, np.inf)
         synth_redshift = np.clip(
