@@ -359,7 +359,6 @@ class DispersionPlotter(Plotter):
                 delta_m = hmc.hmc.samples[..., sn, 0]
                 delta_p = hmc.hmc.samples[..., sn, 1]
                 log_prob = hmc.hmc.log_prob[:, sn]
-
                 lower, center, upper = max_central(delta_p, weight=log_prob)
                 phases.append(center)
                 phase_errs_lower.append(lower)
@@ -371,20 +370,20 @@ class DispersionPlotter(Plotter):
                 amplitude_errs_lower.append(lower)
                 amplitude_stds.append(0.5 * (upper - lower))
                 amplitude_errs_upper.append(upper)
-            pae_phases.append(np.array(amplitudes))
-            pae_phase_errs_lower.append(np.array(amplitude_errs_lower))
-            pae_phase_stds.append(np.array(amplitude_stds))
-            pae_phase_errs_upper.append(np.array(amplitude_errs_upper))
+            pae_phases.append(np.array(phases))
+            pae_phase_errs_lower.append(np.array(phase_errs_lower))
+            pae_phase_stds.append(np.array(phase_stds))
+            pae_phase_errs_upper.append(np.array(phase_errs_upper))
 
             pae_amplitudes.append(np.array(amplitudes))
             pae_amplitude_errs_lower.append(np.array(amplitude_errs_lower))
             pae_amplitude_stds.append(np.array(amplitude_stds))
             pae_amplitude_errs_upper.append(np.array(amplitude_errs_upper))
 
-        pae_phases = np.vstack(pae_amplitudes)[..., pae_order]
-        pae_phase_errs_lower = np.vstack(pae_amplitude_errs_lower)[..., pae_order]
-        pae_phase_stds = np.vstack(pae_amplitude_stds)[..., pae_order]
-        pae_phase_errs_upper = np.vstack(pae_amplitude_errs_upper)[..., pae_order]
+        pae_phases = np.vstack(pae_phases)[..., pae_order]
+        pae_phase_errs_lower = np.vstack(pae_phase_errs_lower)[..., pae_order]
+        pae_phase_stds = np.vstack(pae_phase_stds)[..., pae_order]
+        pae_phase_errs_upper = np.vstack(pae_phase_errs_upper)[..., pae_order]
 
         pae_amplitudes = np.vstack(pae_amplitudes)[..., pae_order]
         pae_amplitude_errs_lower = np.vstack(pae_amplitude_errs_lower)[..., pae_order]
@@ -394,14 +393,14 @@ class DispersionPlotter(Plotter):
         if config.reduce == "mean":
             pae_phases = np.vstack(
                 [
-                    np.mean(hmc.hmc.samples[..., 0], axis=0, keepdims=True)
+                    np.mean(hmc.hmc.samples[..., 1], axis=0, keepdims=True)
                     for hmc in hmcs
                 ],
             )[..., pae_order]
 
             pae_phase_stds = np.vstack(
                 [
-                    np.std(hmc.hmc.samples[..., 0], axis=0, keepdims=True)
+                    np.std(hmc.hmc.samples[..., 1], axis=0, keepdims=True)
                     for hmc in hmcs
                 ],
             )[..., pae_order]
@@ -422,14 +421,14 @@ class DispersionPlotter(Plotter):
         elif config.reduce == "median":
             pae_phases = np.vstack(
                 [
-                    np.median(hmc.hmc.samples[..., 0], axis=0, keepdims=True)
+                    np.median(hmc.hmc.samples[..., 1], axis=0, keepdims=True)
                     for hmc in hmcs
                 ],
             )[..., pae_order]
 
             pae_phase_stds = np.vstack(
                 [
-                    np.std(hmc.hmc.samples[..., 0], axis=0, keepdims=True)
+                    np.std(hmc.hmc.samples[..., 1], axis=0, keepdims=True)
                     for hmc in hmcs
                 ],
             )[..., pae_order]
@@ -465,6 +464,7 @@ class DispersionPlotter(Plotter):
             pae_weighted_phase_errs_upper * pae_weighted_phase_errs_upper
             + pae_magshift_error * pae_magshift_error
         )
+        # TODO: Don't hardcode
         pae_mask &= np.abs(pae_weighted_phases) < 0.02
 
         pae_weights = 1 / np.clip(pae_amplitude_stds * pae_amplitude_stds, 1e-7, np.inf)

@@ -2018,8 +2018,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                             :, None, None
                         ]
 
-                    print(plot_type, names[sn_mask])
-
                     fig, ax = self._plot_comparison(
                         subset,
                         seed,
