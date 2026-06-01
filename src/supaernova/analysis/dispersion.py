@@ -465,7 +465,7 @@ class DispersionPlotter(Plotter):
             pae_weighted_phase_errs_upper * pae_weighted_phase_errs_upper
             + pae_magshift_error * pae_magshift_error
         )
-        pae_mask &= np.abs(pae_weighted_phases) < 0.05
+        pae_mask &= np.abs(pae_weighted_phases) < 0.02
 
         pae_weights = 1 / np.clip(pae_amplitude_stds * pae_amplitude_stds, 1e-7, np.inf)
         pae_weighted_sum = pae_weights.sum(axis=0)
