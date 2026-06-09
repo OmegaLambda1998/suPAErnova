@@ -639,15 +639,17 @@ class TFPosteriorModel(ks.Model):
         ).expect_partial()
 
         if load_hmc:
-            mask = self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask
-            mask_spec = tf.math.reduce_any(mask, axis=-1)
-            mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
-            samples = tf.boolean_mask(self.hmc.samples, mask_sn, axis=-2)
+            # mask = self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask
+            # mask_spec = tf.math.reduce_any(mask, axis=-1)
+            # mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
+            # samples = tf.boolean_mask(self.hmc.samples, mask_sn, axis=-2)
             r_hat = tfp.mcmc.potential_scale_reduction(
-                samples, independent_chain_ndims=1, split_chains=True
+                self.hmc.samples, independent_chain_ndims=1, split_chains=True
             )
             self.r_hat = r_hat
-            r_hat = tfp.stats.percentile(r_hat, 50.0, axis=0)
+            r_hat = tfp.stats.percentile(
+                tf.where(tf.math.is_finite(r_hat), r_hat, 0), 50.0, axis=0
+            )
             self.log.info(f"R-Hat: {r_hat}")
         clear_session()
 

@@ -80,8 +80,9 @@ class RunConfig(InputConfig):
                 if len(step.proxies.get(step.id, [])) > 0:
                     for proxy in step.proxies[step.id]:
                         proxy_step = getattr(self, proxy.id)
-                        proxy_variants = proxy_step.variants
-                        step_variants += proxy_variants
+                        if proxy_step is not None:
+                            proxy_variants = proxy_step.variants
+                            step_variants += proxy_variants
                 for i, variant in enumerate(variants):
                     if not hasattr(variant, required_step):
                         setattr(variant, required_step, i)
