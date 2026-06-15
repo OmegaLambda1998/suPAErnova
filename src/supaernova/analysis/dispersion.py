@@ -471,7 +471,7 @@ class DispersionPlotter(Plotter):
         # TODO: Don't hardcode
         # pae_mask &= np.abs(pae_weighted_phases) < 0.02
         # pae_mask &= np.all(pae_r_hat < 1.1, axis=-1)
-        pae_mask &= pae_r_hat[:, 0] < 1.1
+        pae_mask &= pae_r_hat[:, 0] < 2
 
         amp = amp[pae_order, ...]
         sig = sig[pae_order, ...]
@@ -486,7 +486,7 @@ class DispersionPlotter(Plotter):
             snr[range(snr.shape[0]), max_spectra, :], axis=-1
         ) / np.count_nonzero(snr[range(snr.shape[0]), max_spectra, :], axis=-1)
         pae_max_snr[~np.isfinite(pae_max_snr)] = 0
-        pae_mask &= (pae_max_snr / pae_snr) > 1.1
+        pae_mask &= (pae_max_snr / pae_snr) > 1
 
         pae_weights = 1 / np.clip(pae_amplitude_stds * pae_amplitude_stds, 1e-7, np.inf)
         pae_weighted_sum = pae_weights.sum(axis=0)

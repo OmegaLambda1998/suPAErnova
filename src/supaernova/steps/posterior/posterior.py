@@ -2406,89 +2406,110 @@ class Posterior(ModelStep[PosteriorConfig]):
                 map_init_results = np.concatenate(map_init_results, axis=-1)
                 map_best_results = np.concatenate(map_best_results, axis=-1)
 
-                self._plot_comparison(
-                    subset,
-                    seed,
-                    results,
-                    model,
-                    data,
-                    input_mask.copy(),
-                    input_sn_mask.copy(),
-                    input_spec_mask.copy(),
-                    input_wl_mask.copy(),
-                )
+                try:
+                    self._plot_comparison(
+                        subset,
+                        seed,
+                        results,
+                        model,
+                        data,
+                        input_mask.copy(),
+                        input_sn_mask.copy(),
+                        input_spec_mask.copy(),
+                        input_wl_mask.copy(),
+                    )
+                except Exception as e:
+                    self.log.warning(e)
 
-                self._plot_comparison_spectra(
-                    subset,
-                    seed,
-                    results,
-                    model,
-                    data,
-                    input_mask.copy(),
-                    input_sn_mask.copy(),
-                    input_spec_mask.copy(),
-                    input_wl_mask.copy(),
-                )
+                try:
+                    self._plot_comparison_spectra(
+                        subset,
+                        seed,
+                        results,
+                        model,
+                        data,
+                        input_mask.copy(),
+                        input_sn_mask.copy(),
+                        input_spec_mask.copy(),
+                        input_wl_mask.copy(),
+                    )
+                except Exception as e:
+                    self.log.warning(e)
 
-                self._plot_comparison_array(
-                    subset,
-                    seed,
-                    model,
-                    results,
-                    data,
-                    input_mask.copy(),
-                    input_sn_mask.copy(),
-                    input_spec_mask.copy(),
-                    input_wl_mask.copy(),
-                )
+                try:
+                    self._plot_comparison_array(
+                        subset,
+                        seed,
+                        model,
+                        results,
+                        data,
+                        input_mask.copy(),
+                        input_sn_mask.copy(),
+                        input_spec_mask.copy(),
+                        input_wl_mask.copy(),
+                    )
+                except Exception as e:
+                    self.log.warning(e)
 
-                self._plot_map(
-                    subset,
-                    seed,
-                    data,
-                    input_mask.copy(),
-                    input_sn_mask.copy(),
-                    input_spec_mask.copy(),
-                    input_wl_mask.copy(),
-                    map_init_results,
-                    labels,
-                    is_init=True,
-                )
+                try:
+                    self._plot_map(
+                        subset,
+                        seed,
+                        data,
+                        input_mask.copy(),
+                        input_sn_mask.copy(),
+                        input_spec_mask.copy(),
+                        input_wl_mask.copy(),
+                        map_init_results,
+                        labels,
+                        is_init=True,
+                    )
+                except Exception as e:
+                    self.log.warning(e)
 
-                self._plot_map(
-                    subset,
-                    seed,
-                    data,
-                    input_mask.copy(),
-                    input_sn_mask.copy(),
-                    input_spec_mask.copy(),
-                    input_wl_mask.copy(),
-                    map_best_results,
-                    labels,
-                    is_init=False,
-                )
+                try:
+                    self._plot_map(
+                        subset,
+                        seed,
+                        data,
+                        input_mask.copy(),
+                        input_sn_mask.copy(),
+                        input_spec_mask.copy(),
+                        input_wl_mask.copy(),
+                        map_best_results,
+                        labels,
+                        is_init=False,
+                    )
+                except Exception as e:
+                    self.log.warning(e)
 
-                self._plot_hmc(
-                    subset,
-                    seed,
-                    data,
-                    results,
-                    input_mask.copy(),
-                    input_sn_mask.copy(),
-                    input_spec_mask.copy(),
-                    input_wl_mask.copy(),
-                    labels,
-                )
+                try:
+                    self._plot_hmc(
+                        subset,
+                        seed,
+                        data,
+                        results,
+                        input_mask.copy(),
+                        input_sn_mask.copy(),
+                        input_spec_mask.copy(),
+                        input_wl_mask.copy(),
+                        labels,
+                    )
+                except Exception as e:
+                    self.log.warning(e)
 
-                self._plot_dispersion(
-                    subset,
-                    seed,
-                    data,
-                    input_mask.copy(),
-                    input_sn_mask.copy(),
-                    input_spec_mask.copy(),
-                    input_wl_mask.copy(),
-                )
+                try:
+                    self._plot_dispersion(
+                        subset,
+                        seed,
+                        data,
+                        input_mask.copy(),
+                        input_sn_mask.copy(),
+                        input_spec_mask.copy(),
+                        input_wl_mask.copy(),
+                    )
+                except Exception as e:
+                    self.log.warning(e)
 
     @override
     def _is_cleaned(self, *args: Any, **kwargs: Any) -> bool:
