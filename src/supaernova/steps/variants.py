@@ -327,7 +327,10 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         for name in variants:
             variant = self.variants[name]
             self._result(*args, **{**kwargs, "variants": [name]})
-            variant.analyse(*args, **kwargs)
+            try:
+                variant.analyse(*args, **kwargs)
+            except:
+                continue
 
     @override
     @callback

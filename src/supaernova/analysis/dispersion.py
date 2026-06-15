@@ -471,7 +471,7 @@ class DispersionPlotter(Plotter):
         # TODO: Don't hardcode
         # pae_mask &= np.abs(pae_weighted_phases) < 0.02
         # pae_mask &= np.all(pae_r_hat < 1.1, axis=-1)
-        # pae_mask &= pae_r_hat[:, 0] < 1.1
+        pae_mask &= pae_r_hat[:, 0] < 1.1
 
         amp = amp[pae_order, ...]
         sig = sig[pae_order, ...]
