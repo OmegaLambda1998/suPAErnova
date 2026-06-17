@@ -375,41 +375,38 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.recon_error_centers = {}
         for subset in self.subsets:
             # --- ULatent Bounds ---
-            if self.bounded_u_latents:
-                nearest = 5
-                nflow_subset = nflow.models[subset]
-                z_latents = nflow_subset.z_latents
-                u_latents = nflow_subset.u_latents
-                mask = getattr(self.nflow, f"{subset}_mask")[..., None]
-                sn_mask = getattr(self.nflow, f"{subset}_sn_mask")
-                spec_mask = getattr(self.nflow, f"{subset}_spec_mask")
-                wl_mask = getattr(self.nflow, f"{subset}_wl_mask")
-                mask_sn = np.any(
-                    np.any(mask & wl_mask & spec_mask & sn_mask, axis=-1), axis=-1
+            nearest = 5
+            nflow_subset = nflow.models[subset]
+            z_latents = nflow_subset.z_latents
+            u_latents = nflow_subset.u_latents
+            mask = getattr(self.nflow, f"{subset}_mask")[..., None]
+            sn_mask = getattr(self.nflow, f"{subset}_sn_mask")
+            spec_mask = getattr(self.nflow, f"{subset}_spec_mask")
+            wl_mask = getattr(self.nflow, f"{subset}_wl_mask")
+            mask_sn = np.any(
+                np.any(mask & wl_mask & spec_mask & sn_mask, axis=-1), axis=-1
+            )
+            u_latents_min = np.min(u_latents[mask_sn], axis=0) / nearest
+            u_latents_max = np.max(u_latents[mask_sn], axis=0) / nearest
+            u_latents_min = (
+                np.where(
+                    u_latents_min > 0,
+                    np.ceil(u_latents_min),
+                    np.floor(u_latents_min),
                 )
-                u_latents_min = np.min(u_latents[mask_sn], axis=0) / nearest
-                u_latents_max = np.max(u_latents[mask_sn], axis=0) / nearest
-                u_latents_min = (
-                    np.where(
-                        u_latents_min > 0,
-                        np.ceil(u_latents_min),
-                        np.floor(u_latents_min),
-                    )
-                    * nearest
+                * nearest
+            )
+            u_latents_max = (
+                np.where(
+                    u_latents_max > 0,
+                    np.ceil(u_latents_max),
+                    np.floor(u_latents_max),
                 )
-                u_latents_max = (
-                    np.where(
-                        u_latents_max > 0,
-                        np.ceil(u_latents_max),
-                        np.floor(u_latents_max),
-                    )
-                    * nearest
-                )
-                u_latents_min = np.min(u_latents_min)
-                u_latents_max = np.max(u_latents_max)
-                u_latents_bounds = (u_latents_min, u_latents_max)
-            else:
-                u_latents_bounds = (-np.inf, np.inf)
+                * nearest
+            )
+            u_latents_min = np.min(u_latents_min)
+            u_latents_max = np.max(u_latents_max)
+            u_latents_bounds = (u_latents_min, u_latents_max)
             self.u_latent_bounds[subset] = u_latents_bounds
 
             # --- Step Sizes ---
@@ -2286,6 +2283,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         subset: str,
         seed: int,
         data: "LazySNPAEData",
+        model: "TFPosteriorModel",
         input_mask: "npt.NDArray[bool]",
         input_sn_mask: "npt.NDArray[bool]",
         input_spec_mask: "npt.NDArray[bool]",
@@ -2344,6 +2342,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 stats = DispersionPlotter.plot_dispersion(
                     data,
                     list(self.results[subset].values()),
+                    model,
                     o,
                     twins=twins,
                     legacy=legacy,
@@ -2503,6 +2502,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                         subset,
                         seed,
                         data,
+                        model,
                         input_mask.copy(),
                         input_sn_mask.copy(),
                         input_spec_mask.copy(),

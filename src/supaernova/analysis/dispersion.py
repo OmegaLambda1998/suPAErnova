@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
     from supaernova.configs.steps.data import LazySNPAEData
     from supaernova.configs.steps.posterior import PosteriorStepResult
+    from supaernova.steps.posterior import PosteriorModel
 
     from .analysis import Axis, Figure
 
@@ -30,6 +31,7 @@ class DispersionPlotter(Plotter):
     def plot_dispersion(
         data: "LazySNPAEData",
         hmcs: "list[PosteriorStepResult]",
+        model: "PosteriorModel",
         config: "DispersionPlot",
         *,
         fig: "Figure | None" = None,
@@ -337,10 +339,10 @@ class DispersionPlotter(Plotter):
         pae_names = sn_name[:, 0, 0][pae_order]
         pae_r_hat = []
 
-        pae_phases = []
-        pae_phase_errs_lower = []
-        pae_phase_stds = []
-        pae_phase_errs_upper = []
+        pae_us = []
+        pae_u_errs_lower = []
+        pae_u_stds = []
+        pae_u_errs_upper = []
 
         pae_amplitudes = []
         pae_amplitude_errs_lower = []
@@ -348,10 +350,10 @@ class DispersionPlotter(Plotter):
         pae_amplitude_errs_upper = []
         for i, hmc in enumerate(hmcs):
             pae_r_hat.append(hmc.hmc.r_hat)
-            phases = []
-            phase_errs_lower = []
-            phase_stds = []
-            phase_errs_upper = []
+            us = []
+            u_errs_lower = []
+            u_stds = []
+            u_errs_upper = []
 
             amplitudes = []
             amplitude_errs_lower = []
@@ -360,23 +362,36 @@ class DispersionPlotter(Plotter):
             for sn in range(hmc.hmc.samples.shape[-2]):
                 name = f"{i}_{sn}"
                 delta_m = hmc.hmc.samples[..., sn, 0]
-                delta_p = hmc.hmc.samples[..., sn, 1]
+                u_delta_av = hmc.hmc.samples[..., sn, 2]
+                u1 = hmc.hmc.samples[..., sn, 3]
+                u2 = hmc.hmc.samples[..., sn, 4]
+                u3 = hmc.hmc.samples[..., sn, 5]
                 log_prob = hmc.hmc.log_prob[:, sn]
-                lower, center, upper = max_central(delta_p, weight=log_prob)
-                phases.append(center)
-                phase_errs_lower.append(lower)
-                phase_stds.append(0.5 * (upper - lower))
-                phase_errs_upper.append(upper)
+                u_lower = []
+                u_center = []
+                u_upper = []
+                for u in [u_delta_av, u1, u2, u3]:
+                    lo, ce, up = max_central(u, weight=log_prob)
+                    u_lower.append(lo)
+                    u_center.append(ce)
+                    u_upper.append(up)
+                u_lower = np.array(u_lower)
+                u_center = np.array(u_center)
+                u_upper = np.array(u_upper)
+                us.append(u_center)
+                u_errs_lower.append(u_lower)
+                u_stds.append(0.5 * (u_upper - u_lower))
+                u_errs_upper.append(u_upper)
 
                 lower, center, upper = max_central(delta_m, weight=log_prob)
                 amplitudes.append(center)
                 amplitude_errs_lower.append(lower)
                 amplitude_stds.append(0.5 * (upper - lower))
                 amplitude_errs_upper.append(upper)
-            pae_phases.append(np.array(phases))
-            pae_phase_errs_lower.append(np.array(phase_errs_lower))
-            pae_phase_stds.append(np.array(phase_stds))
-            pae_phase_errs_upper.append(np.array(phase_errs_upper))
+            pae_us.append(np.array(us))
+            pae_u_errs_lower.append(np.array(u_errs_lower))
+            pae_u_stds.append(np.array(u_stds))
+            pae_u_errs_upper.append(np.array(u_errs_upper))
 
             pae_amplitudes.append(np.array(amplitudes))
             pae_amplitude_errs_lower.append(np.array(amplitude_errs_lower))
@@ -384,10 +399,7 @@ class DispersionPlotter(Plotter):
             pae_amplitude_errs_upper.append(np.array(amplitude_errs_upper))
 
         pae_r_hat = np.vstack(pae_r_hat)[..., pae_order, :]
-        pae_phases = np.vstack(pae_phases)[..., pae_order]
-        pae_phase_errs_lower = np.vstack(pae_phase_errs_lower)[..., pae_order]
-        pae_phase_stds = np.vstack(pae_phase_stds)[..., pae_order]
-        pae_phase_errs_upper = np.vstack(pae_phase_errs_upper)[..., pae_order]
+        pae_us = np.vstack(pae_us)[..., pae_order, :]
 
         pae_amplitudes = np.vstack(pae_amplitudes)[..., pae_order]
         pae_amplitude_errs_lower = np.vstack(pae_amplitude_errs_lower)[..., pae_order]
@@ -395,19 +407,12 @@ class DispersionPlotter(Plotter):
         pae_amplitude_errs_upper = np.vstack(pae_amplitude_errs_upper)[..., pae_order]
 
         if config.reduce == "mean":
-            pae_phases = np.vstack(
+            pae_us = np.vstack(
                 [
-                    np.mean(hmc.hmc.samples[..., 1], axis=0, keepdims=True)
+                    np.mean(hmc.hmc.samples[..., 2:], axis=0, keepdims=True)
                     for hmc in hmcs
                 ],
-            )[..., pae_order]
-
-            pae_phase_stds = np.vstack(
-                [
-                    np.std(hmc.hmc.samples[..., 1], axis=0, keepdims=True)
-                    for hmc in hmcs
-                ],
-            )[..., pae_order]
+            )[..., pae_order, :]
 
             pae_amplitudes = np.vstack(
                 [
@@ -423,19 +428,12 @@ class DispersionPlotter(Plotter):
                 ],
             )[..., pae_order]
         elif config.reduce == "median":
-            pae_phases = np.vstack(
+            pae_us = np.vstack(
                 [
-                    np.median(hmc.hmc.samples[..., 1], axis=0, keepdims=True)
+                    np.median(hmc.hmc.samples[..., 2:], axis=0, keepdims=True)
                     for hmc in hmcs
                 ],
-            )[..., pae_order]
-
-            pae_phase_stds = np.vstack(
-                [
-                    np.std(hmc.hmc.samples[..., 1], axis=0, keepdims=True)
-                    for hmc in hmcs
-                ],
-            )[..., pae_order]
+            )[..., pae_order, :]
 
             pae_amplitudes = np.vstack(
                 [
@@ -451,42 +449,50 @@ class DispersionPlotter(Plotter):
                 ],
             )[..., pae_order]
 
-        pae_weights = 1 / np.clip(pae_phase_stds * pae_phase_stds, 1e-7, np.inf)
-        pae_weighted_sum = pae_weights.sum(axis=0)
-        pae_weighted_phases = (pae_weights * pae_phases).sum(axis=0) / pae_weighted_sum
-        pae_weighted_phase_errs_lower = (pae_weights * pae_phase_errs_lower).sum(
-            axis=0
-        ) / pae_weighted_sum
-        pae_weighted_phase_errs_lower = np.sqrt(
-            pae_weighted_phase_errs_lower * pae_weighted_phase_errs_lower
-            + pae_magshift_error * pae_magshift_error
+        amp = model.data.amplitude[pae_order]
+        sig = model.data.sigma[pae_order]
+        time = model.data.phase[pae_order][..., 0]
+        unmasked_wl_snr = amp / sig
+        wl_snr_mask = np.isfinite(unmasked_wl_snr) & model.wl_mask[pae_order]
+        wl_snr = np.where(wl_snr_mask, unmasked_wl_snr, np.zeros_like(unmasked_wl_snr))
+        unmasked_spec_snr = np.sum(wl_snr, axis=-1) / np.count_nonzero(
+            wl_snr_mask, axis=-1
         )
-        pae_weighted_phase_errs_upper = (pae_weights * pae_phase_errs_upper).sum(
-            axis=0
-        ) / pae_weighted_sum
-        pae_weighted_phase_errs_upper = np.sqrt(
-            pae_weighted_phase_errs_upper * pae_weighted_phase_errs_upper
-            + pae_magshift_error * pae_magshift_error
+        spec_snr_mask = (
+            np.isfinite(unmasked_spec_snr) & model.spec_mask[pae_order][..., 0]
         )
-        # TODO: Don't hardcode
-        # pae_mask &= np.abs(pae_weighted_phases) < 0.02
-        # pae_mask &= np.all(pae_r_hat < 1.1, axis=-1)
-        pae_mask &= pae_r_hat[:, 0] < 2
+        spec_snr = np.where(
+            spec_snr_mask, unmasked_spec_snr, np.zeros_like(unmasked_spec_snr)
+        )
+        unmasked_sn_snr = np.sum(spec_snr, axis=-1) / np.count_nonzero(
+            spec_snr_mask, axis=-1
+        )
+        sn_snr_mask = np.isfinite(unmasked_sn_snr) & model.sn_mask[pae_order][..., 0, 0]
+        sn_snr = np.where(
+            sn_snr_mask, unmasked_sn_snr, np.inf * np.ones_like(unmasked_sn_snr)
+        )
+        std_snr = np.std(spec_snr, axis=-1)
+        peak_snr_mask = (np.abs(time) - np.min(np.abs(time), axis=-1)[:, None]) == 0
+        peak_snr = np.sum(
+            np.where(peak_snr_mask, spec_snr, np.zeros_like(spec_snr)), axis=-1
+        )
+        diff_snr = (peak_snr - sn_snr) / std_snr
 
-        amp = amp[pae_order, ...]
-        sig = sig[pae_order, ...]
-        time = time[pae_order, ...]
-        snr = amp / sig
-        snr[~np.isfinite(snr)] = 0
-        pae_snr = np.sum(snr, axis=-1) / np.count_nonzero(snr, axis=-1)
-        pae_snr[~np.isfinite(pae_snr)] = 0
-        pae_snr = np.sum(pae_snr, axis=-1) / np.count_nonzero(pae_snr, axis=-1)
-        max_spectra = np.argmin(np.abs(time[..., 0]), axis=-1)
-        pae_max_snr = np.sum(
-            snr[range(snr.shape[0]), max_spectra, :], axis=-1
-        ) / np.count_nonzero(snr[range(snr.shape[0]), max_spectra, :], axis=-1)
-        pae_max_snr[~np.isfinite(pae_max_snr)] = 0
-        pae_mask &= (pae_max_snr / pae_snr) > 1
+        pae_mask &= diff_snr > 0
+
+        pae_mask &= np.all(
+            ((pae_us > model.u_latent_bounds[0]) & (pae_us < model.u_latent_bounds[1])),
+            axis=-1,
+        )
+
+        r_hat_mask = (
+            np.isfinite(pae_r_hat) & model.sn_mask[pae_order][..., 0, 0][:, None]
+        )
+        r_hat = np.where(r_hat_mask, pae_r_hat, np.zeros_like(pae_r_hat))
+        mean_r_hat = np.sum(r_hat, axis=0) / np.count_nonzero(r_hat_mask, axis=0)
+        std_r_hat = np.std(r_hat, axis=0)
+        diff_r_hat = np.abs(r_hat - mean_r_hat) / std_r_hat
+        pae_mask &= np.all(diff_r_hat < 1, axis=-1)
 
         pae_weights = 1 / np.clip(pae_amplitude_stds * pae_amplitude_stds, 1e-7, np.inf)
         pae_weighted_sum = pae_weights.sum(axis=0)
@@ -688,8 +694,8 @@ class DispersionPlotter(Plotter):
         pae_yerr_upper = pae_weighted_amplitude_errs_upper
         no_plot_mask = None
         sn_plot_mask = pae_mask
-        twins_plot_mask = pae_mask & pae_twins_mask
-        salt_plot_mask = pae_mask & pae_salt_mask
+        twins_plot_mask = pae_twins_mask
+        salt_plot_mask = pae_salt_mask
         combined_plot_mask = pae_mask & pae_twins_mask & pae_salt_mask
 
         residual_max = np.log10(np.max(np.abs(pae_y[combined_plot_mask])))
