@@ -604,8 +604,6 @@ class DispersionPlotter(Plotter):
                     rms_[rms].append(names[rms_sort][i])
                 print("rms")
                 pp(rms_)
-            w_rms = np.mean(w_rms_jackknife)
-            w_rms_std = np.std(w_rms_jackknife)
 
             n = len(w_rms_jackknife)
             w_rms = np.mean(w_rms_jackknife)
@@ -626,8 +624,6 @@ class DispersionPlotter(Plotter):
                     nmad_[nmad].append(names[nmad_sort][i])
                 print("nmad")
                 pp(nmad_)
-            w_nmad = np.mean(w_nmad_jackknife)
-            w_nmad_std = np.std(w_nmad_jackknife)
 
             n = len(w_nmad_jackknife)
             w_nmad = np.mean(w_nmad_jackknife)
