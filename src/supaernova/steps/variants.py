@@ -327,7 +327,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         for name in variants:
             variant = self.variants[name]
             self._result(*args, **{**kwargs, "variants": [name]})
-            variant.analyse(*args, **kwargs)
+            if not variant.analysis.skip:
+                variant.analyse(*args, **kwargs)
 
     @override
     @callback

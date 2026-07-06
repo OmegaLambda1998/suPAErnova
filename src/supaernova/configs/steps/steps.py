@@ -36,6 +36,7 @@ class StepAnalysis(BaseConfig):
     # --- Required ---
     # --- Optional ---
     force: bool = False
+    skip: bool = True
     # === Model Validators ===
     # --- Before ---
     # --- After ---

@@ -53,6 +53,42 @@ class DispersionPlotter(Plotter):
         ]
         | None
     ):
+        pae_redshift = data.redshift[:, 0, 0]
+        pae_order = np.argsort(pae_redshift)
+        (
+            wl,
+            amp,
+            sig,
+            sn_name,
+            time,
+            input_mask,
+            _input_sn_mask,
+            _input_spec_mask,
+            _input_wl_mask,
+        ) = SpectraPlotter.prep(
+            data,
+            config,
+            mask=mask,
+            sn_mask=sn_mask,
+            spec_mask=spec_mask,
+            wl_mask=wl_mask,
+            phase=True,
+        )
+        pae_names = sn_name[:, 0, 0][pae_order]
+        if twins is not None:
+            sort = np.argsort(pae_names)
+
+            twins_names = twins.name
+            twins_intersection = set(pae_names) & set(twins_names)
+            if len(twins_intersection) == 0:
+                twins = None
+        if legacy is not None:
+            legacy_names = legacy["names"]
+
+            legacy_intersection = set(pae_names) & set(legacy_names)
+            if len(legacy_intersection) == 0:
+                legacy = None
+
         do_twins = twins is not None
         do_legacy = legacy is not None
 
@@ -300,28 +336,6 @@ class DispersionPlotter(Plotter):
         if savepath.exists() and not force:
             return None
 
-        pae_redshift = data.redshift[:, 0, 0]
-
-        (
-            wl,
-            amp,
-            sig,
-            sn_name,
-            time,
-            input_mask,
-            _input_sn_mask,
-            _input_spec_mask,
-            _input_wl_mask,
-        ) = SpectraPlotter.prep(
-            data,
-            config,
-            mask=mask,
-            sn_mask=sn_mask,
-            spec_mask=spec_mask,
-            wl_mask=wl_mask,
-            phase=True,
-        )
-
         # Determine which spectra to keep
         # Will mask out any spectrum without at least one masked wavelength within the valid wavelength range
         mask_spec = np.any(input_mask, axis=-1)
@@ -330,13 +344,11 @@ class DispersionPlotter(Plotter):
         # Will mask out any SN with *no* unmasked spectra
         mask_sn = np.any(mask_spec, axis=-1)
 
-        pae_order = np.argsort(pae_redshift)
         pae_redshift = pae_redshift[pae_order]
         pae_redshift_error = (pae_redshift * 3e5 + 300.0) / 3e5
         pae_magshift_error = abs(-5 * np.log10(pae_redshift / pae_redshift_error))
 
         pae_mask = mask_sn[pae_order]
-        pae_names = sn_name[:, 0, 0][pae_order]
         pae_r_hat = []
 
         pae_us = []
@@ -693,6 +705,8 @@ class DispersionPlotter(Plotter):
         twins_plot_mask = pae_twins_mask
         salt_plot_mask = pae_salt_mask
         combined_plot_mask = pae_mask & pae_twins_mask & pae_salt_mask
+        if np.count_nonzero(combined_plot_mask) == 0:
+            combined_plot_mask = pae_mask
 
         residual_max = np.log10(np.max(np.abs(pae_y[combined_plot_mask])))
         residual_scale_min = np.floor(residual_max)
@@ -774,6 +788,9 @@ class DispersionPlotter(Plotter):
 
             twins_names = twins.name
             twins_intersection = set(pae_names) & set(twins_names)
+            if len(twins_intersection) == 0:
+                twins = None
+        if twins is not None:
             twins_mask = np.zeros_like(twins_names, dtype=np.int32)
             twins_pae_mask = np.zeros_like(pae_names, dtype=np.int32)
             for name in twins_intersection:
@@ -914,9 +931,6 @@ class DispersionPlotter(Plotter):
             twins_pull_hist_ax.set_xlabel("PDF")
 
         if legacy is not None:
-            legacy_names = legacy["names"]
-
-            legacy_intersection = set(pae_names) & set(legacy_names)
             legacy_mask = np.zeros_like(legacy_names, dtype=np.int32)
             for name in legacy_intersection:
                 ind = np.argwhere(legacy_names == name)[0]

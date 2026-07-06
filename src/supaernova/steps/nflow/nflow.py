@@ -668,6 +668,8 @@ class NFlow(ModelStep[NFlowConfig]):
 
     @override
     def _analyse(self, *args: Any, **kwargs: Any) -> None:
+        if self.analysis.skip:
+            return
         z_labels = {}
         u_labels = {}
         labels = {}

@@ -867,6 +867,8 @@ class PAE(ModelStep[PAEConfig]):
 
     @override
     def _analyse(self, *args: Any, **kwargs: Any) -> None:
+        if self.analysis.skip:
+            return
         labels = {}
         ind = 0
         if self.physical_latents:
@@ -1219,6 +1221,9 @@ class PAEStep(Model[PAEStepConfig, PAE]):
 
             super()._analyse(*args, **{**kwargs, "variants": [variant_name]})
 
+            if variant.analysis.skip:
+                continue
+
             labels = {}
             ind = 0
             if variant.physical_latents:
@@ -1258,7 +1263,9 @@ class PAEStep(Model[PAEStepConfig, PAE]):
     @callback
     def analyse(self, *args: "Any", **kwargs: "Any") -> None:
         super().analyse(*args, **kwargs)
-        if len(self.variants) > 1:
+        if len(self.variants) > 1 and (
+            not all(variant.analysis.skip for variant in self.variants.values())
+        ):
             for name, opts in self.plots.items():
                 savepath = self.paths.plots / name
                 savepath.parent.mkdir(parents=True, exist_ok=True)

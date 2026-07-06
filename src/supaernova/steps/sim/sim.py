@@ -1,4 +1,4 @@
-from supaernova.utils import pp
+from supaernova.utils import pp, SNR
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis import Plotter
 from supaernova.configs.callbacks import callback
@@ -19,6 +19,7 @@ from supaernova.configs.steps.data import (
     LazySNPAEDataTuple,
     DataStepResult,
 )
+from tqdm import tqdm
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,7 +37,8 @@ class Sim(Step[SimConfig]):
         super().__init__(config)
 
         self.seed: int = self.options.seed
-        self.cadence: int = self.options.cadence
+        self.redshift: float = self.options.redshift
+        self.cadence: float = self.options.cadence / (1 + self.redshift)
         self.n_sn: int
 
         # Output Paths
@@ -167,7 +169,7 @@ class Sim(Step[SimConfig]):
         synth_wl = self.real_data.data.wavelength[:1, ...].repeat(self.sn_dim, axis=0)
         us = self.rng.normal(
             np.zeros((self.sn_dim, self.nflow.n_flow_latents)),
-            1 + np.zeros((self.sn_dim, self.nflow.n_flow_latents)),
+            np.ones((self.sn_dim, self.nflow.n_flow_latents)),
         )
         us = np.astype(us, np.float32)
         synth_zs = self.nflow.u_to_z(us)
@@ -196,16 +198,19 @@ class Sim(Step[SimConfig]):
         synth_zs = np.concatenate(
             (synth_zs, np.zeros((self.sn_dim, self.spec_dim, 2))), axis=-1
         )
-        synth_phase = (
-            np.arange(0, self.spec_dim * self.cadence, self.cadence)[
-                None, :, None
-            ].repeat(self.sn_dim, axis=0)
-            + self.min_phase
+        synth_zs[..., :1] *= 0
+        cadence_time = self.cadence / (self.max_phase - self.min_phase)
+        synth_time = -np.inf * np.ones(
+            (self.sn_dim, self.spec_dim, 1),
+            dtype=self.real_data.data.time.dtype,
         )
-        synth_time = (synth_phase - self.min_phase) / (self.max_phase - self.min_phase)
-        cadence_time = 0.5 * self.cadence / (self.max_phase - self.min_phase)
+        synth_time[:, : int(np.ceil(1 / cadence_time)), :] = np.arange(
+            0, 1, cadence_time
+        )[None, :, None].repeat(self.sn_dim, axis=0)
+        synth_phase = synth_time * (self.max_phase - self.min_phase) + self.min_phase
 
         synth_mask = np.ones((self.sn_dim, self.spec_dim, self.wl_dim), dtype=np.bool)
+        synth_mask &= np.isfinite(synth_time)
         synth_sn_mask = synth_mask[..., :1, :1]
         synth_spec_mask = synth_mask[..., :1]
         synth_wl_mask = synth_mask
@@ -220,38 +225,69 @@ class Sim(Step[SimConfig]):
             training=False,
         ).numpy()
 
+        real_data = self.real_data.data
         data_mask = (
-            self.real_data.data.mask
-            & self.real_data.data.sn_mask
-            & self.real_data.data.spec_mask
-            & self.real_data.data.wl_mask
+            real_data.mask & real_data.sn_mask & real_data.spec_mask & real_data.wl_mask
         )
-        data_amp = self.real_data.data.amplitude
-        data_sigma = self.real_data.data.sigma
-        data_time = self.real_data.data.time
-        data_snr = np.abs(data_amp) / data_sigma
-        data_mask &= np.isfinite(data_snr)
-        data_snr = np.where(data_mask, data_snr, np.zeros_like(data_snr))
+        synth_sigma = np.zeros_like(synth_amp)
+        wavelengths = synth_wl[0, 0, :]
+        wstep = (wavelengths[-1] - wavelengths[0]) / len(wavelengths)
+        tlo = 0
+        for t in tqdm(np.arange(cadence_time, 1, cadence_time)):
+            data_t_mask = np.repeat(
+                (real_data.time >= tlo) & (real_data.time < t),
+                synth_sigma.shape[-1],
+                axis=-1,
+            )
+            if np.count_nonzero(data_t_mask & data_mask) == 0:
+                continue
+            synth_t_mask = np.repeat(
+                (synth_time >= tlo) & (synth_time < t), synth_sigma.shape[-1], axis=-1
+            )
+            wlo = wavelengths[0]
+            for wl in np.arange(wstep, wavelengths[-1], wstep):
+                wl_mask = (synth_wl >= wlo) & (synth_wl < wl)
+                mask_data = (
+                    data_t_mask
+                    & np.repeat(wl_mask[:1, ...], real_data.mask.shape[0], axis=0)
+                    & data_mask
+                )
+                if np.count_nonzero(mask_data) == 0:
+                    continue
 
-        synth_t = synth_time[0, :, 0]
-        data_t = data_time[..., 0]
-        tlo = np.maximum(0, synth_t[:, None, None] - cadence_time)
-        thi = np.minimum(1, synth_t[:, None, None] + cadence_time)
-        window_mask = (data_t[None, :, :] >= tlo) & (data_t[None, :, :] < thi)
-        snr_expanded = data_snr[None, ...]
-        mask_expanded = window_mask[..., None]
-        masked_snr = np.where(mask_expanded, snr_expanded, 0)
-        counts = mask_expanded.sum(axis=(1, 2))
-        mean_snr = masked_snr.sum(axis=(1, 2)) / np.maximum(counts, 1)
-        synth_snr = np.broadcast_to(
-            mean_snr[None, :, :],
-            (synth_time.shape[0],) + mean_snr.shape,
-        ).copy()
+                mask_synth = synth_t_mask & wl_mask
+                if np.count_nonzero(mask_synth) == 0:
+                    continue
 
-        synth_sigma = np.sqrt(np.abs(synth_amp / synth_snr))
-        synth_sigma[synth_snr == 0] = 1
+                data_snr = SNR(
+                    real_data,
+                    mask=mask_data.astype(real_data.mask.dtype),
+                    normalise=True,
+                )
+                if data_snr == 0:
+                    continue
+
+                n_synth_sn = np.count_nonzero(np.any(mask_synth, axis=(-2, -1)))
+                n_synth = np.count_nonzero(mask_synth) / n_synth_sn
+                n_data_sn = np.count_nonzero(np.any(mask_data, axis=(-2, -1)))
+                n_data = np.count_nonzero(mask_data) / n_data_sn
+                n_ratio = n_synth / n_data
+
+                synth_sigma = np.where(
+                    mask_synth,
+                    synth_amp / data_snr,
+                    synth_sigma,
+                )
+                wlo = wl
+            tlo = t
+
+        synth_sigma = np.where(
+            np.isfinite(synth_sigma), synth_sigma, np.zeros_like(synth_sigma)
+        )
+
         synth_amp += self.rng.normal(np.zeros_like(synth_amp), synth_sigma)
-        synth_amp = np.clip(synth_amp, 0, np.inf)
+        # synth_amp = np.clip(synth_amp, 0, np.inf)
+
         synth_redshift = np.clip(
             self.rng.normal(
                 self.real_data.data.redshift.mean() + np.zeros((self.sn_dim, 1, 1)),
@@ -592,6 +628,8 @@ class Sim(Step[SimConfig]):
 
     @override
     def _analyse(self, *args: "Any", **kwargs: "Any") -> None:
+        if self.analysis.skip:
+            return
         self._plot_spectra()
         self._plot_summary()
         self._plot_comparison()
@@ -795,9 +833,13 @@ class SimStep(Variant[SimStepConfig, Sim]):
             variant.set_seed()
             variant.log.info(f"Analysing {variant.name}")
 
-            self._plot_comparison_pre(variant, *args, **kwargs)
+            if not variant.analysis.skip:
+                self._plot_comparison_pre(variant, *args, **kwargs)
 
             super()._analyse(*args, **{**kwargs, "variants": [variant_name]})
+
+            if variant.analysis.skip:
+                continue
 
             self._plot_summary(variant)
 
@@ -813,7 +855,9 @@ class SimStep(Variant[SimStepConfig, Sim]):
         **kwargs: "Any",
     ) -> None:
         super().analyse(*args, **kwargs)
-        if len(self.variants) > 1:
+        if len(self.variants) > 1 and (
+            not all(variant.analysis.skip for variant in self.variants.values())
+        ):
             for name, opts in self.plots.items():
                 savepath = self.paths.plots / name
                 if savepath.exists():

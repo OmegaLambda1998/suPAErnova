@@ -2368,6 +2368,8 @@ class Posterior(ModelStep[PosteriorConfig]):
 
     @override
     def _analyse(self, *args: Any, **kwargs: Any) -> None:
+        if self.analysis.skip:
+            return
         for subset in self.subsets:
             for seed in self.seeds:
                 model = self.models[subset][str(seed)]
@@ -2671,6 +2673,9 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
 
             super()._analyse(*args, **{**kwargs, "variants": [variant_name]})
 
+            if variant.analysis.skip:
+                continue
+
             for subset in variant.subsets:
                 for seed in variant.seeds:
                     model = variant.models[subset][str(seed)]
@@ -2761,7 +2766,9 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
         if not r_hat_path.exists() or self.force:
             with r_hat_path.open("w") as io:
                 json.dump(self.r_hat, io)
-        if len(self.variants) > 1:
+        if len(self.variants) > 1 and (
+            not all(variant.analysis.skip for variant in self.variants.values())
+        ):
             for name in self.plot_labels:
                 o = self.plot_opts[name].model_copy(deep=True)
                 o.labels = self.plot_labels[name]

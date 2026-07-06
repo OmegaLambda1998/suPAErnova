@@ -7,7 +7,7 @@ from pydantic import PositiveInt  # noqa: TC002
 from matplotlib.colors import to_rgba
 from matplotlib.transforms import blended_transform_factory
 
-from supaernova.utils import pp
+from supaernova.utils import pp, SNR
 
 from .analysis import Plotter, AbstractPlot
 
@@ -448,7 +448,7 @@ class SpectraPlotter(Plotter):
                 *args,
                 fig=fig,
                 ax=ax,
-                label=label,
+                label=f"{label}\n(SNRSum={int(SNR(data))})",
                 linestyle="-",
                 c=c,
                 **kwargs,
@@ -625,7 +625,7 @@ class SpectraPlotter(Plotter):
                     *args,
                     fig=fig,
                     ax=spectra_ax,
-                    label=base_label,
+                    label=f"{base_label}\n(SNRSum={int(SNR(data))})",
                     linestyle="-",
                     color="black",
                     **kwargs,
@@ -675,7 +675,7 @@ class SpectraPlotter(Plotter):
                 *args,
                 fig=fig,
                 ax=spectra_ax,
-                label=label,
+                label=f"{label}\n(SNRSum={int(SNR(data))})",
                 linestyle="-",
                 c=c,
                 **kwargs,

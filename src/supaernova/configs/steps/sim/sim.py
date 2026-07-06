@@ -25,9 +25,11 @@ class SimStepAnalysis(DataStepAnalysis):
 
 
 class SimConfig(StepConfig):
-    cadence: PositiveInt
+    cadence: PositiveFloat
     n_sn: PositiveInt | None = None
     analysis: SimStepAnalysis | None = None
+
+    redshift: PositiveFloat = 0
 
 
 class SimStepConfig(VariantConfig):

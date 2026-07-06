@@ -1,6 +1,6 @@
-import tomllib
-from typing import TYPE_CHECKING, ClassVar, cast, override, Literal
+from typing import TYPE_CHECKING, Literal, ClassVar, cast, override
 from pathlib import Path
+import tomllib
 
 import numpy as np
 import pandas as pd
@@ -8,7 +8,7 @@ from astropy import cosmology as cosmo
 import sncosmo
 
 from supaernova.steps import Step
-from supaernova.utils import pp, resolve_path
+from supaernova.utils import pp, resolve_path, SNR
 from supaernova.steps.variants import Variant
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis.analysis import Plotter
@@ -426,6 +426,8 @@ class Data(Step[DataConfig]):
 
     @override
     def _analyse(self, *args: "Any", **kwargs: "Any") -> None:
+        if self.analysis.skip:
+            return
         self._plot_spectra()
         self._plot_summary()
         self._plot_comparison()
@@ -1152,10 +1154,11 @@ class DataStep(Variant[DataStepConfig, Data]):
             variants = [variants]
         for variant_name in variants:
             variant = self.variants[variant_name]
-
             variant.set_seed()
             variant.log.info(f"Analysing {variant.name}")
             variant.result(*args, **{**kwargs, "variants": [variant_name]})
+            if variant.analysis.skip:
+                continue
 
             self._plot_comparison_pre(variant, *args, **kwargs)
 
@@ -1171,7 +1174,9 @@ class DataStep(Variant[DataStepConfig, Data]):
     @callback
     def analyse(self, *args: "Any", **kwargs: "Any") -> None:
         super().analyse(*args, **kwargs)
-        if len(self.variants) > 1:
+        if len(self.variants) > 1 and (
+            not all(variant.analysis.skip for variant in self.variants.values())
+        ):
             for name, opts in self.plots.items():
                 savepath = self.paths.plots / name
                 if savepath.exists():
