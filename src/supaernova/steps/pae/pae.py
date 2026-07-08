@@ -473,7 +473,9 @@ class PAE(ModelStep[PAEConfig]):
         self.model.load_checkpoint(savepath, reset_weights=False)
         self.log.debug(f"Saving final PAE model weights to {final_savepath}")
         if not final_savepath.exists(follow_symlinks=False):
-            final_savepath.symlink_to(savepath / self.ckpt_path)
+            file_path = savepath / self.ckpt_path
+            rel_path = file_path.relative_to(final_savepath.parent, walk_up=True)
+            final_savepath.symlink_to(rel_path)
 
     @override
     def _load(self, *args: Any, **kwargs: Any) -> None:

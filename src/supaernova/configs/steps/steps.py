@@ -112,7 +112,8 @@ class StepConfig(CallbackConfig):
             if not external_path.exists():
                 external_path.mkdir(parents=True, exist_ok=True)
             if not paths.results.exists():
-                paths.results.symlink_to(external_path, target_is_directory=True)
+                rel_path = external_path.relative_to(paths.results.parent, walk_up=True)
+                paths.results.symlink_to(rel_path, target_is_directory=True)
         else:
             paths.results.mkdir(parents=True, exist_ok=True)
         input_config["paths"] = paths

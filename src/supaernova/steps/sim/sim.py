@@ -263,6 +263,7 @@ class Sim(Step[SimConfig]):
                     real_data,
                     mask=mask_data.astype(real_data.mask.dtype),
                     normalise=True,
+                    reduce=np.median,
                 )
                 if data_snr == 0:
                     continue

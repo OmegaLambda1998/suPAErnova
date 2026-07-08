@@ -11,6 +11,7 @@ def SNR(
     data: "SNPAEData | LazySNPAEData",
     mask: "npt.NDArray | None" = None,
     normalise: "bool" = False,
+    reduce: "Callable | None" = None,
 ):
     amplitude = np.clip(data.amplitude, 0, np.inf)
     sigma = data.sigma
@@ -29,4 +30,6 @@ def SNR(
     snr_mask = np.isfinite(snr_sum)
     snr_sum = np.where(snr_mask, snr_sum, np.zeros_like(snr_sum))
     snr_coadd = np.sqrt(snr_sum)
-    return np.sum(snr_coadd) / np.count_nonzero(snr_mask)
+    if reduce is None:
+        return np.sum(snr_coadd) / np.count_nonzero(snr_mask)
+    return reduce(snr_coadd[snr_mask])
