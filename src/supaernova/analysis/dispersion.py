@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from supaernova.utils import pp, max_central, jackknife_resample
+from supaernova.utils import pp, max_central, jackknife_resample, SNR
 
 from .spectra import SpectraPlot, SpectraPlotter
 from .analysis import Plotter, scale_lightness
@@ -410,9 +410,6 @@ class DispersionPlotter(Plotter):
             pae_amplitude_stds.append(np.array(amplitude_stds))
             pae_amplitude_errs_upper.append(np.array(amplitude_errs_upper))
 
-        pae_r_hat = np.vstack(pae_r_hat)[..., pae_order, :]
-        pae_us = np.vstack(pae_us)[..., pae_order, :]
-
         pae_amplitudes = np.vstack(pae_amplitudes)[..., pae_order]
         pae_amplitude_errs_lower = np.vstack(pae_amplitude_errs_lower)[..., pae_order]
         pae_amplitude_stds = np.vstack(pae_amplitude_stds)[..., pae_order]
@@ -461,51 +458,6 @@ class DispersionPlotter(Plotter):
                 ],
             )[..., pae_order]
 
-        amp = model.data.amplitude[pae_order]
-        sig = model.data.sigma[pae_order]
-        time = model.data.phase[pae_order][..., 0]
-        unmasked_wl_snr = amp / sig
-        wl_snr_mask = np.isfinite(unmasked_wl_snr) & model.wl_mask[pae_order]
-        wl_snr = np.where(wl_snr_mask, unmasked_wl_snr, np.zeros_like(unmasked_wl_snr))
-        unmasked_spec_snr = np.sum(wl_snr, axis=-1) / np.count_nonzero(
-            wl_snr_mask, axis=-1
-        )
-        spec_snr_mask = (
-            np.isfinite(unmasked_spec_snr) & model.spec_mask[pae_order][..., 0]
-        )
-        spec_snr = np.where(
-            spec_snr_mask, unmasked_spec_snr, np.zeros_like(unmasked_spec_snr)
-        )
-        unmasked_sn_snr = np.sum(spec_snr, axis=-1) / np.count_nonzero(
-            spec_snr_mask, axis=-1
-        )
-        sn_snr_mask = np.isfinite(unmasked_sn_snr) & model.sn_mask[pae_order][..., 0, 0]
-        sn_snr = np.where(
-            sn_snr_mask, unmasked_sn_snr, np.inf * np.ones_like(unmasked_sn_snr)
-        )
-        std_snr = np.std(spec_snr, axis=-1)
-        peak_snr_mask = (np.abs(time) - np.min(np.abs(time), axis=-1)[:, None]) == 0
-        peak_snr = np.sum(
-            np.where(peak_snr_mask, spec_snr, np.zeros_like(spec_snr)), axis=-1
-        )
-        diff_snr = (peak_snr - sn_snr) / std_snr
-
-        pae_mask &= diff_snr > 0
-
-        pae_mask &= np.all(
-            ((pae_us > model.u_latent_bounds[0]) & (pae_us < model.u_latent_bounds[1])),
-            axis=-1,
-        )
-
-        r_hat_mask = (
-            np.isfinite(pae_r_hat) & model.sn_mask[pae_order][..., 0, 0][:, None]
-        )
-        r_hat = np.where(r_hat_mask, pae_r_hat, np.zeros_like(pae_r_hat))
-        mean_r_hat = np.sum(r_hat, axis=0) / np.count_nonzero(r_hat_mask, axis=0)
-        std_r_hat = np.std(r_hat, axis=0)
-        diff_r_hat = np.abs(r_hat - mean_r_hat) / std_r_hat
-        pae_mask &= np.all(diff_r_hat < 1, axis=-1)
-
         pae_weights = 1 / np.clip(pae_amplitude_stds * pae_amplitude_stds, 1e-7, np.inf)
         pae_weighted_sum = pae_weights.sum(axis=0)
         pae_weighted_amplitudes = (pae_weights * pae_amplitudes).sum(
@@ -541,6 +493,73 @@ class DispersionPlotter(Plotter):
             + pae_magshift_error * pae_magshift_error
         )
 
+        # # RHat < 1.2
+        # pae_r_hat = np.vstack(pae_r_hat)[..., pae_order, :]
+        # print(pae_r_hat)
+        # r_hat_mask = (
+        #     np.where(
+        #         pae_mask, np.median(pae_r_hat, axis=-1), np.inf * np.ones_like(pae_mask)
+        #     )
+        #     < 1.2
+        # )
+        # print(
+        #     np.where(
+        #         pae_mask, np.median(pae_r_hat, axis=-1), np.inf * np.ones_like(pae_mask)
+        #     )
+        # )
+        # pae_mask &= r_hat_mask
+        # print(np.count_nonzero(pae_mask))
+
+        # Spectrum within 5 days of max *after accounting for DeltaP*
+        max_delta_p = [
+            hmc.hmc.delta_p[
+                np.argmin(
+                    np.abs(
+                        hmc.hmc.log_prob - np.max(hmc.hmc.log_prob, axis=0)[None, ...]
+                    ),
+                    axis=0,
+                ),
+                np.arange(hmc.hmc.delta_p.shape[-1]),
+            ]
+            for hmc in hmcs
+        ]
+        max_delta_p = np.vstack(max_delta_p)[..., pae_order][0]
+        phase = (
+            model.data.phase
+            + (max_delta_p * (model.max_phase - model.min_phase))[:, None, None]
+        )
+        pae_peak_phase = phase[
+            np.arange(model.data.mask.shape[0]),
+            np.argmin(np.abs(phase)[..., 0], axis=-1),
+            0,
+        ][pae_order]
+        peak_mask = np.abs(pae_peak_phase) < 5
+        pae_mask &= peak_mask
+
+        # SNR not an outlier for its redshift
+        pae_z = model.data.redshift[..., 0, 0]
+        z_mask = lambda z: np.repeat(
+            np.repeat(
+                ((pae_z > z - 0.005) & (pae_z < z + 0.005))[:, None, None],
+                model.data.mask.shape[-1],
+                axis=-1,
+            ),
+            model.data.mask.shape[-2],
+            axis=-2,
+        ).astype(int)
+        pae_snr_norm_z = np.array([
+            SNR(
+                model.data,
+                mask=z_mask(z),
+                normalise=True,
+                reduce=lambda x: np.sum(x) / np.count_nonzero(x),
+            )
+            for z in pae_z
+        ])[pae_order]
+        pae_snr_norm = SNR(model.data, normalise=True, reduce=lambda x: x)[pae_order]
+        snr_mask = (pae_snr_norm - pae_snr_norm_z) / np.std(pae_snr_norm[pae_mask]) > -1
+        pae_mask &= snr_mask
+
         pae_twins_mask = np.ones_like(pae_mask, dtype=bool)
         pae_salt_mask = np.ones_like(pae_mask, dtype=bool)
         if twins is not None:
@@ -553,6 +572,7 @@ class DispersionPlotter(Plotter):
                 df = twins[twins.name == name]
                 pae_twins_mask[ind] = df.mask_twins
                 pae_salt_mask[ind] = df.mask_salt
+            print(pae_names[np.logical_not(pae_twins_mask & pae_mask)])
 
         def _plot(
             x: "npt.NDArray[Any]",
@@ -607,6 +627,7 @@ class DispersionPlotter(Plotter):
             names = names[mask]
 
             w_rms_jackknife = jackknife_resample(y, np.std)
+            n = len(w_rms_jackknife)
             if tmp:
                 rms_sort = np.argsort(w_rms_jackknife)
                 rms_ = {}
@@ -617,16 +638,19 @@ class DispersionPlotter(Plotter):
                 print("rms")
                 pp(rms_)
 
-            n = len(w_rms_jackknife)
-            w_rms = np.mean(w_rms_jackknife)
-            w_rms_std = np.sqrt(np.sum((y - w_rms) ** 2 * pull_yerr**2)) / (
-                (n - 1) * w_rms
+            w_rms = np.std(y)
+            w_rms_std = np.sqrt(
+                np.sum(((y - np.mean(y)) * pull_yerr) ** 2, axis=0)
+            ) / np.sqrt(np.sum((y - np.mean(y)) ** 2, axis=0))
+            w_rms_std = np.sqrt(np.std(w_rms_jackknife) ** 2 + w_rms_std**2) / np.sqrt(
+                n
             )
 
             k = 1.4826
             w_nmad_jackknife = k * jackknife_resample(
                 y, lambda a: np.median(np.abs(a - np.median(a, axis=0)))
             )
+            n = len(w_nmad_jackknife)
             if tmp:
                 nmad_sort = np.argsort(w_nmad_jackknife)
                 nmad_ = {}
@@ -637,9 +661,15 @@ class DispersionPlotter(Plotter):
                 print("nmad")
                 pp(nmad_)
 
-            n = len(w_nmad_jackknife)
-            w_nmad = np.mean(w_nmad_jackknife)
-            w_nmad_std = 1.253 * w_nmad / np.sqrt(n)
+            med = np.median(y, axis=0)
+            d = np.abs(y - med)
+            idx = np.argmin(np.abs(d - np.median(d, axis=0)), axis=0)
+
+            w_nmad = k * np.median(d, axis=0)
+            w_nmad_std = k * np.take_along_axis(pull_yerr, idx[None], axis=0)[0]
+            w_nmad_std = np.sqrt(
+                np.std(w_nmad_jackknife) ** 2 + w_nmad_std**2
+            ) / np.sqrt(n)
 
             fig, s_ax, ebar = Plotter.errorbar(
                 x,
@@ -864,7 +894,7 @@ class DispersionPlotter(Plotter):
             )
 
             if twins is not None:
-                # === SN Mask ===
+                # === PAE Mask ===
                 fig, twins_ax, _ = _plot(
                     twins_x,
                     twins_y,
@@ -874,7 +904,7 @@ class DispersionPlotter(Plotter):
                     twins_ax,
                     "brown",
                     0.25,
-                    "Twins SN Mask",
+                    "Twins PAE Mask",
                     residual_bins=residual_bins,
                     pull_bins=pull_bins,
                     names=twins_names,
@@ -994,7 +1024,7 @@ class DispersionPlotter(Plotter):
             )
 
             if twins is not None:
-                # === SN Mask ===
+                # === PAE Mask ===
                 fig, legacy_ax, _ = _plot(
                     legacy_x,
                     legacy_y,
@@ -1004,7 +1034,7 @@ class DispersionPlotter(Plotter):
                     legacy_ax,
                     "brown",
                     0.25,
-                    "Legacy SN Mask",
+                    "Legacy PAE Mask",
                     residual_bins=residual_bins,
                     pull_bins=pull_bins,
                 )
@@ -1077,7 +1107,7 @@ class DispersionPlotter(Plotter):
         twins_mask_stats = None
         salt_mask_stats = None
         if twins is not None:
-            # === SN Mask ===
+            # === PAE Mask ===
             fig, pae_ax, sn_mask_stats = _plot(
                 pae_x,
                 pae_y,
@@ -1087,11 +1117,12 @@ class DispersionPlotter(Plotter):
                 pae_ax,
                 "brown",
                 0.25,
-                "SN Mask",
+                "PAE Mask",
                 residual_bins=residual_bins,
                 pull_bins=pull_bins,
                 yerr_lower=pae_yerr_lower,
                 yerr_upper=pae_yerr_upper,
+                tmp=True,
             )
 
             # === Twins Mask ===

@@ -53,11 +53,16 @@ def resolve_path(
     return final_path
 
 
-def jackknife_resample(arr: "npt.NDArray", func: "Callable") -> "npt.NDArray":
+def jackknife_resample(
+    arr: "npt.NDArray", func: "Callable", weights: "npt.NDArray | None" = None
+) -> "npt.NDArray":
     n = len(arr)
     jackknife_values = np.zeros(n)
     for i in range(n):
-        jackknife_values[i] = func(np.delete(arr, i))
+        if weights is not None:
+            jackknife_values[i] = func(np.delete(arr, i), np.delete(weights, i))
+        else:
+            jackknife_values[i] = func(np.delete(arr, i))
     return jackknife_values
 
 

@@ -32,4 +32,4 @@ def SNR(
     snr_coadd = np.sqrt(snr_sum)
     if reduce is None:
         return np.sum(snr_coadd) / np.count_nonzero(snr_mask)
-    return reduce(snr_coadd[snr_mask])
+    return reduce(np.where(snr_mask, snr_coadd, np.zeros_like(snr_coadd)))
