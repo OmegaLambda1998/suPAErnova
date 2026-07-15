@@ -1,4 +1,6 @@
-from supaernova.utils import pp, SNR
+from supaernova.steps.pae.tf.photometry import photometry
+from supaernova.utils.photometry import Filter
+from supaernova.utils import pp, SNR, resolve_path
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis import Plotter
 from supaernova.configs.callbacks import callback
@@ -40,6 +42,8 @@ class Sim(Step[SimConfig]):
         self.redshift: float = self.options.redshift
         self.cadence: float = self.options.cadence / (1 + self.redshift)
         self.n_sn: int
+        self.n_spectra: int
+        self.filters: list[Filter]
 
         # Output Paths
         self.out_data: Path = self.paths.results / "data.npz"
@@ -54,6 +58,8 @@ class Sim(Step[SimConfig]):
             "pae",
             "real_data",
             "n_sn",
+            "n_spectra",
+            "filters",
             "min_redshift",
             "max_redshift",
             "min_phase",
@@ -135,12 +141,21 @@ class Sim(Step[SimConfig]):
             if self.options.n_sn is not None
             else self.real_data.sn_dim
         )
+        self.n_spectra = (
+            self.options.n_spectra
+            if self.options.n_spectra >= 0
+            else self.real_data.sn_dim
+        )
 
         self.data_dir = self.real_data.dir
         self.train_frac = self.real_data.train_frac
         self.test_frac = 1 - self.train_frac
         self.n_kfolds = int(1 / self.test_frac)
         self.colourlaw = self.real_data.colourlaw
+        self.filters = [
+            Filter(resolve_path(path, relative_path=self.data_dir))
+            for path in self.options.filters or []
+        ]
 
         self.min_redshift = self.real_data.min_redshift
         self.max_redshift = self.real_data.max_redshift
@@ -287,7 +302,6 @@ class Sim(Step[SimConfig]):
         )
 
         synth_amp += self.rng.normal(np.zeros_like(synth_amp), synth_sigma)
-        # synth_amp = np.clip(synth_amp, 0, np.inf)
 
         synth_redshift = np.clip(
             self.rng.normal(
@@ -347,6 +361,36 @@ class Sim(Step[SimConfig]):
             synth_mask & data["sn_mask"] & data["spec_mask"] & data["wl_mask"]
         )
         data["time"] = synth_time
+
+        n_filters = len(self.filters) + 1
+        throughput = np.repeat(
+            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
+        )
+        effective_wavelength = np.repeat(
+            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
+        )
+        # wl = data["wavelength"][0, 0, :]
+        # for i, f in enumerate(self.filters):
+        #     tp = np.interp(wl, f.wavelength, f.throughput)
+        #     throughput[..., i] = tp
+        #
+        #     ef = (
+        #         np.abs(wl - f.effective_wavelength)
+        #         == np.min(np.abs(wl - f.effective_wavelength))
+        #     ).astype(tp.dtype)
+        #     effective_wavelength[..., i] = ef
+
+        data["throughput"] = throughput
+        data["effective_wavelength"] = effective_wavelength
+        # amp, sigma = photometry(
+        #     data["wavelength"],
+        #     data["amplitude"],
+        #     data["sigma"],
+        #     data["throughput"],
+        #     data["effective_wavelength"],
+        # )
+        # data["amplitude"] = amp.numpy()
+        # data["sigma"] = sigma.numpy()
 
         self.data.model_validate(data)
 

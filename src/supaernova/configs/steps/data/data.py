@@ -50,6 +50,8 @@ class SNPAEData(StepResult):
     spec_mask: npt.NDArray[int]
     wl_mask: npt.NDArray[int]
     time: npt.NDArray[float]
+    throughput: npt.NDArray[float]
+    effective_wavelength: npt.NDArray[float]
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---

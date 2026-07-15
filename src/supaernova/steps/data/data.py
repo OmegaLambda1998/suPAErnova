@@ -908,6 +908,10 @@ class Data(Step[DataConfig]):
 
         data["mask"] = data["mask"].astype(np.int32)
 
+        # TODO: Read in photometry
+        data["throughput"] = np.zeros_like(data["amplitude"])[..., None]
+        data["effective_wavelength"] = np.zeros_like(data["amplitude"])[..., None]
+
         self.data.model_validate(data)
 
     def get_unmasked_dims(
