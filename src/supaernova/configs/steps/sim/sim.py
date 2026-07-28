@@ -31,6 +31,7 @@ class SimConfig(StepConfig):
     filters: list[Path] | None = None
     cadence: PositiveFloat
     n_spectra: NonNegativeInt | Literal[-1] = -1
+    n_phot: NonNegativeInt | Literal[-1] = -1
 
 
 class SimStepConfig(VariantConfig):

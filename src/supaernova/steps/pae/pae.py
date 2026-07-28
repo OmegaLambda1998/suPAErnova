@@ -159,6 +159,12 @@ class PAE(ModelStep[PAEConfig]):
         self.val_wl_mask: npt.NDArray[bool]
 
         self.colourlaw: npt.NDArray[float] | None
+        self.input_wavelength: npt.NDArray[float]
+        self.input_sigma: npt.NDArray[float]
+        self.input_throughput: npt.NDArray[float]
+        self.input_effective_wavelength: npt.NDArray[float]
+        self.input_spectra_mask: npt.NDArray[float]
+        self.input_phot_mask: npt.NDArray[float]
 
         # --- Bounds ---
         self.min_redshift: float
@@ -231,6 +237,12 @@ class PAE(ModelStep[PAEConfig]):
         # --- Previous Step Variables ---
         self.data = data.data
         self.colourlaw = data.colourlaw
+        self.input_wavelength = data.data.wavelength
+        self.input_sigma = data.data.sigma
+        self.input_throughput = data.data.throughput
+        self.input_effective_wavelength = data.data.effective_wavelength
+        self.input_spectra_mask = data.data.spectra_mask
+        self.input_phot_mask = data.data.phot_mask
         self.train_data = data.train_data[self.kfold % len(data.train_data)]
         self.test_data = data.test_data[self.kfold % len(data.test_data)]
         self.val_data = self.test_data
@@ -516,6 +528,11 @@ class PAE(ModelStep[PAEConfig]):
             input_phase = data.time.astype(np.float32)
             input_amplitude = data.amplitude.astype(np.float32)
             input_d_amplitude = data.sigma.astype(np.float32)
+            input_wavelength = data.wavelength
+            input_throughput = data.throughput
+            input_effective_wavelength = data.effective_wavelength
+            input_spectra_mask = data.spectra_mask
+            input_phot_mask = data.phot_mask
             data.clear()
             input_mask = getattr(self, f"{dt}mask").astype(np.bool)
             input_sn_mask = getattr(self, f"{dt}sn_mask").astype(np.bool)
@@ -539,6 +556,12 @@ class PAE(ModelStep[PAEConfig]):
                     sn_mask=input_sn_mask,
                     spec_mask=input_spec_mask,
                     wl_mask=input_wl_mask,
+                    wavelength=input_wavelength,
+                    sigma=input_d_amplitude,
+                    throughput=input_throughput,
+                    effective_wavelength=input_effective_wavelength,
+                    spectra_mask=input_spectra_mask,
+                    phot_mask=input_phot_mask,
                 )
 
                 loss = self.model.compute_loss(

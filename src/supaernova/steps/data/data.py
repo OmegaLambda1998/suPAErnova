@@ -821,6 +821,8 @@ class Data(Step[DataConfig]):
             valid_phase_mask & (data["phase"] > -np.inf) & (data["phase"] < np.inf)
         )
         data["mask"] &= spec_mask
+        data["spectra_mask"] = np.ones_like(spec_mask)
+        data["phot_mask"] = np.zeros_like(spec_mask)
 
         self.log.debug(f"Valid Phases ({self.min_phase} <= p <= {self.max_phase}):")
         self.get_unmasked_dims(data["mask"])

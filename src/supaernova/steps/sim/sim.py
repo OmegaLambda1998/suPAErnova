@@ -146,6 +146,9 @@ class Sim(Step[SimConfig]):
             if self.options.n_spectra >= 0
             else self.real_data.sn_dim
         )
+        self.n_phot = (
+            self.options.n_phot if self.options.n_phot >= 0 else self.real_data.sn_dim
+        )
 
         self.data_dir = self.real_data.dir
         self.train_frac = self.real_data.train_frac
@@ -213,7 +216,6 @@ class Sim(Step[SimConfig]):
         synth_zs = np.concatenate(
             (synth_zs, np.zeros((self.sn_dim, self.spec_dim, 2))), axis=-1
         )
-        synth_zs[..., :1] *= 0
         cadence_time = self.cadence / (self.max_phase - self.min_phase)
         synth_time = -np.inf * np.ones(
             (self.sn_dim, self.spec_dim, 1),
@@ -223,6 +225,16 @@ class Sim(Step[SimConfig]):
             0, 1, cadence_time
         )[None, :, None].repeat(self.sn_dim, axis=0)
         synth_phase = synth_time * (self.max_phase - self.min_phase) + self.min_phase
+
+        phase_shuffle = np.argsort(
+            np.argsort(np.abs(synth_phase)[0, :, 0], axis=0), axis=0
+        )
+        spectra_mask = np.zeros_like(synth_phase, dtype=int)
+        spectra_mask[:, : self.n_spectra, :] = 1
+        spectra_mask = spectra_mask[:, phase_shuffle, :]
+        phot_mask = np.zeros_like(synth_phase, dtype=int)
+        phot_mask[:, : self.n_phot, :] = 1
+        phot_mask = phot_mask[:, phase_shuffle, :]
 
         synth_mask = np.ones((self.sn_dim, self.spec_dim, self.wl_dim), dtype=np.bool)
         synth_mask &= np.isfinite(synth_time)
@@ -281,12 +293,6 @@ class Sim(Step[SimConfig]):
                 )
                 if data_snr == 0:
                     continue
-
-                n_synth_sn = np.count_nonzero(np.any(mask_synth, axis=(-2, -1)))
-                n_synth = np.count_nonzero(mask_synth) / n_synth_sn
-                n_data_sn = np.count_nonzero(np.any(mask_data, axis=(-2, -1)))
-                n_data = np.count_nonzero(mask_data) / n_data_sn
-                n_ratio = n_synth / n_data
 
                 synth_sigma = np.where(
                     mask_synth,
@@ -350,6 +356,8 @@ class Sim(Step[SimConfig]):
             & (synth_phase >= self.min_phase)
             & (synth_phase <= self.max_phase)
         )
+        data["spectra_mask"] = spectra_mask
+        data["phot_mask"] = phot_mask
         data["sn_mask"] = (
             synth_sn_mask
             & (synth_redshift >= self.min_redshift)
@@ -368,28 +376,33 @@ class Sim(Step[SimConfig]):
         effective_wavelength = np.repeat(
             np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
         )
-        # wl = data["wavelength"][0, 0, :]
-        # for i, f in enumerate(self.filters):
-        #     tp = np.interp(wl, f.wavelength, f.throughput)
-        #     throughput[..., i] = tp
-        #
-        #     ef = (
-        #         np.abs(wl - f.effective_wavelength)
-        #         == np.min(np.abs(wl - f.effective_wavelength))
-        #     ).astype(tp.dtype)
-        #     effective_wavelength[..., i] = ef
+        wl = data["wavelength"]
+        for i, f in enumerate(self.filters):
+            tp = np.interp(wl, f.wavelength, f.throughput)
+            throughput[..., i] = tp
+
+            ef = (
+                np.abs(wl - f.effective_wavelength)
+                == np.min(np.abs(wl - f.effective_wavelength))
+            ).astype(tp.dtype)
+            effective_wavelength[..., i] = ef
 
         data["throughput"] = throughput
         data["effective_wavelength"] = effective_wavelength
-        # amp, sigma = photometry(
-        #     data["wavelength"],
-        #     data["amplitude"],
-        #     data["sigma"],
-        #     data["throughput"],
-        #     data["effective_wavelength"],
-        # )
-        # data["amplitude"] = amp.numpy()
-        # data["sigma"] = sigma.numpy()
+        amp, sigma = photometry(
+            data["wavelength"],
+            data["amplitude"],
+            data["sigma"],
+            data["throughput"],
+            data["effective_wavelength"],
+            data["spectra_mask"],
+            data["phot_mask"],
+        )
+        amp = amp.numpy()
+        sigma = sigma.numpy()
+        amp[~data["mask"]] = 0
+        data["amplitude"] = amp
+        data["sigma"] = sigma
 
         self.data.model_validate(data)
 

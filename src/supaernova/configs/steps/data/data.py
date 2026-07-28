@@ -48,6 +48,8 @@ class SNPAEData(StepResult):
     laser_mask: npt.NDArray[int]
     sn_mask: npt.NDArray[int]
     spec_mask: npt.NDArray[int]
+    spectra_mask: npt.NDArray[int]
+    phot_mask: npt.NDArray[int]
     wl_mask: npt.NDArray[int]
     time: npt.NDArray[float]
     throughput: npt.NDArray[float]

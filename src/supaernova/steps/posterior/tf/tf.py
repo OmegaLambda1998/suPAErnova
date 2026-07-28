@@ -1,4 +1,5 @@
 # Copyright 2025 Patrick Armstrong
+from supaernova.steps.pae.tf.photometry import photometry
 import os
 from typing import TYPE_CHECKING, override
 
@@ -68,6 +69,13 @@ class TFPosteriorModel(ks.Model):
         self.data_time: npt.NDArray[float] = self.data.time
         self.data_amplitude: npt.NDArray[float] = self.data.amplitude
         self.data_sigma: npt.NDArray[float] = self.data.sigma
+        self.data_wavelength: npt.NDArray[float] = self.data.wavelength
+        self.data_throughput: npt.NDArray[float] = self.data.throughput
+        self.data_effective_wavelength: npt.NDArray[float] = (
+            self.data.effective_wavelength
+        )
+        self.data_spectra_mask: npt.NDArray[float] = self.data.spectra_mask
+        self.data_phot_mask: npt.NDArray[float] = self.data.phot_mask
         self.data.clear()
 
         self.data_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_mask")
@@ -185,6 +193,11 @@ class TFPosteriorModel(ks.Model):
         input_phase: tf.Tensor | None = None,
         input_amp: tf.Tensor | None = None,
         input_sigma: tf.Tensor | None = None,
+        input_wavelength: tf.Tensor | None = None,
+        input_throughput: tf.Tensor | None = None,
+        input_effective_wavelength: tf.Tensor | None = None,
+        input_spectra_mask: tf.Tensor | None = None,
+        input_phot_mask: tf.Tensor | None = None,
         mask: tf.Tensor | None = None,
         sn_mask: tf.Tensor | None = None,
         spec_mask: tf.Tensor | None = None,
@@ -203,15 +216,23 @@ class TFPosteriorModel(ks.Model):
             input_amp = self.data_amplitude
         if input_sigma is None:
             input_sigma = self.data_sigma
+        if input_wavelength is None:
+            input_wavelength = self.data_wavelength
+        if input_throughput is None:
+            input_throughput = self.data_throughput
+        if input_effective_wavelength is None:
+            input_effective_wavelength = self.data_effective_wavelength
+        if input_spectra_mask is None:
+            input_spectra_mask = self.data_spectra_mask
+        if input_phot_mask is None:
+            input_phot_mask = self.data_phot_mask
 
         # --- Masks ---
         # Data Mask
         input_mask = tf.ones_like(input_amp, dtype=tf.bool) if mask is None else mask
-        # pp(tf.math.count_nonzero(input_mask), "input_mask")
 
         # Wavelength Range Mask
         input_wl_mask = tf.ones_like(input_mask) if wl_mask is None else wl_mask
-        # pp(tf.math.count_nonzero(input_wl_mask), "input_wl_mask")
 
         # Phase Range Mask
         input_spec_mask = (
@@ -219,7 +240,6 @@ class TFPosteriorModel(ks.Model):
             if spec_mask is None
             else spec_mask
         )
-        # pp(tf.math.count_nonzero(input_spec_mask), "input_spec_mask")
 
         # Redshift Range Mask
         input_sn_mask = (
@@ -227,17 +247,13 @@ class TFPosteriorModel(ks.Model):
             if sn_mask is None
             else sn_mask
         )
-        # pp(tf.math.count_nonzero(input_sn_mask), "input_sn_mask")
 
         posterior_mask = input_mask & input_sn_mask & input_spec_mask & input_wl_mask
-        # pp(tf.math.count_nonzero(posterior_mask), "posterior_mask")
 
         mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
-        # pp(tf.math.count_nonzero(mask_spec), "mask_spec")
 
         # Determine which sn to keep
         mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
-        # pp(tf.math.count_nonzero(mask_sn), "mask_sn")
 
         # Unconstrained -> Constrained
         input_position = self.map.constrain(input_position, full=True)
@@ -294,6 +310,20 @@ class TFPosteriorModel(ks.Model):
             wl_mask=input_wl_mask,
             training=False,
         )
+        (
+            synth_amp,
+            _,
+        ) = photometry(
+            tf.repeat(input_wavelength[None, ...], synth_amp.shape[0], axis=0),
+            synth_amp,
+            tf.repeat(input_sigma[None, ...], synth_amp.shape[0], axis=0),
+            tf.repeat(input_throughput[None, ...], synth_amp.shape[0], axis=0),
+            tf.repeat(
+                input_effective_wavelength[None, ...], synth_amp.shape[0], axis=0
+            ),
+            tf.repeat(input_spectra_mask[None, ...], synth_amp.shape[0], axis=0),
+            tf.repeat(input_phot_mask[None, ...], synth_amp.shape[0], axis=0),
+        )
 
         if self.map.train_delta_m and not self.pae.physical_latents:
             delta_m = tf.expand_dims(delta_m, axis=-2)
@@ -306,8 +336,6 @@ class TFPosteriorModel(ks.Model):
         if self.map.train_delta_p:  # and not self.pae.physical_latents:
             delta_p = tf.expand_dims(delta_p, axis=-2)
             phase += delta_p
-
-        # pp(tf.boolean_mask(input_sigma, posterior_mask), "input_sigma")
 
         # Measured average AE reconstruction error at current times
         sigma_recon = tf.transpose(
@@ -336,9 +364,8 @@ class TFPosteriorModel(ks.Model):
         likelihood = tfd.Normal(loc=synth_amp, scale=synth_sigma)
 
         # Set missing values to 0 for all times
-        # amp = tf.where(posterior_mask, input_amp, tf.zeros_like(input_amp))
-        amp = input_amp
-
+        amp = tf.where(posterior_mask, input_amp, tf.zeros_like(input_amp))
+        # amp = input_amp
         log_likelihood_wl = likelihood.log_prob(amp)
 
         log_likelihood_spec_num = tf.reduce_sum(
@@ -1023,7 +1050,8 @@ class TFPosteriorModel(ks.Model):
             wl_mask=self.wl_mask,
         )
 
-        return self._loss(self.norm_prob, log_prob)
+        loss = self._loss(self.norm_prob, log_prob)
+        return loss
 
     def lbfgs(
         self,
