@@ -5,6 +5,128 @@ from supaernova.utils.tf import db, pp
 
 
 @tf.function
+def photometry_amplitude_setup(
+    wavelength: tf.Tensor,
+    throughput: tf.Tensor,
+) -> tuple[tf.Tensor, tf.Tensor]:
+    wavelength = tf.cast(wavelength, tf.float32)
+    throughput = tf.cast(throughput, tf.float32)
+    # (n_sn, n_spec, 1, n_filters)
+    denom = tfp.math.trapz(throughput * wavelength, wavelength, axis=-2)[..., None, :]
+    amp_mask = tf.cast(
+        tf.where(denom == 0, tf.zeros_like(denom), tf.ones_like(denom)), tf.bool
+    )
+    denom = tf.where(denom == 0, tf.ones_like(denom), denom)
+
+    return denom, amp_mask
+
+
+@tf.function
+def photometry_amplitude(
+    wavelength: tf.Tensor,
+    amplitude: tf.Tensor,
+    throughput: tf.Tensor,
+    effective_wavelength: tf.Tensor,
+    spec_mask: tf.Tensor,
+    phot_mask: tf.Tensor,
+    cached: tuple[tf.Tensor, tf.Tensor] | None = None,
+) -> tf.Tensor:
+
+    if cached is None:
+        denom, amp_mask = photometry_amplitude_setup(wavelength, throughput)
+    else:
+        denom, amp_mask = cached
+
+    # (n_sn, n_spec, 1, n_filters)
+    numer = tfp.math.trapz(
+        amplitude * throughput * wavelength,
+        wavelength,
+        axis=-2,
+    )[..., None, :]
+
+    # (n_sn, n_spec, n_wl, n_filters)
+    phot_amp = numer / denom
+    phot_amp = tf.where(amp_mask, phot_amp, tf.zeros_like(phot_amp))
+
+    # (n_sn, n_spec, n_wl, n_filters)
+    phot_amp = spec_mask * amplitude + phot_mask * effective_wavelength * phot_amp
+
+    # (n_sn, n_spec, n_wl)
+    phot_amp = tf.reduce_sum(phot_amp, axis=-1)
+
+    return phot_amp
+
+
+@tf.function
+def photometry_sigma_setup(
+    wavelength: tf.Tensor,
+    throughput: tf.Tensor,
+) -> tuple[tf.Tensor, tf.Tensor]:
+    wavelength = tf.cast(wavelength, tf.float32)
+    throughput = tf.cast(throughput, tf.float32)
+
+    denom_sigma = tfp.math.trapz((throughput * wavelength) ** 2, wavelength, axis=-2)[
+        ..., None, :
+    ]
+    sigma_mask = tf.cast(
+        tf.where(
+            denom_sigma == 0, tf.zeros_like(denom_sigma), tf.ones_like(denom_sigma)
+        ),
+        tf.bool,
+    )
+    denom_sigma = tf.where(denom_sigma == 0, tf.ones_like(denom_sigma), denom_sigma)
+
+    return denom_sigma, sigma_mask
+
+
+@tf.function
+def photometry_sigma(
+    wavelength: tf.Tensor,
+    sigma: tf.Tensor,
+    throughput: tf.Tensor,
+    effective_wavelength: tf.Tensor,
+    spec_mask: tf.Tensor,
+    phot_mask: tf.Tensor,
+    cached: tuple[tf.Tensor, tf.Tensor] | None = None,
+) -> tf.Tensor:
+
+    if cached is None:
+        denom_sigma, sigma_mask = photometry_sigma_setup(wavelength, throughput)
+    else:
+        denom_sigma, sigma_mask = cached
+
+    # Variance propagation through the filter integration
+    # (n_sn, n_spec, 1, n_filters)
+    numer_sigma = tfp.math.trapz(
+        (sigma * throughput * wavelength) ** 2,
+        wavelength,
+        axis=-2,
+    )[..., None, :]
+
+    # (n_sn, n_spec, 1, n_filters)
+    phot_sigma = tf.sqrt(numer_sigma / denom_sigma)
+    phot_sigma = tf.where(
+        sigma_mask,
+        phot_sigma,
+        tf.ones_like(phot_sigma),
+    )
+
+    # Put the uncertainty only at the effective wavelength bin,
+    # matching the phot_amp construction
+    # (n_sn, n_spec, n_wl, n_filters)
+    phot_sigma = tf.sqrt(
+        tf.square(spec_mask * sigma)
+        + tf.square(phot_mask * effective_wavelength * phot_sigma)
+    )
+
+    # Same reduction as phot_amp
+    # (n_sn, n_spec, n_wl)
+    phot_sigma = tf.sqrt(tf.reduce_sum(tf.square(phot_sigma), axis=-1))  # / phot_mask
+
+    return phot_sigma
+
+
+@tf.function
 def photometry(
     wavelength: tf.Tensor,
     amplitude: tf.Tensor,
@@ -13,6 +135,8 @@ def photometry(
     effective_wavelength: tf.Tensor,
     spec_mask: tf.Tensor | None = None,
     phot_mask: tf.Tensor | None = None,
+    cached_amp: tuple[tf.Tensor, tf.Tensor] | None = None,
+    cached_sigma: tuple[tf.Tensor, tf.Tensor] | None = None,
 ) -> tuple[tf.Tensor, tf.Tensor]:
     """Integrate spectroscopy through filters to produce pseudo-photometry.
 
@@ -51,78 +175,30 @@ def photometry(
         ]
         phot_mask = tf.repeat(phot_mask, throughput.shape[-1] - 1, axis=-1)
         phot_mask = tf.concat((phot_mask, blank_mask[..., :1]), axis=-1)
-    amplitude = tf.repeat(amplitude[..., None], throughput.shape[-1], axis=-1)
     wavelength = tf.repeat(wavelength[..., None], throughput.shape[-1], axis=-1)
-    sigma = tf.repeat(sigma[..., None], throughput.shape[-1], axis=-1)
+    amplitude = amplitude[..., None]
+    sigma = sigma[..., None]
+    # amplitude = tf.repeat(amplitude[..., None], throughput.shape[-1], axis=-1)
+    # sigma = tf.repeat(sigma[..., None], throughput.shape[-1], axis=-1)
 
-    # (n_sn, n_spec, 1, n_filters)
-    numer = tfp.math.trapz(
-        amplitude * throughput * wavelength,
+    phot_amp = photometry_amplitude(
         wavelength,
-        axis=-2,
-    )[..., None, :]
-
-    # (n_sn, n_spec, 1, n_filters)
-    denom = tfp.math.trapz(throughput * wavelength, wavelength, axis=-2)[..., None, :]
-    amp_mask = tf.cast(
-        tf.where(denom == 0, tf.zeros_like(denom), tf.ones_like(denom)), tf.bool
+        amplitude,
+        throughput,
+        effective_wavelength,
+        spec_mask,
+        phot_mask,
+        cached_amp,
     )
-    denom = tf.where(denom == 0, tf.ones_like(denom), denom)
 
-    # (n_sn, n_spec, n_wl, n_filters)
-    phot_amp = numer / denom
-    phot_amp = tf.where(amp_mask, phot_amp, tf.zeros_like(phot_amp))
-
-    # (n_sn, n_spec, n_wl, n_filters)
-    phot_amp = spec_mask * amplitude + phot_mask * effective_wavelength * phot_amp
-
-    # (n_sn, n_spec, n_wl)
-    phot_amp = tf.reduce_sum(phot_amp, axis=-1)
-    # phot_amp = tf.where(
-    #     tf.abs(phot_amp) > ks.backend.epsilon(), phot_amp, tf.zeros_like(phot_amp)
-    # )
-
-    # Variance propagation through the filter integration
-    # (n_sn, n_spec, 1, n_filters)
-    numer_sigma = tfp.math.trapz(
-        (sigma * throughput * wavelength) ** 2,
+    phot_sigma = photometry_sigma(
         wavelength,
-        axis=-2,
-    )[..., None, :]
-    denom_sigma = tfp.math.trapz((throughput * wavelength) ** 2, wavelength, axis=-2)[
-        ..., None, :
-    ]
-    sigma_mask = tf.cast(
-        tf.where(
-            denom_sigma == 0, tf.zeros_like(denom_sigma), tf.ones_like(denom_sigma)
-        ),
-        tf.bool,
+        sigma,
+        throughput,
+        effective_wavelength,
+        spec_mask,
+        phot_mask,
+        cached_sigma,
     )
-    denom_sigma = tf.where(denom_sigma == 0, tf.ones_like(denom_sigma), denom_sigma)
-
-    # (n_sn, n_spec, 1, n_filters)
-    phot_sigma = tf.sqrt(numer_sigma / denom_sigma)
-    phot_sigma = tf.where(
-        sigma_mask,
-        phot_sigma,
-        tf.ones_like(phot_sigma),
-    )
-
-    # Put the uncertainty only at the effective wavelength bin,
-    # matching the phot_amp construction
-    # (n_sn, n_spec, n_wl, n_filters)
-    phot_sigma = tf.sqrt(
-        tf.square(spec_mask * sigma)
-        + tf.square(phot_mask * effective_wavelength * phot_sigma)
-    )
-
-    # Same reduction as phot_amp
-    # (n_sn, n_spec, n_wl)
-    phot_sigma = tf.sqrt(tf.reduce_sum(tf.square(phot_sigma), axis=-1))  # / phot_mask
-    # phot_sigma = tf.where(
-    #     tf.abs(phot_sigma) > ks.backend.epsilon(),
-    #     phot_sigma,
-    #     tf.ones_like(phot_sigma),
-    # )
 
     return phot_amp, phot_sigma

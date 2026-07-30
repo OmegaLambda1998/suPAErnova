@@ -1,5 +1,9 @@
 # Copyright 2025 Patrick Armstrong
-from supaernova.steps.pae.tf.photometry import photometry
+from supaernova.steps.pae.tf.photometry import (
+    photometry,
+    photometry_amplitude_setup,
+    photometry_sigma_setup,
+)
 import os
 from typing import TYPE_CHECKING, override
 
@@ -77,6 +81,19 @@ class TFPosteriorModel(ks.Model):
         self.data_spectra_mask: npt.NDArray[float] = self.data.spectra_mask
         self.data_phot_mask: npt.NDArray[float] = self.data.phot_mask
         self.data.clear()
+
+        self.cached_amp: tuple[tf.Tensor, tf.Tensor] = photometry_amplitude_setup(
+            tf.repeat(
+                self.data_wavelength[..., None], self.data_throughput.shape[-1], axis=-1
+            ),
+            self.data_throughput,
+        )
+        self.cached_sigma: tuple[tf.Tensor, tf.Tensor] = photometry_sigma_setup(
+            tf.repeat(
+                self.data_wavelength[..., None], self.data_throughput.shape[-1], axis=-1
+            ),
+            self.data_throughput,
+        )
 
         self.data_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_mask")
         self.sn_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_sn_mask")
@@ -323,6 +340,8 @@ class TFPosteriorModel(ks.Model):
             ),
             tf.repeat(input_spectra_mask[None, ...], synth_amp.shape[0], axis=0),
             tf.repeat(input_phot_mask[None, ...], synth_amp.shape[0], axis=0),
+            self.cached_amp,
+            self.cached_sigma,
         )
 
         if self.map.train_delta_m and not self.pae.physical_latents:
