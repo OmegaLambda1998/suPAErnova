@@ -9,6 +9,8 @@ import sncosmo
 
 from supaernova.steps import Step
 from supaernova.utils import pp, resolve_path, SNR
+from supaernova.utils.photometry import Filter
+from supaernova.steps.pae.tf.photometry import photometry
 from supaernova.steps.variants import Variant
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis.analysis import Plotter
@@ -69,6 +71,7 @@ class Data(Step[DataConfig]):
             "colourlaw",
             "cosmological_model",
             "salt_model",
+            "filters",
             "test_frac",
             "n_kfolds",
             "data",
@@ -79,6 +82,7 @@ class Data(Step[DataConfig]):
         self.colourlaw: npt.NDArray[float] | None
         self.cosmological_model: cosmo.FLRW
         self.salt_model: sncosmo.SALT2Source | sncosmo.SALT3Source
+        self.filters: list[Filter]
 
         # Train / Test Split
         self.splits: dict[str, dict[Literal["train | test | validate"], list[str]]]
@@ -111,6 +115,9 @@ class Data(Step[DataConfig]):
         self.sn_dim: int  # Created in self.get_dims
         self.spec_dim: int  # Created in self.get_dims
         self.wl_dim: int  # Created in self.get_dims
+
+        self.n_phot: int  # Created in self.prepare_data_arrays
+        self.n_spectra: int  # Created in self.prepare_data_arrays
 
         # === Result Variables ===
         self.results: DataStepResult
@@ -146,6 +153,11 @@ class Data(Step[DataConfig]):
                 self.salt_model = sncosmo.SALT3Source(salt_model)
         else:
             self.salt_model = sncosmo.get_source(salt_model)
+
+        self.filters = [
+            Filter(resolve_path(path, relative_path=self.data_dir))
+            for path in self.options.filters or []
+        ]
 
         # === Config Variables ===
 
@@ -822,7 +834,21 @@ class Data(Step[DataConfig]):
         )
         data["mask"] &= spec_mask
         data["spectra_mask"] = np.ones_like(spec_mask)
-        data["phot_mask"] = np.zeros_like(spec_mask)
+
+        self.n_phot = self.options.n_phot if self.options.n_phot >= 0 else self.sn_dim
+        self.n_spectra = (
+            self.options.n_spectra if self.options.n_spectra >= 0 else self.sn_dim
+        )
+        # Rank each SN's spectra by |phase|, closest to peak first, same as sim.py
+        phase_rank = np.argsort(
+            np.argsort(np.abs(data["phase"][..., 0]), axis=-1), axis=-1
+        )
+        data["spectra_mask"] = (phase_rank < self.n_spectra).astype(spec_mask.dtype)[
+            ..., None
+        ]
+        data["phot_mask"] = (phase_rank < self.n_phot).astype(spec_mask.dtype)[
+            ..., None
+        ]
 
         self.log.debug(f"Valid Phases ({self.min_phase} <= p <= {self.max_phase}):")
         self.get_unmasked_dims(data["mask"])
@@ -910,9 +936,41 @@ class Data(Step[DataConfig]):
 
         data["mask"] = data["mask"].astype(np.int32)
 
-        # TODO: Read in photometry
-        data["throughput"] = np.zeros_like(data["amplitude"])[..., None]
-        data["effective_wavelength"] = np.zeros_like(data["amplitude"])[..., None]
+        n_filters = len(self.filters) + 1
+        throughput = np.repeat(
+            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
+        )
+        effective_wavelength = np.repeat(
+            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
+        )
+        wl = data["wavelength"]
+        for i, f in enumerate(self.filters):
+            tp = np.interp(wl, f.wavelength, f.throughput)
+            throughput[..., i] = tp
+
+            ef = (
+                np.abs(wl - f.effective_wavelength)
+                == np.min(np.abs(wl - f.effective_wavelength))
+            ).astype(tp.dtype)
+            effective_wavelength[..., i] = ef
+
+        data["throughput"] = throughput
+        data["effective_wavelength"] = effective_wavelength
+
+        amp, sigma = photometry(
+            data["wavelength"],
+            data["amplitude"],
+            data["sigma"],
+            data["throughput"],
+            data["effective_wavelength"],
+            data["spectra_mask"],
+            data["phot_mask"],
+        )
+        amp = amp.numpy()
+        sigma = sigma.numpy()
+        amp[~data["mask"].astype(bool)] = 0
+        data["amplitude"] = amp
+        data["sigma"] = sigma
 
         self.data.model_validate(data)
 

@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, ClassVar, Annotated
+from typing import Any, ClassVar, Literal, Annotated
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +9,7 @@ from pydantic import (
     Field,
     PositiveInt,
     AfterValidator,
+    NonNegativeInt,
     field_validator,
     model_validator,
 )
@@ -146,6 +147,9 @@ class DataConfig(StepConfig):
     train_frac: float = Field(ge=0, le=1, default=0.75)
     n_kfolds: PositiveInt | None = None
     colourlaw: Path | None = None
+    filters: list[Path] | None = None
+    n_phot: NonNegativeInt | Literal[-1] = -1
+    n_spectra: NonNegativeInt | Literal[-1] = -1
     analysis: DataStepAnalysis | None = None
     cosmological_model: str = "WMAP7"
     salt_model: str | Path = "salt2"
