@@ -158,6 +158,14 @@ class TFPosteriorModel(ks.Model):
 
         self.recon_error = config.recon_error[self.subset]
         self.recon_error_centers = config.recon_error_centers[self.subset]
+        self.sigma_recon = tf.transpose(
+            tfp.math.interp_regular_1d_grid(
+                x=tf.transpose(self.data_time[..., 0]),
+                x_ref_min=self.recon_error_centers[0],
+                x_ref_max=self.recon_error_centers[-1],
+                y_ref=self.recon_error,
+            )
+        )
 
         loss: Loss = self.options.loss_cls()
         loss.model = self
@@ -356,15 +364,17 @@ class TFPosteriorModel(ks.Model):
             delta_p = tf.expand_dims(delta_p, axis=-2)
             phase += delta_p
 
-        # Measured average AE reconstruction error at current times
-        sigma_recon = tf.transpose(
-            tfp.math.interp_regular_1d_grid(
-                x=tf.transpose(phase[..., 0]),
-                x_ref_min=self.recon_error_centers[0],
-                x_ref_max=self.recon_error_centers[-1],
-                y_ref=self.recon_error,
+            # Measured average AE reconstruction error at current times
+            sigma_recon = tf.transpose(
+                tfp.math.interp_regular_1d_grid(
+                    x=tf.transpose(phase[..., 0]),
+                    x_ref_min=self.recon_error_centers[0],
+                    x_ref_max=self.recon_error_centers[-1],
+                    y_ref=self.recon_error,
+                )
             )
-        )
+        else:
+            sigma_recon = self.sigma_recon
 
         synth_scale = (
             tf.math.maximum(
