@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import ClassVar, Any, LiteralString, Literal
 import numpy as np
 
-from pydantic import Field, model_validator, PositiveInt, PositiveFloat
+from pydantic import Field, model_validator, PositiveInt, PositiveFloat, NonNegativeInt
 
 from supaernova.configs.steps import StepConfig
 from supaernova.configs.steps.pae import PAEStepConfig
@@ -25,11 +25,13 @@ class SimStepAnalysis(DataStepAnalysis):
 
 
 class SimConfig(StepConfig):
-    cadence: PositiveFloat
     n_sn: PositiveInt | None = None
     analysis: SimStepAnalysis | None = None
-
     redshift: PositiveFloat = 0
+    filters: list[Path] | None = None
+    cadence: PositiveFloat
+    n_spectra: NonNegativeInt | Literal[-1] = -1
+    n_phot: NonNegativeInt | Literal[-1] = -1
 
 
 class SimStepConfig(VariantConfig):

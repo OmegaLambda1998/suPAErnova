@@ -1,4 +1,6 @@
-from supaernova.utils import pp, SNR
+from supaernova.steps.pae.tf.photometry import photometry
+from supaernova.utils.photometry import Filter
+from supaernova.utils import pp, resolve_path
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis import Plotter
 from supaernova.configs.callbacks import callback
@@ -40,6 +42,8 @@ class Sim(Step[SimConfig]):
         self.redshift: float = self.options.redshift
         self.cadence: float = self.options.cadence / (1 + self.redshift)
         self.n_sn: int
+        self.n_spectra: int
+        self.filters: list[Filter]
 
         # Output Paths
         self.out_data: Path = self.paths.results / "data.npz"
@@ -54,6 +58,8 @@ class Sim(Step[SimConfig]):
             "pae",
             "real_data",
             "n_sn",
+            "n_spectra",
+            "filters",
             "min_redshift",
             "max_redshift",
             "min_phase",
@@ -135,12 +141,24 @@ class Sim(Step[SimConfig]):
             if self.options.n_sn is not None
             else self.real_data.sn_dim
         )
+        self.n_spectra = (
+            self.options.n_spectra
+            if self.options.n_spectra >= 0
+            else self.real_data.sn_dim
+        )
+        self.n_phot = (
+            self.options.n_phot if self.options.n_phot >= 0 else self.real_data.sn_dim
+        )
 
         self.data_dir = self.real_data.dir
         self.train_frac = self.real_data.train_frac
         self.test_frac = 1 - self.train_frac
         self.n_kfolds = int(1 / self.test_frac)
         self.colourlaw = self.real_data.colourlaw
+        self.filters = [
+            Filter(resolve_path(path, relative_path=self.data_dir))
+            for path in self.options.filters or []
+        ]
 
         self.min_redshift = self.real_data.min_redshift
         self.max_redshift = self.real_data.max_redshift
@@ -164,6 +182,7 @@ class Sim(Step[SimConfig]):
     @override
     def _run(self, *args: "Any", **kwargs: "Any") -> None:
         data = {}
+        real_data = self.real_data.data
         self.get_dims()
 
         synth_wl = self.real_data.data.wavelength[:1, ...].repeat(self.sn_dim, axis=0)
@@ -198,7 +217,6 @@ class Sim(Step[SimConfig]):
         synth_zs = np.concatenate(
             (synth_zs, np.zeros((self.sn_dim, self.spec_dim, 2))), axis=-1
         )
-        synth_zs[..., :1] *= 0
         cadence_time = self.cadence / (self.max_phase - self.min_phase)
         synth_time = -np.inf * np.ones(
             (self.sn_dim, self.spec_dim, 1),
@@ -208,6 +226,22 @@ class Sim(Step[SimConfig]):
             0, 1, cadence_time
         )[None, :, None].repeat(self.sn_dim, axis=0)
         synth_phase = synth_time * (self.max_phase - self.min_phase) + self.min_phase
+
+        phase_rank = np.argsort(
+            np.argsort(np.abs(synth_phase[..., 0]), axis=-1), axis=-1
+        )
+        spectra_mask = (phase_rank < self.n_spectra).astype(real_data.spec_mask.dtype)[
+            ..., None
+        ]
+        phot_mask = (phase_rank < self.n_phot).astype(real_data.spec_mask.dtype)[
+            ..., None
+        ]
+        # spectra_mask = np.zeros_like(synth_phase, dtype=int)
+        # spectra_mask[:, : self.n_spectra, :] = 1
+        # spectra_mask = spectra_mask[:, phase_shuffle, :]
+        # phot_mask = np.zeros_like(synth_phase, dtype=int)
+        # phot_mask[:, : self.n_phot, :] = 1
+        # phot_mask = phot_mask[:, phase_shuffle, :]
 
         synth_mask = np.ones((self.sn_dim, self.spec_dim, self.wl_dim), dtype=np.bool)
         synth_mask &= np.isfinite(synth_time)
@@ -225,60 +259,84 @@ class Sim(Step[SimConfig]):
             training=False,
         ).numpy()
 
-        real_data = self.real_data.data
         data_mask = (
             real_data.mask & real_data.sn_mask & real_data.spec_mask & real_data.wl_mask
         )
-        synth_sigma = np.zeros_like(synth_amp)
+
+        # SNR() previously ran once per (time, wavelength) bin over the *entire*
+        # real-data array, an O(n_time_bins * n_wl_bins * n_real_points) cost.
+        # Precompute the per-point contribution once and aggregate bins via
+        # cumulative sums instead, cutting this to ~O(n_real_points).
+        n_real_sn = data_mask.shape[0]
         wavelengths = synth_wl[0, 0, :]
         wstep = (wavelengths[-1] - wavelengths[0]) / len(wavelengths)
+
+        real_amp = np.clip(real_data.amplitude, 0, np.inf)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            point_ratio = np.where(
+                data_mask,
+                real_amp * real_amp / (real_data.sigma * real_data.sigma),
+                0.0,
+            )
+        point_ratio = np.where(np.isfinite(point_ratio), point_ratio, 0.0)
+        mask_f = data_mask.astype(point_ratio.dtype)
+        row_has_any_data = np.any(data_mask, axis=-1)
+        real_time0 = real_data.time[..., 0]
+        synth_time0 = synth_time[..., 0]
+
+        # Candidate wavelength-bin upper edges, expressed as column indices into
+        # `wavelengths` rather than floats, so bin sums are O(1) cumsum lookups.
+        wl_edges = np.arange(wstep, wavelengths[-1], wstep)
+        b_idx_arr = np.searchsorted(wavelengths, wl_edges, side="left")
+
+        synth_sigma = np.zeros_like(synth_amp)
         tlo = 0
         for t in tqdm(np.arange(cadence_time, 1, cadence_time)):
-            data_t_mask = np.repeat(
-                (real_data.time >= tlo) & (real_data.time < t),
-                synth_sigma.shape[-1],
-                axis=-1,
-            )
-            if np.count_nonzero(data_t_mask & data_mask) == 0:
+            row_mask = (real_time0 >= tlo) & (real_time0 < t)
+            if np.count_nonzero(row_mask & row_has_any_data) == 0:
                 continue
-            synth_t_mask = np.repeat(
-                (synth_time >= tlo) & (synth_time < t), synth_sigma.shape[-1], axis=-1
+
+            col_sum = np.sum(np.where(row_mask[..., None], point_ratio, 0.0), axis=1)
+            col_cnt = np.sum(np.where(row_mask[..., None], mask_f, 0.0), axis=1)
+            cum_sum = np.concatenate(
+                [np.zeros((n_real_sn, 1)), np.cumsum(col_sum, axis=1)], axis=1
             )
-            wlo = wavelengths[0]
-            for wl in np.arange(wstep, wavelengths[-1], wstep):
-                wl_mask = (synth_wl >= wlo) & (synth_wl < wl)
-                mask_data = (
-                    data_t_mask
-                    & np.repeat(wl_mask[:1, ...], real_data.mask.shape[0], axis=0)
-                    & data_mask
-                )
-                if np.count_nonzero(mask_data) == 0:
+            cum_cnt = np.concatenate(
+                [np.zeros((n_real_sn, 1)), np.cumsum(col_cnt, axis=1)], axis=1
+            )
+
+            synth_row_mask = (synth_time0 >= tlo) & (synth_time0 < t)
+
+            # `a_idx` only advances on a successful bin, so an empty candidate
+            # bin (no wl columns, no real data, or no synth rows) gets merged
+            # into the next candidate instead of being dropped - matching the
+            # original loop's `wlo`/`tlo` behaviour exactly.
+            a_idx = 0
+            for b_idx in b_idx_arr:
+                if b_idx <= a_idx:
                     continue
 
-                mask_synth = synth_t_mask & wl_mask
-                if np.count_nonzero(mask_synth) == 0:
+                cnt_diff = cum_cnt[:, b_idx] - cum_cnt[:, a_idx]
+                if np.sum(cnt_diff) == 0:
+                    continue
+                if not np.any(synth_row_mask):
                     continue
 
-                data_snr = SNR(
-                    real_data,
-                    mask=mask_data.astype(real_data.mask.dtype),
-                    normalise=True,
-                )
+                sum_diff = cum_sum[:, b_idx] - cum_sum[:, a_idx]
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    val = sum_diff / cnt_diff
+                finite = np.isfinite(val)
+                if not np.any(finite):
+                    continue
+                coadd = np.sqrt(np.where(finite, val, 0.0))
+                data_snr = np.sum(coadd) / np.count_nonzero(finite)
                 if data_snr == 0:
                     continue
 
-                n_synth_sn = np.count_nonzero(np.any(mask_synth, axis=(-2, -1)))
-                n_synth = np.count_nonzero(mask_synth) / n_synth_sn
-                n_data_sn = np.count_nonzero(np.any(mask_data, axis=(-2, -1)))
-                n_data = np.count_nonzero(mask_data) / n_data_sn
-                n_ratio = n_synth / n_data
-
-                synth_sigma = np.where(
-                    mask_synth,
-                    synth_amp / data_snr,
-                    synth_sigma,
+                synth_sigma[synth_row_mask, a_idx:b_idx] = (
+                    synth_amp[synth_row_mask, a_idx:b_idx] / data_snr
                 )
-                wlo = wl
+                a_idx = b_idx
             tlo = t
 
         synth_sigma = np.where(
@@ -286,7 +344,6 @@ class Sim(Step[SimConfig]):
         )
 
         synth_amp += self.rng.normal(np.zeros_like(synth_amp), synth_sigma)
-        # synth_amp = np.clip(synth_amp, 0, np.inf)
 
         synth_redshift = np.clip(
             self.rng.normal(
@@ -336,6 +393,8 @@ class Sim(Step[SimConfig]):
             & (synth_phase >= self.min_phase)
             & (synth_phase <= self.max_phase)
         )
+        data["spectra_mask"] = spectra_mask
+        data["phot_mask"] = phot_mask
         data["sn_mask"] = (
             synth_sn_mask
             & (synth_redshift >= self.min_redshift)
@@ -346,6 +405,41 @@ class Sim(Step[SimConfig]):
             synth_mask & data["sn_mask"] & data["spec_mask"] & data["wl_mask"]
         )
         data["time"] = synth_time
+
+        n_filters = len(self.filters) + 1
+        throughput = np.repeat(
+            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
+        )
+        effective_wavelength = np.repeat(
+            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
+        )
+        wl = data["wavelength"]
+        for i, f in enumerate(self.filters):
+            tp = np.interp(wl, f.wavelength, f.throughput)
+            throughput[..., i] = tp
+
+            ef = (
+                np.abs(wl - f.effective_wavelength)
+                == np.min(np.abs(wl - f.effective_wavelength))
+            ).astype(tp.dtype)
+            effective_wavelength[..., i] = ef
+
+        data["throughput"] = throughput
+        data["effective_wavelength"] = effective_wavelength
+        amp, sigma = photometry(
+            data["wavelength"],
+            data["amplitude"],
+            data["sigma"],
+            data["throughput"],
+            data["effective_wavelength"],
+            data["spectra_mask"],
+            data["phot_mask"],
+        )
+        amp = amp.numpy()
+        sigma = sigma.numpy()
+        amp[~data["mask"]] = 0
+        data["amplitude"] = amp
+        data["sigma"] = sigma
 
         self.data.model_validate(data)
 
@@ -389,15 +483,14 @@ class Sim(Step[SimConfig]):
                 )
             )[0]
 
-            n_axes = 3
             self.train_data[kfold].model_validate({
-                key: val[inds_train, :, :] if val.ndim == n_axes else val[inds_train, :]
+                key: val[inds_train, ...]
                 for key, val in self.data.model_dump().items()
                 if isinstance(val, np.ndarray)
             })
 
             self.test_data[kfold].model_validate({
-                key: val[inds_test, :, :] if val.ndim == n_axes else val[inds_test, :]
+                key: val[inds_test, ...]
                 for key, val in self.data.model_dump().items()
                 if isinstance(val, np.ndarray)
             })

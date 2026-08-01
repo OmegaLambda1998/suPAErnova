@@ -68,6 +68,12 @@ IS_ROCM = any(
     for gpu in GPUS
 )
 TF_CTX = tf.device("/CPU:0") if IS_ROCM else nullcontext()
+if IS_ROCM:
+    # XLA command buffers use HIP graph capture, which is unstable on ROCm
+    # and crashes with `stream_id_ wasn't initialized` in hip_graph_internal.hpp.
+    os.environ["XLA_FLAGS"] = (
+        os.environ.get("XLA_FLAGS", "") + " --xla_gpu_enable_command_buffer="
+    ).strip()
 JIT_COMPILE = IS_GPU
 
 HUGE = tf.float16.max

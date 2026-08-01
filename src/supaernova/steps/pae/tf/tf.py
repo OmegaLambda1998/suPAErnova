@@ -1,5 +1,6 @@
 # Copyright 2025 Patrick Armstrong
 
+from supaernova.steps.pae.tf.photometry import photometry
 from typing import (
     TYPE_CHECKING,
     cast,
@@ -507,12 +508,18 @@ class TFPAEDecoder(ks.layers.Layer):
         sn_mask: tf.Tensor | None = None,
         spec_mask: tf.Tensor | None = None,
         wl_mask: tf.Tensor | None = None,
+        wavelength: tf.Tensor | None = None,
+        sigma: tf.Tensor | None = None,
+        throughput: tf.Tensor | None = None,
+        effective_wavelength: tf.Tensor | None = None,
+        spectra_mask: tf.Tensor | None = None,
+        phot_mask: tf.Tensor | None = None,
         training: bool | None = None,
         testing: bool | None = None,
     ) -> tf.Tensor:
         training = False if training is None else training
         testing = False if testing is None else testing
-        return super().__call__(
+        synth_amp = super().__call__(
             inputs,
             mask=mask,
             sn_mask=sn_mask,
@@ -521,6 +528,31 @@ class TFPAEDecoder(ks.layers.Layer):
             training=training,
             testing=testing,
         )
+
+        if not any(
+            v is None
+            for v in (
+                wavelength,
+                sigma,
+                throughput,
+                effective_wavelength,
+                spectra_mask,
+                phot_mask,
+            )
+        ):
+            (
+                synth_amp,
+                _,
+            ) = photometry(
+                wavelength,
+                synth_amp,
+                sigma,
+                throughput,
+                effective_wavelength,
+                spectra_mask,
+                phot_mask,
+            )
+        return synth_amp
 
 
 PAEMODELSTEP: "PAE"
@@ -557,6 +589,12 @@ class TFPAEModel(ks.Model):
         self.decoder: TFPAEDecoder = TFPAEDecoder(self.options, config.name)
         self.decoder.wl_dim = config.wl_dim
         self.decoder.colourlaw = config.colourlaw
+        self.decoder.input_wavelength = config.input_wavelength
+        self.decoder.input_sigma = config.input_sigma
+        self.decoder.input_throughput = config.input_throughput
+        self.decoder.input_effective_wavelength = config.input_effective_wavelength
+        self.decoder.input_spectra_mask = config.input_spectra_mask
+        self.decoder.input_phot_mask = config.input_phot_mask
 
         # --- Training ---
         self.built: bool = False
@@ -700,6 +738,12 @@ class TFPAEModel(ks.Model):
         sn_mask: tf.Tensor | None = None,
         spec_mask: tf.Tensor | None = None,
         wl_mask: tf.Tensor | None = None,
+        wavelength: tf.Tensor | None = None,
+        sigma: tf.Tensor | None = None,
+        throughput: tf.Tensor | None = None,
+        effective_wavelength: tf.Tensor | None = None,
+        spectra_mask: tf.Tensor | None = None,
+        phot_mask: tf.Tensor | None = None,
         training: bool | None = None,
         testing: bool | None = None,
     ) -> tuple[tf.Tensor, tf.Tensor]:
@@ -727,9 +771,16 @@ class TFPAEModel(ks.Model):
             sn_mask=sn_mask,
             spec_mask=spec_mask,
             wl_mask=wl_mask,
+            wavelength=wavelength,
+            sigma=sigma,
+            throughput=throughput,
+            effective_wavelength=effective_wavelength,
+            spectra_mask=spectra_mask,
+            phot_mask=phot_mask,
             training=training,
             testing=testing,
         )
+
         return encoded, decoded
 
     @override
@@ -741,6 +792,12 @@ class TFPAEModel(ks.Model):
         sn_mask: "TensorLike | None" = None,
         spec_mask: "TensorLike | None" = None,
         wl_mask: "TensorLike | None" = None,
+        wavelength: tf.Tensor | None = None,
+        sigma: tf.Tensor | None = None,
+        throughput: tf.Tensor | None = None,
+        effective_wavelength: tf.Tensor | None = None,
+        spectra_mask: tf.Tensor | None = None,
+        phot_mask: tf.Tensor | None = None,
         training: bool | None = None,
         testing: bool | None = None,
     ) -> tuple[tf.Tensor, tf.Tensor]:
@@ -758,12 +815,32 @@ class TFPAEModel(ks.Model):
             spec_mask = tf.convert_to_tensor(spec_mask)
         if wl_mask is not None:
             wl_mask = tf.convert_to_tensor(wl_mask)
+        if wavelength is not None:
+            wavelength = tf.convert_to_tensor(wavelength, dtype=inputs.dtype)
+        if sigma is not None:
+            sigma = tf.convert_to_tensor(sigma, dtype=inputs.dtype)
+        if throughput is not None:
+            throughput = tf.convert_to_tensor(throughput, dtype=inputs.dtype)
+        if effective_wavelength is not None:
+            effective_wavelength = tf.convert_to_tensor(
+                effective_wavelength, dtype=inputs.dtype
+            )
+        if spectra_mask is not None:
+            spectra_mask = tf.convert_to_tensor(spectra_mask, dtype=inputs.dtype)
+        if phot_mask is not None:
+            phot_mask = tf.convert_to_tensor(phot_mask, dtype=inputs.dtype)
         return super().__call__(
             inputs,
             mask=mask,
             sn_mask=sn_mask,
             spec_mask=spec_mask,
             wl_mask=wl_mask,
+            wavelength=wavelength,
+            sigma=sigma,
+            throughput=throughput,
+            effective_wavelength=effective_wavelength,
+            spectra_mask=spectra_mask,
+            phot_mask=phot_mask,
             training=training,
             testing=testing,
         )
@@ -1009,13 +1086,37 @@ class TFPAEModel(ks.Model):
 
         # --- Setup Data ---
         if dummy:
-            (phase, amplitude, d_amplitude, mask, sn_mask, spec_mask, wl_mask) = (
-                tf.convert_to_tensor(d) for d in data
-            )
+            (
+                phase,
+                amplitude,
+                d_amplitude,
+                mask,
+                sn_mask,
+                spec_mask,
+                wl_mask,
+                wavelength,
+                sigma,
+                throughput,
+                effective_wavelength,
+                spectra_mask,
+                phot_mask,
+            ) = (tf.convert_to_tensor(d) for d in data)
         else:
-            (phase, amplitude, d_amplitude, mask, sn_mask, spec_mask, wl_mask) = (
-                self.prep_data_per_epoch(data)
-            )
+            (
+                phase,
+                amplitude,
+                d_amplitude,
+                mask,
+                sn_mask,
+                spec_mask,
+                wl_mask,
+                wavelength,
+                sigma,
+                throughput,
+                effective_wavelength,
+                spectra_mask,
+                phot_mask,
+            ) = self.prep_data_per_epoch(data)
 
         pae_input = tf.concat((phase, amplitude), axis=-1)
 
@@ -1026,6 +1127,12 @@ class TFPAEModel(ks.Model):
                 sn_mask=sn_mask,
                 spec_mask=spec_mask,
                 wl_mask=wl_mask,
+                wavelength=wavelength,
+                sigma=sigma,
+                throughput=throughput,
+                effective_wavelength=effective_wavelength,
+                spectra_mask=spectra_mask,
+                phot_mask=phot_mask,
                 training=training,
                 testing=testing,
             )
@@ -1069,9 +1176,22 @@ class TFPAEModel(ks.Model):
         testing = True
 
         # --- Setup Data ---
-        (phase, _d_phase, amplitude, d_amplitude, mask, sn_mask, spec_mask, wl_mask) = (
-            data[0]
-        )
+        (
+            phase,
+            _d_phase,
+            amplitude,
+            d_amplitude,
+            mask,
+            sn_mask,
+            spec_mask,
+            wl_mask,
+            wavelength,
+            sigma,
+            throughput,
+            effective_wavelength,
+            spectra_mask,
+            phot_mask,
+        ) = data[0]
         pae_input = tf.concat((phase, amplitude), axis=-1)
 
         latents, pred_amplitude = self(
@@ -1080,6 +1200,12 @@ class TFPAEModel(ks.Model):
             sn_mask=sn_mask,
             spec_mask=spec_mask,
             wl_mask=wl_mask,
+            wavelength=wavelength,
+            sigma=sigma,
+            throughput=throughput,
+            effective_wavelength=effective_wavelength,
+            spectra_mask=spectra_mask,
+            phot_mask=phot_mask,
             training=training,
             testing=testing,
         )
@@ -1307,6 +1433,12 @@ class TFPAEModel(ks.Model):
             self.stage.sn_mask,
             self.stage.spec_mask,
             self.stage.wl_mask,
+            self.stage.data.wavelength,
+            self.stage.data.sigma,
+            self.stage.data.throughput,
+            self.stage.data.effective_wavelength,
+            self.stage.data.spectra_mask,
+            self.stage.data.phot_mask,
         )
         self.stage.data.clear()
 
@@ -1347,6 +1479,12 @@ class TFPAEModel(ks.Model):
             self.stage.train_sn_mask,
             self.stage.train_spec_mask,
             self.stage.train_wl_mask,
+            self.stage.train_data.wavelength,
+            self.stage.train_data.sigma,
+            self.stage.train_data.throughput,
+            self.stage.train_data.effective_wavelength,
+            self.stage.train_data.spectra_mask,
+            self.stage.train_data.phot_mask,
         )
         self.stage.train_data.clear()
 
@@ -1387,6 +1525,12 @@ class TFPAEModel(ks.Model):
             self.stage.test_sn_mask,
             self.stage.test_spec_mask,
             self.stage.test_wl_mask,
+            self.stage.test_data.wavelength,
+            self.stage.test_data.sigma,
+            self.stage.test_data.throughput,
+            self.stage.test_data.effective_wavelength,
+            self.stage.test_data.spectra_mask,
+            self.stage.test_data.phot_mask,
         )
         self.stage.test_data.clear()
 
@@ -1427,6 +1571,12 @@ class TFPAEModel(ks.Model):
             self.stage.val_sn_mask,
             self.stage.val_spec_mask,
             self.stage.val_wl_mask,
+            self.stage.val_data.wavelength,
+            self.stage.val_data.sigma,
+            self.stage.val_data.throughput,
+            self.stage.val_data.effective_wavelength,
+            self.stage.val_data.spectra_mask,
+            self.stage.val_data.phot_mask,
         )
         self.stage.val_data.clear()
 
@@ -1504,6 +1654,12 @@ class TFPAEModel(ks.Model):
                     sn_mask=self.stage.sn_mask,
                     spec_mask=self.stage.spec_mask,
                     wl_mask=self.stage.wl_mask,
+                    wavelength=self.stage.data.wavelength,
+                    sigma=self.stage.data.sigma,
+                    throughput=self.stage.data.throughput,
+                    effective_wavelength=self.stage.data.effective_wavelength,
+                    spectra_mask=self.stage.data.spectra_mask,
+                    phot_mask=self.stage.data.phot_mask,
                 )
                 if self.stage.debug:
                     self.log.debug("Trainable variables:")
@@ -1571,7 +1727,19 @@ class TFPAEModel(ks.Model):
     def prep_data_per_epoch(
         self, data: tuple["TensorLike", ...]
     ) -> tuple[
-        tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
     ]:
         (
             phase,
@@ -1582,6 +1750,12 @@ class TFPAEModel(ks.Model):
             sn_mask,
             spec_mask,
             wl_mask,
+            wavelength,
+            sigma,
+            throughput,
+            effective_wavelength,
+            spectra_mask,
+            phot_mask,
         ) = data[0]
 
         # === Randomised Data Offsets ===
@@ -1698,12 +1872,38 @@ class TFPAEModel(ks.Model):
             )  # [batch, n_total, 1]
             mask &= shuffled_mask
 
-        return (phase, amplitude, d_amplitude, mask, sn_mask, spec_mask, wl_mask)
+        return (
+            phase,
+            amplitude,
+            d_amplitude,
+            mask,
+            sn_mask,
+            spec_mask,
+            wl_mask,
+            wavelength,
+            sigma,
+            throughput,
+            effective_wavelength,
+            spectra_mask,
+            phot_mask,
+        )
 
     def recon_error(
         self,
         data: tuple[
-            tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
+            tf.Tensor,
         ],
         min_phase: float,
         max_phase: float,
@@ -1712,7 +1912,21 @@ class TFPAEModel(ks.Model):
         weighted_error: bool = False,
         measurement_error: bool = False,
     ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-        (phase, amp_true, d_amp, mask, sn_mask, spec_mask, wl_mask) = data
+        (
+            phase,
+            amp_true,
+            d_amp,
+            mask,
+            sn_mask,
+            spec_mask,
+            wl_mask,
+            wavelength,
+            sigma,
+            throughput,
+            effective_wavelength,
+            spectra_mask,
+            phot_mask,
+        ) = data
         phase = tf.convert_to_tensor(phase, dtype=tf.float32)
         amp_true = tf.convert_to_tensor(amp_true, dtype=tf.float32)
         d_amp = tf.convert_to_tensor(d_amp, dtype=tf.float32)
@@ -1720,6 +1934,14 @@ class TFPAEModel(ks.Model):
         sn_mask = tf.convert_to_tensor(sn_mask, dtype=tf.bool)
         spec_mask = tf.convert_to_tensor(spec_mask, dtype=tf.bool)
         wl_mask = tf.convert_to_tensor(wl_mask, dtype=tf.bool)
+        wavelength = tf.convert_to_tensor(wavelength, dtype=tf.float32)
+        sigma = tf.convert_to_tensor(sigma, dtype=tf.float32)
+        throughput = tf.convert_to_tensor(throughput, dtype=tf.float32)
+        effective_wavelength = tf.convert_to_tensor(
+            effective_wavelength, dtype=tf.float32
+        )
+        spectra_mask = tf.convert_to_tensor(spectra_mask, dtype=tf.float32)
+        phot_mask = tf.convert_to_tensor(phot_mask, dtype=tf.float32)
 
         time = (phase - min_phase) / (max_phase - min_phase)
 
@@ -1730,6 +1952,12 @@ class TFPAEModel(ks.Model):
             sn_mask=sn_mask,
             spec_mask=spec_mask,
             wl_mask=wl_mask,
+            wavelength=wavelength,
+            sigma=sigma,
+            throughput=throughput,
+            effective_wavelength=effective_wavelength,
+            spectra_mask=spectra_mask,
+            phot_mask=phot_mask,
         )
         wl_dim = tf.shape(mask)[-1]
 

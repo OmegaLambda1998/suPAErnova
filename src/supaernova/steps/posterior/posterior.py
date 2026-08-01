@@ -458,6 +458,11 @@ class Posterior(ModelStep[PosteriorConfig]):
             phase = subset_data.phase
             amplitude = subset_data.amplitude
             sigma = subset_data.sigma
+            wavelength = subset_data.wavelength
+            throughput = subset_data.throughput
+            effective_wavelength = subset_data.effective_wavelength
+            spectra_mask = subset_data.spectra_mask
+            phot_mask = subset_data.phot_mask
             mask = getattr(stage, f"{stage_subset}mask")
             sn_mask = getattr(stage, f"{stage_subset}sn_mask")
             spec_mask = getattr(stage, f"{stage_subset}spec_mask")
@@ -472,6 +477,12 @@ class Posterior(ModelStep[PosteriorConfig]):
                     sn_mask,
                     spec_mask,
                     wl_mask,
+                    wavelength,
+                    sigma,
+                    throughput,
+                    effective_wavelength,
+                    spectra_mask,
+                    phot_mask,
                 ),
                 pae.min_phase,
                 pae.max_phase,
@@ -1454,6 +1465,12 @@ class Posterior(ModelStep[PosteriorConfig]):
                     sn_mask=input_sn_mask,
                     spec_mask=input_spec_mask,
                     wl_mask=input_wl_mask,
+                    wavelength=data.wavelength,
+                    sigma=data.sigma,
+                    throughput=data.throughput,
+                    effective_wavelength=data.effective_wavelength,
+                    spectra_mask=data.spectra_mask,
+                    phot_mask=data.phot_mask,
                 )
                 pae_pae_latents = pae_pae_latents[:, 0, :][None, ...]
 
