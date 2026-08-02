@@ -82,7 +82,7 @@ class Data(Step[DataConfig]):
         self.colourlaw: npt.NDArray[float] | None
         self.cosmological_model: cosmo.FLRW
         self.salt_model: sncosmo.SALT2Source | sncosmo.SALT3Source
-        self.filters: list[Filter]
+        self.filters: dict[str, Filter]
 
         # Train / Test Split
         self.splits: dict[str, dict[Literal["train | test | validate"], list[str]]]
@@ -154,10 +154,11 @@ class Data(Step[DataConfig]):
         else:
             self.salt_model = sncosmo.get_source(salt_model)
 
-        self.filters = [
+        filters = [
             Filter(resolve_path(path, relative_path=self.data_dir))
             for path in self.options.filters or []
         ]
+        self.filters = {filt.name: filt for filt in filters}
 
         # === Config Variables ===
 
@@ -495,8 +496,14 @@ class Data(Step[DataConfig]):
             "c": float,
             "path": str,
             "hubble_resid": float,
+            "filt": str,
         }
         sne_data = pd.read_csv(self.meta, header=0, dtype=sne_dtypes)
+        if "filt" not in sne_data.columns:
+            sne_data["filt"] = None
+        else:
+            sne_data.filt = sne_data.filt.where(sne_data.filt.notna(), None)
+
         # Update paths relative to self.meta
         sne_data.path = sne_data.path.apply(
             lambda path: str(resolve_path(Path(path), relative_path=self.meta.parent))
@@ -563,6 +570,7 @@ class Data(Step[DataConfig]):
             "flag",
             "wl_mask_min",
             "wl_mask_max",
+            "filt",
         ]
         spectra = sne_data[spec_cols].reset_index(drop=True)
 
@@ -596,6 +604,7 @@ class Data(Step[DataConfig]):
         #       flag:           int       = Quality of spectra
         #       wl_mask_min:    float     = Min wavelength of spectra
         #       wl_mask_max:    float     = Max wavelength of spectra
+        #       filter:         str|None  = Photometric filter to assume for this spectrum
         #       data:           DataFrame = Spectral data with columns:
         #
         #           wave:  Series[float]  = wavelength in AA
@@ -658,7 +667,13 @@ class Data(Step[DataConfig]):
         # Wavelength grid
         # Since all spectra share the same wavelength grid
         # Just get the wavelength grid of the first spectrum
-        self.wavelength = self.sne["spectra"][0]["data"][0]["wave"].to_numpy()
+        self.wavelength = self.sne["spectra"][
+            np.argmax([
+                max([len(data["wave"]) for data in spectra.data])
+                for spectra in self.sne["spectra"]
+            ])
+        ]["data"][0]["wave"].to_numpy()
+        # self.wavelength = self.sne["spectra"][0]["data"][0]["wave"].to_numpy()
         self.wl_dim = len(self.wavelength)
         self.log.debug(f"Length of wavelength grid: {self.wl_dim}")
 
@@ -733,6 +748,7 @@ class Data(Step[DataConfig]):
             "phase": ("phase", np.float32(-np.inf)),
             "wl_mask_min": ("wl_mask_min", np.float32(np.inf)),
             "wl_mask_max": ("wl_mask_max", np.float32(-np.inf)),
+            "filt": ("filt", None),
         }
 
         for data_key, (spectra_key, padding) in spectra_params.items():
@@ -767,46 +783,6 @@ class Data(Step[DataConfig]):
             if len(v.shape) == n_axes:
                 data[k] = v[..., np.newaxis]
 
-        # def nearest_mask[T: np.number[Any]](
-        #     arr: "npt.NDArray[T]",
-        #     min_val: "T | npt.NDArray[T]",
-        #     max_val: "T | npt.NDArray[T]",
-        # ) -> "npt.NDArray[bool]":
-        #     if not isinstance(min_val, np.ndarray):
-        #         min_val = cast("npt.NDArray[T]", np.array(min_val))
-        #     if not isinstance(max_val, np.ndarray):
-        #         max_val = cast("npt.NDArray[T]", np.array(max_val))
-        #     base_mask = (min_val <= arr) & (arr <= max_val)
-        #
-        #     # Pad left and right
-        #     pad_left = np.pad(
-        #         base_mask[:, :, :-1],
-        #         ((0, 0), (0, 0), (1, 0)),
-        #         mode="constant",
-        #         constant_values=False,
-        #     )
-        #     pad_right = np.pad(
-        #         base_mask[:, :, 1:],
-        #         ((0, 0), (0, 0), (0, 1)),
-        #         mode="constant",
-        #         constant_values=False,
-        #     )
-        #
-        #     # Compute distances to the boundaries
-        #     dist_to_min = np.abs(arr - min_val)
-        #     dist_to_max = np.abs(arr - max_val)
-        #
-        #     # Left edge logic
-        #     expand_left = (
-        #         (~base_mask) & pad_right & (dist_to_min < np.roll(dist_to_min, -1))
-        #     )
-        #     # Right edge logic
-        #     expand_right = (
-        #         (~base_mask) & pad_left & (dist_to_max < np.roll(dist_to_max, 1))
-        #     )
-        #     # Combine the masks
-        #     return base_mask | expand_left | expand_right
-
         # Create a mask of wavelength outside of the wavelength limits
         data["mask"] = np.full(
             (self.sn_dim, self.spec_dim, self.wl_dim), fill_value=True
@@ -833,22 +809,29 @@ class Data(Step[DataConfig]):
             valid_phase_mask & (data["phase"] > -np.inf) & (data["phase"] < np.inf)
         )
         data["mask"] &= spec_mask
-        data["spectra_mask"] = np.ones_like(spec_mask)
 
         self.n_phot = self.options.n_phot if self.options.n_phot >= 0 else self.sn_dim
         self.n_spectra = (
             self.options.n_spectra if self.options.n_spectra >= 0 else self.sn_dim
         )
-        # Rank each SN's spectra by |phase|, closest to peak first, same as sim.py
-        phase_rank = np.argsort(
-            np.argsort(np.abs(data["phase"][..., 0]), axis=-1), axis=-1
-        )
-        data["spectra_mask"] = (phase_rank < self.n_spectra).astype(spec_mask.dtype)[
-            ..., None
-        ]
-        data["phot_mask"] = (phase_rank < self.n_phot).astype(spec_mask.dtype)[
-            ..., None
-        ]
+        no_filt_defined = pd.isna(data["filt"]).all()
+        if no_filt_defined:
+            # Rank each SN's spectra by |phase|, closest to peak first, same as sim.py
+            phase_rank = np.argsort(
+                np.argsort(np.abs(data["phase"][..., 0]), axis=-1), axis=-1
+            )
+            data["spectra_mask"] = (phase_rank < self.n_spectra).astype(
+                spec_mask.dtype
+            )[..., None]
+            data["phot_mask"] = (phase_rank < self.n_phot).astype(spec_mask.dtype)[
+                ..., None
+            ]
+        else:
+            # Rows with a `filt` value are photometric observations in that filter,
+            # rows without one are genuine spectra
+            is_phot = ~pd.isna(data["filt"][..., 0])
+            data["phot_mask"] = is_phot.astype(spec_mask.dtype)[..., None]
+            data["spectra_mask"] = (~is_phot).astype(spec_mask.dtype)[..., None]
 
         self.log.debug(f"Valid Phases ({self.min_phase} <= p <= {self.max_phase}):")
         self.get_unmasked_dims(data["mask"])
@@ -944,7 +927,8 @@ class Data(Step[DataConfig]):
             np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
         )
         wl = data["wavelength"]
-        for i, f in enumerate(self.filters):
+        filter_names = list(self.filters.keys())
+        for i, f in enumerate(self.filters.values()):
             tp = np.interp(wl, f.wavelength, f.throughput)
             throughput[..., i] = tp
 
@@ -953,6 +937,24 @@ class Data(Step[DataConfig]):
                 == np.min(np.abs(wl - f.effective_wavelength))
             ).astype(tp.dtype)
             effective_wavelength[..., i] = ef
+
+        if not no_filt_defined:
+            # Each photometric row is a real observation in a single filter, so
+            # restrict its throughput/effective_wavelength to that filter only.
+            # Rows with no `filt` (genuine spectra) are zeroed out here, but that's
+            # fine since phot_mask is 0 for them and throughput is never used.
+            filt = data["filt"][..., 0]
+            filter_row_mask = np.zeros(
+                (self.sn_dim, self.spec_dim, n_filters), dtype=throughput.dtype
+            )
+            for i, name in enumerate(filter_names):
+                filter_row_mask[..., i] = filt == name
+            print(throughput)
+            throughput = throughput * filter_row_mask[:, :, None, :]
+            print(throughput)
+            print(effective_wavelength)
+            effective_wavelength = effective_wavelength * filter_row_mask[:, :, None, :]
+            print(effective_wavelength)
 
         data["throughput"] = throughput
         data["effective_wavelength"] = effective_wavelength
@@ -971,6 +973,9 @@ class Data(Step[DataConfig]):
         amp[~data["mask"].astype(bool)] = 0
         data["amplitude"] = amp
         data["sigma"] = sigma
+
+        # Only needed temporarily, so delete before validating
+        del data["filt"]
 
         self.data.model_validate(data)
 
@@ -1183,6 +1188,9 @@ class DataStep(Variant[DataStepConfig, Data]):
                     if dataset:
                         data = data[0]
                     data.load()
+
+                    if data.wavelength.shape[0] == 0:
+                        continue
 
                     o.base_wl = self.bases[name]["wl"]
                     o.base_amp = self.bases[name]["amp"]
