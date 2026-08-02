@@ -193,8 +193,9 @@ class Data(Step[DataConfig]):
     @override
     def _run(self, *args: "Any", **kwargs: "Any") -> None:
         self.load_sne()
-        self.calculate_salt_flux()
         self.get_dims()
+        self.interpolate_photometry()
+        self.calculate_salt_flux()
         self.prepare_data_arrays()
         self.split_train_test()
 
@@ -677,6 +678,39 @@ class Data(Step[DataConfig]):
         self.wl_dim = len(self.wavelength)
         self.log.debug(f"Length of wavelength grid: {self.wl_dim}")
 
+    def interpolate_photometry(self) -> None:
+        self.log.debug(
+            "Shifting photometric data loaded from files onto the master wavelength grid"
+        )
+        for _, sn in self.sne.iterrows():
+            spectra_table = sn["spectra"]
+            for idx, spectra in spectra_table.iterrows():
+                filt_name = spectra["filt"]
+                if pd.isna(filt_name):
+                    continue
+
+                # Real photometric observations are reported at (approximately)
+                # their filter's throughput-weighted effective wavelength, which
+                # rarely lands exactly on a `self.wavelength` grid point. Shift
+                # the observation onto the nearest master grid bin, interpolating
+                # the observed flux/sigma onto it, and zero every other bin so
+                # the row matches the shape of a genuine spectrum.
+                filt = self.filters[filt_name]
+                raw = spectra["data"]
+                wl_ind = np.argmin(np.abs(self.wavelength - filt.effective_wavelength))
+                target_wavelength = self.wavelength[wl_ind]
+
+                flux = np.zeros_like(self.wavelength)
+                sigma = np.zeros_like(self.wavelength)
+                flux[wl_ind] = np.interp(target_wavelength, raw["wave"], raw["flux"])
+                sigma[wl_ind] = np.interp(target_wavelength, raw["wave"], raw["sigma"])
+
+                spectra_table.at[idx, "data"] = pd.DataFrame({
+                    "wave": self.wavelength,
+                    "flux": flux,
+                    "sigma": sigma,
+                })
+
     def prepare_data_arrays(self) -> None:
         self.log.debug("Preparing data arrays")
         # Each element of data is a 3D Array of shape (SNDim x SpecDim x DataDim) where:
@@ -949,30 +983,27 @@ class Data(Step[DataConfig]):
             )
             for i, name in enumerate(filter_names):
                 filter_row_mask[..., i] = filt == name
-            print(throughput)
             throughput = throughput * filter_row_mask[:, :, None, :]
-            print(throughput)
-            print(effective_wavelength)
             effective_wavelength = effective_wavelength * filter_row_mask[:, :, None, :]
-            print(effective_wavelength)
 
         data["throughput"] = throughput
         data["effective_wavelength"] = effective_wavelength
 
-        amp, sigma = photometry(
-            data["wavelength"],
-            data["amplitude"],
-            data["sigma"],
-            data["throughput"],
-            data["effective_wavelength"],
-            data["spectra_mask"],
-            data["phot_mask"],
-        )
-        amp = amp.numpy()
-        sigma = sigma.numpy()
-        amp[~data["mask"].astype(bool)] = 0
-        data["amplitude"] = amp
-        data["sigma"] = sigma
+        if no_filt_defined:
+            amp, sigma = photometry(
+                data["wavelength"],
+                data["amplitude"],
+                data["sigma"],
+                data["throughput"],
+                data["effective_wavelength"],
+                data["spectra_mask"],
+                data["phot_mask"],
+            )
+            amp = amp.numpy()
+            sigma = sigma.numpy()
+            amp[~data["mask"].astype(bool)] = 0
+            data["amplitude"] = amp
+            data["sigma"] = sigma
 
         # Only needed temporarily, so delete before validating
         del data["filt"]
