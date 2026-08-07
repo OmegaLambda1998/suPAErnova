@@ -147,7 +147,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         if not isinstance(variants, list):
             variants = [variants]
         for name in variants:
-            self._setup(*args, **{**kwargs, "variants": [name]})
+            if not self._is_setup(*args, **{**kwargs, "variants": [name]}):
+                self._setup(*args, **{**kwargs, "variants": [name]})
             self.variants[name].run(*args, **kwargs)
 
     @override
@@ -190,7 +191,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         if not isinstance(variants, list):
             variants = [variants]
         for name in variants:
-            self._run(*args, **{**kwargs, "variants": [name]})
+            if not self._has_run(*args, **{**kwargs, "variants": [name]}):
+                self._run(*args, **{**kwargs, "variants": [name]})
             self.variants[name].save(*args, **kwargs)
 
     @override
@@ -233,7 +235,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
         if not isinstance(variants, list):
             variants = [variants]
         for name in variants:
-            self._setup(*args, **{**kwargs, "variants": [name]})
+            if not self._is_setup(*args, **{**kwargs, "variants": [name]}):
+                self._setup(*args, **{**kwargs, "variants": [name]})
             self.variants[name].load(*args, **kwargs)
 
     @override
@@ -282,7 +285,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             variants = [variants]
         for name in variants:
             variant = self.variants[name]
-            self._load(*args, **{**kwargs, "variants": [name]})
+            if not self._is_loaded(*args, **{**kwargs, "variants": [name]}):
+                self._load(*args, **{**kwargs, "variants": [name]})
             variant.result(*args, **kwargs)
 
     @override
@@ -326,7 +330,8 @@ class Variant[C: VariantConfig, S: Step](Step[C]):
             variants = [variants]
         for name in variants:
             variant = self.variants[name]
-            self._result(*args, **{**kwargs, "variants": [name]})
+            if not self._has_results(*args, **{**kwargs, "variants": [name]}):
+                self._result(*args, **{**kwargs, "variants": [name]})
             if not variant.analysis.skip:
                 variant.analyse(*args, **kwargs)
 

@@ -523,7 +523,7 @@ class DispersionPlotter(Plotter):
             ]
             for hmc in hmcs
         ]
-        max_delta_p = np.vstack(max_delta_p)[..., pae_order][0]
+        max_delta_p = np.vstack(max_delta_p)[0]
         phase = (
             model.data.phase
             + (max_delta_p * (model.max_phase - model.min_phase))[:, None, None]
@@ -532,7 +532,16 @@ class DispersionPlotter(Plotter):
             np.arange(model.data.mask.shape[0]),
             np.argmin(np.abs(phase)[..., 0], axis=-1),
             0,
-        ][pae_order]
+        ]
+        phase_mask = np.repeat(
+            np.isclose(phase, pae_peak_phase[:, None, None]),
+            model.data.mask.shape[-1],
+            axis=-1,
+        ).astype(int)
+        pae_snr_norm_peak = SNR(
+            model.data, mask=phase_mask, normalise=True, reduce=lambda x: x
+        )[pae_order]
+        pae_peak_phase = pae_peak_phase[pae_order]
         peak_mask = np.abs(pae_peak_phase) < 5
         pae_mask &= peak_mask
 
@@ -557,7 +566,15 @@ class DispersionPlotter(Plotter):
             for z in pae_z
         ])[pae_order]
         pae_snr_norm = SNR(model.data, normalise=True, reduce=lambda x: x)[pae_order]
-        snr_mask = (pae_snr_norm - pae_snr_norm_z) / np.std(pae_snr_norm[pae_mask]) > -1
+        z_snr_mask = (pae_snr_norm - pae_snr_norm_z) / np.std(
+            pae_snr_norm[pae_mask]
+        ) > 0
+
+        peak_snr_mask = (pae_snr_norm_peak - pae_snr_norm) / np.std(
+            pae_snr_norm_peak[pae_mask]
+        ) > 0
+        snr_mask = z_snr_mask | peak_snr_mask
+
         pae_mask &= snr_mask
 
         pae_twins_mask = np.ones_like(pae_mask, dtype=bool)
