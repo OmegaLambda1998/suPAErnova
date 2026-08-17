@@ -1,10 +1,10 @@
 from typing import TYPE_CHECKING
 
-from supaernova._tf import tf, tfp, ks
+from supaernova._tf import tf, tfp, ks, JIT_COMPILE
 from supaernova.utils.tf import db, pp
 
 
-@tf.function
+@tf.function(jit_compile=JIT_COMPILE)
 def photometry_amplitude_setup(
     wavelength: tf.Tensor,
     throughput: tf.Tensor,
@@ -21,7 +21,7 @@ def photometry_amplitude_setup(
     return denom, amp_mask
 
 
-@tf.function
+@tf.function(jit_compile=JIT_COMPILE)
 def photometry_amplitude(
     wavelength: tf.Tensor,
     amplitude: tf.Tensor,
@@ -57,7 +57,7 @@ def photometry_amplitude(
     return phot_amp
 
 
-@tf.function
+@tf.function(jit_compile=JIT_COMPILE)
 def photometry_sigma_setup(
     wavelength: tf.Tensor,
     throughput: tf.Tensor,
@@ -79,7 +79,7 @@ def photometry_sigma_setup(
     return denom_sigma, sigma_mask
 
 
-@tf.function
+@tf.function(jit_compile=JIT_COMPILE)
 def photometry_sigma(
     wavelength: tf.Tensor,
     sigma: tf.Tensor,
@@ -126,7 +126,7 @@ def photometry_sigma(
     return phot_sigma
 
 
-@tf.function
+@tf.function(jit_compile=JIT_COMPILE)
 def photometry(
     wavelength: tf.Tensor,
     amplitude: tf.Tensor,

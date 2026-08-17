@@ -10,7 +10,17 @@ from typing import TYPE_CHECKING, override
 from tqdm import tqdm
 import numpy as np
 
-from supaernova._tf import HUGE, NPROC, ks, tf, tfb, tfd, tfp, clear_session
+from supaernova._tf import (
+    HUGE,
+    NPROC,
+    ks,
+    tf,
+    tfb,
+    tfd,
+    tfp,
+    clear_session,
+    JIT_COMPILE,
+)
 from supaernova.utils.tf import db, pp
 
 from .hmc import PosteriorHMCValue
@@ -1064,7 +1074,7 @@ class TFPosteriorModel(ks.Model):
             self.save_checkpoint(savepath, save_map=True, save_hmc=True)
         clear_session()
 
-    @tf.function(jit_compile=False)
+    @tf.function(jit_compile=JIT_COMPILE)
     def vals_and_grads(self, position: tf.Tensor) -> tf.Tensor:
         input_position = self.map.get_position(position)
         log_prob = self(
@@ -1891,7 +1901,7 @@ class TFPosteriorModel(ks.Model):
         #     log_accept_ratio,
         # )  # , log_prior, log_like, log_prob
 
-    @tf.function(jit_compile=False)
+    @tf.function(jit_compile=JIT_COMPILE)
     def sample_chain(
         self,
         position: tf.Tensor,

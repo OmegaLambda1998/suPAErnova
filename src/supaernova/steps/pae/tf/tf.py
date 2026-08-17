@@ -1641,7 +1641,7 @@ class TFPAEModel(ks.Model):
                     loss=loss,
                     metrics=self.metrics,
                     run_eagerly=self.stage.debug,
-                    jit_compile=JIT_COMPILE and not self.stage.debug,
+                    jit_compile=JIT_COMPILE,
                 )
 
                 phase = tf.convert_to_tensor(self.stage.data.time, dtype=tf.float32)

@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, cast, override
 
 from tqdm.keras import TqdmCallback
 
-from supaernova._tf import ks, tf, tfb, tfd, tfp, clear_session
+from supaernova._tf import ks, tf, tfb, tfd, tfp, clear_session, JIT_COMPILE
 from supaernova.utils.tf import db, pp
 
 if TYPE_CHECKING:
@@ -503,7 +503,7 @@ class TFNFlowModel(ks.Model):
                 optimizer=optimiser,
                 loss=loss,
                 run_eagerly=self.debug,
-                jit_compile=False,
+                jit_compile=JIT_COMPILE,
             )
 
             self.built = True
