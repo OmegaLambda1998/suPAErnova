@@ -346,22 +346,6 @@ class TFPosteriorModel(ks.Model):
             wl_mask=input_wl_mask,
             training=False,
         )
-        (
-            synth_amp,
-            _,
-        ) = photometry(
-            tf.repeat(input_wavelength[None, ...], synth_amp.shape[0], axis=0),
-            synth_amp,
-            tf.repeat(input_sigma[None, ...], synth_amp.shape[0], axis=0),
-            tf.repeat(input_throughput[None, ...], synth_amp.shape[0], axis=0),
-            tf.repeat(
-                input_effective_wavelength[None, ...], synth_amp.shape[0], axis=0
-            ),
-            tf.repeat(input_spectra_mask[None, ...], synth_amp.shape[0], axis=0),
-            tf.repeat(input_phot_mask[None, ...], synth_amp.shape[0], axis=0),
-            self.cached_amp,
-            self.cached_sigma,
-        )
 
         if self.map.train_delta_m and not self.pae.physical_latents:
             delta_m = tf.expand_dims(delta_m, axis=-2)
@@ -398,6 +382,26 @@ class TFPosteriorModel(ks.Model):
             tf.square(synth_scale * sigma_recon) + (input_sigma * input_sigma)
         )
 
+        (
+            synth_amp,
+            synth_sigma,
+        ) = photometry(
+            tf.repeat(input_wavelength[None, ...], synth_amp.shape[0], axis=0),
+            synth_amp,
+            synth_sigma,
+            tf.repeat(input_throughput[None, ...], synth_amp.shape[0], axis=0),
+            tf.repeat(
+                input_effective_wavelength[None, ...], synth_amp.shape[0], axis=0
+            ),
+            tf.repeat(input_spectra_mask[None, ...], synth_amp.shape[0], axis=0),
+            tf.repeat(input_phot_mask[None, ...], synth_amp.shape[0], axis=0),
+            self.cached_amp,
+            self.cached_sigma,
+        )
+
+        # Set missing values to 0 for all times
+        synth_amp = tf.where(posterior_mask, synth_amp, tf.zeros_like(synth_amp))
+
         # Set missing values to 1 for all times
         synth_sigma = tf.where(posterior_mask, synth_sigma, tf.ones_like(synth_sigma))
 
@@ -405,7 +409,6 @@ class TFPosteriorModel(ks.Model):
 
         # Set missing values to 0 for all times
         amp = tf.where(posterior_mask, input_amp, tf.zeros_like(input_amp))
-        # amp = input_amp
         log_likelihood_wl = likelihood.log_prob(amp)
 
         log_likelihood_spec_num = tf.reduce_sum(
