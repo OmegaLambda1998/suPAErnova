@@ -826,9 +826,11 @@ class TFPAEModel(ks.Model):
                 effective_wavelength, dtype=inputs.dtype
             )
         if spectra_mask is not None:
-            spectra_mask = tf.convert_to_tensor(spectra_mask, dtype=inputs.dtype)
+            spectra_mask = tf.cast(
+                tf.convert_to_tensor(spectra_mask), dtype=inputs.dtype
+            )
         if phot_mask is not None:
-            phot_mask = tf.convert_to_tensor(phot_mask, dtype=inputs.dtype)
+            phot_mask = tf.cast(tf.convert_to_tensor(phot_mask), dtype=inputs.dtype)
         return super().__call__(
             inputs,
             mask=mask,
