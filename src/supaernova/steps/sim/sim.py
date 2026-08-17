@@ -271,11 +271,12 @@ class Sim(Step[SimConfig]):
         wavelengths = synth_wl[0, 0, :]
         wstep = (wavelengths[-1] - wavelengths[0]) / len(wavelengths)
 
-        real_amp = np.clip(real_data.amplitude, 0, np.inf)
         with np.errstate(divide="ignore", invalid="ignore"):
             point_ratio = np.where(
                 data_mask,
-                real_amp * real_amp / (real_data.sigma * real_data.sigma),
+                real_data.amplitude
+                * real_data.amplitude
+                / (real_data.sigma * real_data.sigma),
                 0.0,
             )
         point_ratio = np.where(np.isfinite(point_ratio), point_ratio, 0.0)
