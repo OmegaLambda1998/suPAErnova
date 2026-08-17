@@ -103,6 +103,7 @@ class TFPosteriorModel(ks.Model):
                 self.data_wavelength[..., None], self.data_throughput.shape[-1], axis=-1
             ),
             self.data_throughput,
+            self.cached_amp,
         )
 
         self.data_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_mask")

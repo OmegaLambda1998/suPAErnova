@@ -61,20 +61,19 @@ def photometry_amplitude(
 def photometry_sigma_setup(
     wavelength: tf.Tensor,
     throughput: tf.Tensor,
+    cached_amp: tuple[tf.Tensor, tf.Tensor] | None = None,
 ) -> tuple[tf.Tensor, tf.Tensor]:
-    wavelength = tf.cast(wavelength, tf.float32)
-    throughput = tf.cast(throughput, tf.float32)
-
-    denom_sigma = tfp.math.trapz((throughput * wavelength) ** 2, wavelength, axis=-2)[
-        ..., None, :
-    ]
-    sigma_mask = tf.cast(
-        tf.where(
-            denom_sigma == 0, tf.zeros_like(denom_sigma), tf.ones_like(denom_sigma)
-        ),
-        tf.bool,
-    )
-    denom_sigma = tf.where(denom_sigma == 0, tf.ones_like(denom_sigma), denom_sigma)
+    # phot_amp is a weighted mean with weight w = throughput * wavelength, so
+    # the variance of that mean is sum(w_i^2 sigma_i^2) / sum(w_i)^2 - the
+    # denominator is the *square of the amplitude's denom*, not a separate
+    # integral of the squared weight (which would instead give a weighted
+    # average of sigma^2 that never shrinks with more integrated pixels).
+    if cached_amp is None:
+        denom, amp_mask = photometry_amplitude_setup(wavelength, throughput)
+    else:
+        denom, amp_mask = cached_amp
+    denom_sigma = denom**2
+    sigma_mask = amp_mask
 
     return denom_sigma, sigma_mask
 
@@ -87,11 +86,14 @@ def photometry_sigma(
     effective_wavelength: tf.Tensor,
     spec_mask: tf.Tensor,
     phot_mask: tf.Tensor,
+    cached_amp: tuple[tf.Tensor, tf.Tensor] | None = None,
     cached: tuple[tf.Tensor, tf.Tensor] | None = None,
 ) -> tf.Tensor:
 
     if cached is None:
-        denom_sigma, sigma_mask = photometry_sigma_setup(wavelength, throughput)
+        denom_sigma, sigma_mask = photometry_sigma_setup(
+            wavelength, throughput, cached_amp
+        )
     else:
         denom_sigma, sigma_mask = cached
 
@@ -198,6 +200,7 @@ def photometry(
         effective_wavelength,
         spec_mask,
         phot_mask,
+        cached_amp,
         cached_sigma,
     )
 
