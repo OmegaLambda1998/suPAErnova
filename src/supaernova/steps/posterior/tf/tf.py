@@ -355,7 +355,7 @@ class TFPosteriorModel(ks.Model):
             bias = tf.expand_dims(bias, axis=-2)
             synth_amp += bias
 
-        if self.map.train_delta_p:  # and not self.pae.physical_latents:
+        if self.map.train_delta_p and not self.pae.physical_latents:
             delta_p = tf.expand_dims(delta_p, axis=-2)
             phase += delta_p
 
