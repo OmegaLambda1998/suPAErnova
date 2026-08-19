@@ -1,3 +1,4 @@
+import copy
 from typing import TYPE_CHECKING, Any, Literal
 from pathlib import Path
 
@@ -46,7 +47,8 @@ class DispersionPlotter(Plotter):
     ) -> (
         tuple[
             tuple[float, float, float, float],
-            tuple[float, float, float, float] | None,
+            tuple[float, float, float, float],
+            tuple[float, float, float, float],
             tuple[float, float, float, float] | None,
             tuple[float, float, float, float] | None,
             tuple[float, float, float, float],
@@ -493,37 +495,29 @@ class DispersionPlotter(Plotter):
             + pae_magshift_error * pae_magshift_error
         )
 
-        # # RHat < 1.2
-        # pae_r_hat = np.vstack(pae_r_hat)[..., pae_order, :]
-        # print(pae_r_hat)
-        # r_hat_mask = (
-        #     np.where(
-        #         pae_mask, np.median(pae_r_hat, axis=-1), np.inf * np.ones_like(pae_mask)
-        #     )
-        #     < 1.2
-        # )
-        # print(
-        #     np.where(
-        #         pae_mask, np.median(pae_r_hat, axis=-1), np.inf * np.ones_like(pae_mask)
-        #     )
-        # )
-        # pae_mask &= r_hat_mask
-        # print(np.count_nonzero(pae_mask))
+        # === SNPAE Mask ===
+        snpae_mask = np.ones_like(pae_mask)
+        snpae_mask &= pae_mask
 
-        # Spectrum within 5 days of max *after accounting for DeltaP*
-        max_delta_p = [
-            hmc.hmc.delta_p[
-                np.argmin(
-                    np.abs(
-                        hmc.hmc.log_prob - np.max(hmc.hmc.log_prob, axis=0)[None, ...]
-                    ),
-                    axis=0,
+        # === UMask ===
+        max_us = pae_us[0]
+        u_mask = np.all(
+            (max_us > model.u_latent_bounds[0]) & (max_us < model.u_latent_bounds[-1]),
+            axis=-1,
+        )
+        snpae_mask &= u_mask
+
+        # === Peak Mask ===
+        max_delta_p = hmcs[0].hmc.delta_p[
+            np.argmin(
+                np.abs(
+                    hmcs[0].hmc.log_prob
+                    - np.max(hmcs[0].hmc.log_prob, axis=0)[None, ...]
                 ),
-                np.arange(hmc.hmc.delta_p.shape[-1]),
-            ]
-            for hmc in hmcs
+                axis=0,
+            ),
+            np.arange(hmcs[0].hmc.delta_p.shape[-1]),
         ]
-        max_delta_p = np.vstack(max_delta_p)[0]
         phase = (
             model.data.phase
             + (max_delta_p * (model.max_phase - model.min_phase))[:, None, None]
@@ -532,50 +526,9 @@ class DispersionPlotter(Plotter):
             np.arange(model.data.mask.shape[0]),
             np.argmin(np.abs(phase)[..., 0], axis=-1),
             0,
-        ]
-        phase_mask = np.repeat(
-            np.isclose(phase, pae_peak_phase[:, None, None]),
-            model.data.mask.shape[-1],
-            axis=-1,
-        ).astype(int)
-        pae_snr_norm_peak = SNR(
-            model.data, mask=phase_mask, normalise=True, reduce=lambda x: x
-        )[pae_order]
-        pae_peak_phase = pae_peak_phase[pae_order]
+        ][pae_order]
         peak_mask = np.abs(pae_peak_phase) < 5
-        pae_mask &= peak_mask
-
-        # SNR not an outlier for its redshift
-        pae_z = model.data.redshift[..., 0, 0]
-        z_mask = lambda z: np.repeat(
-            np.repeat(
-                ((pae_z > z - 0.005) & (pae_z < z + 0.005))[:, None, None],
-                model.data.mask.shape[-1],
-                axis=-1,
-            ),
-            model.data.mask.shape[-2],
-            axis=-2,
-        ).astype(int)
-        pae_snr_norm_z = np.array([
-            SNR(
-                model.data,
-                mask=z_mask(z),
-                normalise=True,
-                reduce=lambda x: np.sum(x) / np.count_nonzero(x),
-            )
-            for z in pae_z
-        ])[pae_order]
-        pae_snr_norm = SNR(model.data, normalise=True, reduce=lambda x: x)[pae_order]
-        z_snr_mask = (pae_snr_norm - pae_snr_norm_z) / np.std(
-            pae_snr_norm[pae_mask]
-        ) > 0
-
-        peak_snr_mask = (pae_snr_norm_peak - pae_snr_norm) / np.std(
-            pae_snr_norm_peak[pae_mask]
-        ) > 0
-        snr_mask = z_snr_mask | peak_snr_mask
-
-        pae_mask &= snr_mask
+        snpae_mask &= peak_mask
 
         pae_twins_mask = np.ones_like(pae_mask, dtype=bool)
         pae_salt_mask = np.ones_like(pae_mask, dtype=bool)
@@ -589,7 +542,14 @@ class DispersionPlotter(Plotter):
                 df = twins[twins.name == name]
                 pae_twins_mask[ind] = df.mask_twins
                 pae_salt_mask[ind] = df.mask_salt
-            print(pae_names[np.logical_not(pae_twins_mask & pae_mask)])
+            print(
+                "SNPAE",
+                pae_names[np.logical_not(pae_twins_mask & snpae_mask) & snpae_mask],
+            )
+            print(
+                "Twins",
+                pae_names[np.logical_not(pae_twins_mask & snpae_mask) & pae_twins_mask],
+            )
 
         def _plot(
             x: "npt.NDArray[Any]",
@@ -749,11 +709,12 @@ class DispersionPlotter(Plotter):
         pae_yerr_upper = pae_weighted_amplitude_errs_upper
         no_plot_mask = None
         sn_plot_mask = pae_mask
+        snpae_plot_mask = snpae_mask
         twins_plot_mask = pae_twins_mask
         salt_plot_mask = pae_salt_mask
-        combined_plot_mask = pae_mask & pae_twins_mask & pae_salt_mask
+        combined_plot_mask = pae_mask & snpae_mask & pae_twins_mask & pae_salt_mask
         if np.count_nonzero(combined_plot_mask) == 0:
-            combined_plot_mask = pae_mask
+            combined_plot_mask = pae_mask & snpae_mask
 
         residual_max = np.log10(np.max(np.abs(pae_y[combined_plot_mask])))
         residual_scale_min = np.floor(residual_max)
@@ -910,23 +871,39 @@ class DispersionPlotter(Plotter):
                 names=twins_names,
             )
 
-            if twins is not None:
-                # === PAE Mask ===
-                fig, twins_ax, _ = _plot(
-                    twins_x,
-                    twins_y,
-                    twins_yerr,
-                    sn_plot_mask[pae_twins],
-                    fig,
-                    twins_ax,
-                    "brown",
-                    0.25,
-                    "Twins PAE Mask",
-                    residual_bins=residual_bins,
-                    pull_bins=pull_bins,
-                    names=twins_names,
-                )
+            # === PAE Mask ===
+            fig, twins_ax, _ = _plot(
+                twins_x,
+                twins_y,
+                twins_yerr,
+                sn_plot_mask[pae_twins],
+                fig,
+                twins_ax,
+                "brown",
+                0.25,
+                "Twins PAE Mask",
+                residual_bins=residual_bins,
+                pull_bins=pull_bins,
+                names=twins_names,
+            )
 
+            # === SNPAE Mask ===
+            fig, twins_ax, _ = _plot(
+                twins_x,
+                twins_y,
+                twins_yerr,
+                snpae_plot_mask[pae_twins],
+                fig,
+                twins_ax,
+                "orange",
+                0.25,
+                "Twins SNPAE Mask",
+                residual_bins=residual_bins,
+                pull_bins=pull_bins,
+                names=twins_names,
+            )
+
+            if twins is not None:
                 # === Twins Mask ===
                 fig, twins_ax, _ = _plot(
                     twins_x,
@@ -1040,22 +1017,37 @@ class DispersionPlotter(Plotter):
                 pull_bins=pull_bins,
             )
 
-            if twins is not None:
-                # === PAE Mask ===
-                fig, legacy_ax, _ = _plot(
-                    legacy_x,
-                    legacy_y,
-                    legacy_yerr,
-                    sn_plot_mask,
-                    fig,
-                    legacy_ax,
-                    "brown",
-                    0.25,
-                    "Legacy PAE Mask",
-                    residual_bins=residual_bins,
-                    pull_bins=pull_bins,
-                )
+            # === PAE Mask ===
+            fig, legacy_ax, _ = _plot(
+                legacy_x,
+                legacy_y,
+                legacy_yerr,
+                sn_plot_mask,
+                fig,
+                legacy_ax,
+                "brown",
+                0.25,
+                "Legacy PAE Mask",
+                residual_bins=residual_bins,
+                pull_bins=pull_bins,
+            )
 
+            # === SNPAE Mask ===
+            fig, legacy_ax, _ = _plot(
+                legacy_x,
+                legacy_y,
+                legacy_yerr,
+                snpae_plot_mask,
+                fig,
+                legacy_ax,
+                "orange",
+                0.25,
+                "Legacy SNPAE Mask",
+                residual_bins=residual_bins,
+                pull_bins=pull_bins,
+            )
+
+            if twins is not None:
                 # === Twins Mask ===
                 fig, legacy_ax, _ = _plot(
                     legacy_x,
@@ -1121,27 +1113,47 @@ class DispersionPlotter(Plotter):
         )
 
         sn_mask_stats = None
+        snpae_mask_stats = None
         twins_mask_stats = None
         salt_mask_stats = None
-        if twins is not None:
-            # === PAE Mask ===
-            fig, pae_ax, sn_mask_stats = _plot(
-                pae_x,
-                pae_y,
-                pae_yerr,
-                sn_plot_mask,
-                fig,
-                pae_ax,
-                "brown",
-                0.25,
-                "PAE Mask",
-                residual_bins=residual_bins,
-                pull_bins=pull_bins,
-                yerr_lower=pae_yerr_lower,
-                yerr_upper=pae_yerr_upper,
-                tmp=True,
-            )
 
+        # === PAE Mask ===
+        fig, pae_ax, sn_mask_stats = _plot(
+            pae_x,
+            pae_y,
+            pae_yerr,
+            sn_plot_mask,
+            fig,
+            pae_ax,
+            "brown",
+            0.25,
+            "Data Mask",
+            residual_bins=residual_bins,
+            pull_bins=pull_bins,
+            yerr_lower=pae_yerr_lower,
+            yerr_upper=pae_yerr_upper,
+            tmp=True,
+        )
+
+        # === SNPAE Mask ===
+        fig, pae_ax, snpae_mask_stats = _plot(
+            pae_x,
+            pae_y,
+            pae_yerr,
+            snpae_plot_mask,
+            fig,
+            pae_ax,
+            "orange",
+            0.25,
+            "SNPAE Mask",
+            residual_bins=residual_bins,
+            pull_bins=pull_bins,
+            yerr_lower=pae_yerr_lower,
+            yerr_upper=pae_yerr_upper,
+            tmp=True,
+        )
+
+        if twins is not None:
             # === Twins Mask ===
             fig, pae_ax, twins_mask_stats = _plot(
                 pae_x,
@@ -1250,6 +1262,7 @@ class DispersionPlotter(Plotter):
         return (
             no_mask_stats,
             sn_mask_stats,
+            snpae_mask_stats,
             twins_mask_stats,
             salt_mask_stats,
             combined_mask_stats,
