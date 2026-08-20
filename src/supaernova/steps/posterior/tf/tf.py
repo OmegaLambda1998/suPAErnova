@@ -404,13 +404,16 @@ class TFPosteriorModel(ks.Model):
 
         # Set missing values to 1 for all times
         synth_sigma = tf.where(posterior_mask, synth_sigma, tf.ones_like(synth_sigma))
-        synth_sigma = tf.where(synth_sigma > 0, synth_sigma, tf.ones_like(synth_sigma))
+        sigma_mask = synth_sigma > 0
+        synth_sigma = tf.where(sigma_mask, synth_sigma, tf.ones_like(synth_sigma))
 
         likelihood = tfd.Normal(loc=synth_amp, scale=synth_sigma)
 
         # Set missing values to 0 for all times
+        synth_sigma = tf.where(sigma_mask, synth_sigma, tf.zeros_like(synth_sigma))
         amp = tf.where(posterior_mask, input_amp, tf.zeros_like(input_amp))
         log_likelihood_wl = likelihood.log_prob(amp)
+        log_likelihood_wl = tf.where(sigma_mask, log_likelihood_wl, 0)
 
         log_likelihood_spec_num = tf.reduce_sum(
             tf.where(
