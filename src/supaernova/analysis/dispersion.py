@@ -530,6 +530,20 @@ class DispersionPlotter(Plotter):
         peak_mask = np.abs(pae_peak_phase) < 5
         snpae_mask &= peak_mask
 
+        # === RHat Mask ===
+        unmasked_r_hat = hmcs[0].hmc.r_hat[pae_order, ...]
+        r_hat_mask = (
+            np.isfinite(unmasked_r_hat) & model.sn_mask[pae_order][..., 0, 0][:, None]
+        )
+        pae_r_hat = np.where(r_hat_mask, unmasked_r_hat, np.zeros_like(unmasked_r_hat))
+        flat_r_hat = pae_r_hat.ravel()
+        median_r_hat = np.median(flat_r_hat)
+        mad_r_hat = np.median(np.abs(flat_r_hat - median_r_hat))
+        nmad_r_hat = 0.6745 * (pae_r_hat - median_r_hat) / mad_r_hat
+        r_hat = np.max(nmad_r_hat, axis=-1)
+        r_hat_mask = r_hat < np.percentile(r_hat[snpae_mask], 99)
+        snpae_mask &= r_hat_mask
+
         pae_twins_mask = np.ones_like(pae_mask, dtype=bool)
         pae_salt_mask = np.ones_like(pae_mask, dtype=bool)
         if twins is not None:
