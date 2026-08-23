@@ -5,6 +5,33 @@ from supaernova.utils.tf import db, pp
 
 
 @tf.function(jit_compile=JIT_COMPILE)
+def _trapz_weights(wavelength: tf.Tensor) -> tf.Tensor:
+    """Per-point quadrature weights of the trapezoidal rule along the wavelength axis (-2).
+
+    trapz(f, x) = sum_i weights_i * f_i, so propagating independent per-point
+    variance through the integral requires weights_i**2 (Var[c*X] = c**2 *
+    Var[X]) applied to each squared term, not a second unweighted trapz call
+    over the already-squared integrand (which reapplies weights_i once more,
+    diluting the result by an extra, wavelength-spacing-dependent factor).
+
+    Returns:
+        The trapezoidal rule's per-point quadrature weights, same shape as `wavelength`.
+    """
+    dx = wavelength[..., 1:, :] - wavelength[..., :-1, :]
+    return (
+        tf.concat(
+            [
+                dx[..., :1, :],
+                dx[..., :-1, :] + dx[..., 1:, :],
+                dx[..., -1:, :],
+            ],
+            axis=-2,
+        )
+        * 0.5
+    )
+
+
+@tf.function(jit_compile=JIT_COMPILE)
 def photometry_amplitude_setup(
     wavelength: tf.Tensor,
     throughput: tf.Tensor,
@@ -97,11 +124,14 @@ def photometry_sigma(
     else:
         denom_sigma, sigma_mask = cached
 
-    # Variance propagation through the filter integration
+    # Variance propagation through the filter integration.
+    # phot_amp is `sum_i c_i * amp_i * w_i / denom` for trapezoidal weights
+    # c_i, so its variance is `sum_i c_i**2 * sigma_i**2 * w_i**2 / denom**2`.
+    # A plain trapz() call on the squared integrand would apply c_i again
+    # (not c_i**2), so the quadrature weights are squared explicitly here.
     # (n_sn, n_spec, 1, n_filters)
-    numer_sigma = tfp.math.trapz(
-        (sigma * throughput * wavelength) ** 2,
-        wavelength,
+    numer_sigma = tf.reduce_sum(
+        tf.square(_trapz_weights(wavelength) * sigma * throughput * wavelength),
         axis=-2,
     )[..., None, :]
 
