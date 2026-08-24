@@ -7,7 +7,10 @@ os.environ["KERAS_BACKEND"] = "tensorflow"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_GPU_THREAD_MODE"] = "gpu_private"
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
-os.environ["TF_GPU_ALLOCATOR"] = "tensorpool"
+# "tensorpool" is not a recognised TF_GPU_ALLOCATOR value (only "BFC" and
+# "cuda_malloc_async" are); it silently falls back to the default allocator.
+# Pin it explicitly to that default so CUDA and ROCm take the same path.
+os.environ["TF_GPU_ALLOCATOR"] = "BFC"
 
 # Number of CPUs available
 os.environ["TF_NUM_INTEROP_THREADS"] = "1"
@@ -32,6 +35,13 @@ from tensorflow_probability import (
 
 ks.utils.set_random_seed(1)
 tf.config.experimental.enable_op_determinism()
+
+# TF32 is an NVIDIA-only reduced-precision math mode (Ampere and newer) that
+# TensorFlow enables by default for fp32 matmul/conv. It has no ROCm
+# equivalent, so leaving it on makes CUDA runs systematically less precise
+# than ROCm runs for the exact same "float32" model/gradients. Disable it so
+# both backends compute fp32 ops at full precision.
+tf.config.experimental.enable_tensor_float_32_execution(False)
 
 GPUS = tf.config.list_physical_devices("GPU")
 tf.config.set_soft_device_placement(True)
