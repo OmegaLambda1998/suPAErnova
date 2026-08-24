@@ -2073,6 +2073,27 @@ class TFPosteriorModel(ks.Model):
         initial_position = self.map.unconstrain(initial_position)
         initial_position = tf.repeat(initial_position, repeats=self.n_walkers, axis=0)
 
+        # Give each walker its own copy of the (per-SN) step size, so
+        # DualAveragingStepSizeAdaptation adapts a fully independent step
+        # size per (walker, SN) pair instead of pooling every walker's
+        # accept ratio into one shared per-SN step size, where a single
+        # stuck/divergent walker could otherwise drag the step size down
+        # for every walker sampling that SN.
+        step_size = tf.repeat(
+            tf.expand_dims(step_size, axis=0), repeats=self.n_walkers, axis=0
+        )
+
+        if self.n_walkers > 1:
+            # Start each walker from an independently-jittered point
+            # around the MAP estimate (scaled by the per-SN step size)
+            # rather than every walker replicating the exact same
+            # starting position. Identical starts mean extra walkers are
+            # pseudo-replicates of a single trajectory rather than
+            # independent explorations of the posterior.
+            initial_position += tf.random.normal(
+                tf.shape(initial_position), stddev=step_size
+            )
+
         self.log.debug(
             f"With {self.n_burnin_steps} [{self.max_tree_depth * self.n_burnin_steps}] burn-in steps [samples] ({self.n_adaption_steps} [{self.max_tree_depth * self.n_adaption_steps}] of which will be used for step-size adaption) and {self.n_run_steps} [{self.max_tree_depth * self.n_run_steps}] run steps [samples], a maximum of {(self.n_burnin_steps + self.n_run_steps)} [{self.max_samples}] steps [samples] will be drawn per-walker for a max leapfrog depth of {self.max_tree_depth}. Across all {self.n_walkers} walkers a maximum of {self.n_walkers * (self.n_burnin_steps + self.n_run_steps)} [{self.n_walkers * self.max_samples}] steps [samples] will be drawn."
         )
