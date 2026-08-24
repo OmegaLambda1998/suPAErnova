@@ -5,6 +5,8 @@ from supaernova.steps.pae.tf.photometry import (
     photometry_sigma_setup,
 )
 import os
+import types
+import contextlib
 from typing import TYPE_CHECKING, override
 
 from tqdm import tqdm
@@ -30,7 +32,7 @@ if TYPE_CHECKING:
     from typing import Any, Literal
     from logging import Logger
     from pathlib import Path
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from numpy import typing as npt
     from tensorflow_probability.python.optimizer.lbfgs import LBfgsOptimizerResults
@@ -536,6 +538,127 @@ class TFPosteriorModel(ks.Model):
         if not hasattr(self, "map"):
             vars(self)["map"] = PosteriorMap(self)
 
+    def get_mask_sn(self) -> tf.Tensor:
+        """Compute the per-SN mask.
+
+        Returns:
+            Boolean tensor of shape `(sn_dim,)`, True where a SN has at
+            least one unmasked spec/wl point.
+        """
+        mask = self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask
+        mask_spec = tf.math.reduce_any(mask, axis=-1)
+        return tf.math.reduce_any(mask_spec, axis=-1)
+
+    @contextlib.contextmanager
+    def _restricted_to_valid_sn(self) -> "Iterator[tf.Tensor | None]":
+        """Temporarily shrink every sn_dim-indexed attribute to unmasked SNe only.
+
+        NUTS runs one shared `tf.while_loop` across the whole (n_walkers,
+        sn_dim) batch, so fully-masked SNe (whose log-prob is always -inf)
+        otherwise ride along for the full trajectory length of whichever
+        real SN's chain is slowest to U-turn, wasting the max_tree_depth
+        budget. Restricting the batch to real SNe for the scope of
+        sampling fixes that; callers must restore/scatter back afterwards.
+
+        Yields:
+            The indices of the valid (unmasked) SNe, or `None` if no SN is
+            masked (in which case nothing was changed).
+        """
+        valid_sn = self.get_mask_sn()
+        if bool(tf.reduce_all(valid_sn)):
+            yield None
+        else:
+            valid_indices = tf.where(valid_sn)[:, 0]
+
+            sn_attrs = (
+                "data_time",
+                "data_amplitude",
+                "data_sigma",
+                "data_wavelength",
+                "data_throughput",
+                "data_effective_wavelength",
+                "data_spectra_mask",
+                "data_phot_mask",
+                "data_mask",
+                "sn_mask",
+                "spec_mask",
+                "wl_mask",
+                "sigma_recon",
+            )
+            originals = {attr: getattr(self, attr) for attr in sn_attrs}
+            original_cached_amp = self.cached_amp
+            original_cached_sigma = self.cached_sigma
+            original_sn_dim = self.sn_dim
+
+            map_value_attrs = ("u_delta_av", "delta_m", "delta_p", "bias")
+            map_originals = {attr: getattr(self.map, attr) for attr in map_value_attrs}
+            original_map_sn_dim = self.map.sn_dim
+
+            try:
+                for attr in sn_attrs:
+                    setattr(
+                        self, attr, tf.gather(originals[attr], valid_indices, axis=0)
+                    )
+                self.cached_amp = tuple(
+                    tf.gather(t, valid_indices, axis=0) for t in original_cached_amp
+                )
+                self.cached_sigma = tuple(
+                    tf.gather(t, valid_indices, axis=0) for t in original_cached_sigma
+                )
+                self.sn_dim = int(valid_indices.shape[0])
+
+                for attr in map_value_attrs:
+                    value = map_originals[attr]
+                    setattr(
+                        self.map,
+                        attr,
+                        types.SimpleNamespace(
+                            current=tf.gather(value.current, valid_indices, axis=1),
+                            best=tf.gather(value.best, valid_indices, axis=1),
+                        ),
+                    )
+                self.map.sn_dim = self.sn_dim
+
+                yield valid_indices
+            finally:
+                for attr in sn_attrs:
+                    setattr(self, attr, originals[attr])
+                self.cached_amp = original_cached_amp
+                self.cached_sigma = original_cached_sigma
+                self.sn_dim = original_sn_dim
+
+                for attr in map_value_attrs:
+                    setattr(self.map, attr, map_originals[attr])
+                self.map.sn_dim = original_map_sn_dim
+
+    def _scatter_sn(
+        self,
+        value: tf.Tensor,
+        *,
+        axis: int,
+        indices: tf.Tensor,
+        fill: float,
+    ) -> tf.Tensor:
+        """Scatter a tensor computed over valid SNe only back to full sn_dim.
+
+        `value` has `len(indices)` entries along `axis`; the returned
+        tensor has `self.sn_dim` entries along `axis`, with masked SNe
+        filled with `fill`.
+
+        Returns:
+            `value` scattered back to `self.sn_dim` entries along `axis`.
+        """
+        rank = len(value.shape)
+        axis %= rank
+        perm = [axis, *(a for a in range(rank) if a != axis)]
+        moved = tf.transpose(value, perm)
+        full = tf.fill(
+            [self.sn_dim, *moved.shape[1:]], tf.constant(fill, dtype=value.dtype)
+        )
+        updated = tf.tensor_scatter_nd_update(full, indices[:, None], moved)
+        inv_perm = list(np.argsort(perm))
+        return tf.transpose(updated, inv_perm)
+
     def setup_hmc(self) -> None:
         self.setup_map()
         if not hasattr(self, "hmc"):
@@ -567,26 +690,6 @@ class TFPosteriorModel(ks.Model):
                         self.map.n_pae_latents,
                     ),
                 ),
-                # tf.Variable(  # Step Sizes Final
-                #     tf.convert_to_tensor(
-                #         [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
-                #         dtype=tf.float32,
-                #     ),
-                #     shape=(
-                #         self.max_steps,
-                #         self.sn_dim,
-                #         self.map.n_pae_latents,
-                #     ),
-                # ),
-                # tf.Variable(  # Is Accepted
-                #     tf.convert_to_tensor(
-                #         [[False] * self.sn_dim] * self.max_steps, dtype=tf.bool
-                #     ),
-                #     shape=(
-                #         self.max_steps,
-                #         self.sn_dim,
-                #     ),
-                # ),
                 tf.Variable(  # Log Prior
                     tf.convert_to_tensor(
                         [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
@@ -622,44 +725,6 @@ class TFPosteriorModel(ks.Model):
                     ),
                     shape=(self.max_steps, self.sn_dim, self.map.n_flow_latents),
                 ),
-                # tf.Variable(  # UDeltaAv
-                #     tf.convert_to_tensor(
-                #         [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                #     ),
-                #     shape=(self.max_steps, self.sn_dim, 1),
-                # ),
-                # tf.Variable(  # ULatents
-                #     tf.convert_to_tensor(
-                #         [[[0] * self.map.n_u_latents] * self.sn_dim] * self.max_steps,
-                #         dtype=tf.float32,
-                #     ),
-                #     shape=(self.max_steps, self.sn_dim, self.map.n_u_latents),
-                # ),
-                # tf.Variable(  # DeltaAv
-                #     tf.convert_to_tensor(
-                #         [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                #     ),
-                #     shape=(self.max_steps, self.sn_dim, 1),
-                # ),
-                # tf.Variable(  # ZLatents
-                #     tf.convert_to_tensor(
-                #         [[[0] * self.map.n_z_latents] * self.sn_dim] * self.max_steps,
-                #         dtype=tf.float32,
-                #     ),
-                #     shape=(self.max_steps, self.sn_dim, self.map.n_z_latents),
-                # ),
-                # tf.Variable(  # DeltaM
-                #     tf.convert_to_tensor(
-                #         [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                #     ),
-                #     shape=(self.max_steps, self.sn_dim, 1),
-                # ),
-                # tf.Variable(  # DeltaP
-                #     tf.convert_to_tensor(
-                #         [[[0] * 1] * self.sn_dim] * self.max_steps, dtype=tf.float32
-                #     ),
-                #     shape=(self.max_steps, self.sn_dim, 1),
-                # ),
             )
 
     def save_checkpoint(
@@ -717,9 +782,7 @@ class TFPosteriorModel(ks.Model):
                 self.hmc.samples, independent_chain_ndims=1, split_chains=True
             )
             self.r_hat = r_hat
-            mask = self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask
-            mask_spec = tf.math.reduce_any(mask, axis=-1)
-            mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
+            mask_sn = self.get_mask_sn()
             samples = tf.boolean_mask(self.hmc.samples, mask_sn, axis=-2)
             r_hat = tfp.mcmc.potential_scale_reduction(
                 samples, independent_chain_ndims=1, split_chains=True
@@ -911,24 +974,6 @@ class TFPosteriorModel(ks.Model):
                             tf.boolean_mask(self.map.chain_min, converged),
                             step=chain,
                         )
-                        # tf.summary.scalar(
-                        #     "converged",
-                        #     tf.reduce_sum(
-                        #         tf.ones_like(self.map.converged, dtype=tf.int32)
-                        #         * tf.cast(self.map.converged, tf.int32)
-                        #     )
-                        #     / self.map.converged.shape[1],
-                        #     step=chain,
-                        # )
-                        # tf.summary.scalar(
-                        #     "failed",
-                        #     tf.reduce_sum(
-                        #         tf.ones_like(self.map.failed, dtype=tf.int32)
-                        #         * tf.cast(self.map.failed, tf.int32)
-                        #     )
-                        #     / self.map.failed.shape[1],
-                        #     step=chain,
-                        # )
                         tf.summary.scalar(
                             "improved",
                             tf.reduce_sum(
@@ -938,14 +983,6 @@ class TFPosteriorModel(ks.Model):
                             ),
                             step=chain,
                         )
-                        # tf.summary.scalar(
-                        #     "num_evaluations", self.map.num_evaluations, step=chain
-                        # )
-                        # tf.summary.scalar(
-                        #     "num_chain_evaluations",
-                        #     self.map.num_chain_evaluations,
-                        #     step=chain,
-                        # )
                         tf.summary.scalar(
                             "map/min_log_prior",
                             min_log_prior,
@@ -1825,18 +1862,7 @@ class TFPosteriorModel(ks.Model):
                     tf.summary.scalar(
                         "accept_ratio", accept_ratio, step=self.run_progress.n
                     )
-                    # tf.summary.scalar(
-                    #     "step_samples",
-                    #     self.sample_progress.n - self.step_samples,
-                    #     step=self.run_progress.n,
-                    # )
                     self.step_samples = self.sample_progress.n
-                    # for i in range(step_size.shape[-1]):
-                    #     tf.summary.histogram(
-                    #         f"step_size/{i}",
-                    #         step_size[..., i],
-                    #         step=self.run_progress.n,
-                    #     )
 
         _update(
             min_log_prior,
@@ -1855,7 +1881,6 @@ class TFPosteriorModel(ks.Model):
     def unnormalized_posterior_log_prob(
         self,
         *pos: tf.Tensor,
-        # pkr: "DualAveragingStepSizeAdaptationResults | None" = None,
         additional_outputs: bool = False,
     ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
 
@@ -1873,89 +1898,204 @@ class TFPosteriorModel(ks.Model):
             additional_outputs=True,
         )
 
-        # log_prob, log_like, log_prior = tf.vectorized_map(
-        #     self._step,
-        #     tf.convert_to_tensor(pos),
-        # )
-        #
-        # log_prob = tf.reduce_sum(log_prob, axis=0)
-        # log_like = tf.reduce_sum(log_like, axis=0)
-        # log_prior = tf.reduce_sum(log_prior, axis=0)
-
         if self.summary_writer is not None:
             self.update_sample_progress(log_prior, log_like, log_prob)
-        # if pkr is not None:
-        #     self.update_run_progress(log_prior, log_like, log_prob, pkr)
 
         if additional_outputs:
             return log_prior, log_like, log_prob
         return log_prob
 
     def trace_fn(
-        self, state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
-    ) -> (
-        "DualAveragingStepSizeAdaptationResults"
-    ):  # tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        return pkr
-        # log_prior, log_like, log_prob = self.unnormalized_posterior_log_prob(
-        #     state, pkr=pkr, additional_outputs=True
-        # )
-        # step_size = pkr.inner_results.step_size
-        # is_accepted = pkr.inner_results.is_accepted
-        # log_accept_ratio = pkr.inner_results.log_accept_ratio
-        # return (
-        #     step_size,
-        #     is_accepted,
-        #     log_accept_ratio,
-        # )  # , log_prior, log_like, log_prob
+        self, _state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
+    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        # new_step_size: lets us check whether step-size adaptation has
+        #   plateaued by the end of burn-in (diagnoses n_burnin_steps).
+        # reach_max_depth: whether this step's NUTS trajectory was cut short
+        #   by max_tree_depth rather than terminating on a U-turn/divergence
+        #   (diagnoses n_leapfrog).
+        # is_accepted / has_divergence: cheap standard health checks that
+        #   help interpret the other two (e.g. a saturating chain with a
+        #   low accept rate points at step size/geometry, not just a small
+        #   n_leapfrog).
+        new_step_size = pkr.new_step_size
+        reach_max_depth = pkr.inner_results.reach_max_depth
+        is_accepted = pkr.inner_results.is_accepted
+        has_divergence = pkr.inner_results.has_divergence
+
+        if self.summary_writer is not None:
+            self.write_hmc_step_summary(
+                new_step_size, reach_max_depth, is_accepted, has_divergence
+            )
+
+        return (new_step_size, reach_max_depth, is_accepted, has_divergence)
+
+    def write_hmc_step_summary(
+        self,
+        step_size: tf.Tensor,
+        reach_max_depth: tf.Tensor,
+        is_accepted: tf.Tensor,
+        has_divergence: tf.Tensor,
+    ) -> None:
+        """Stream one NUTS step's diagnostics to TensorBoard as they happen.
+
+        Called from `trace_fn` during both burn-in and the run phase, on a
+        single counter (`self.hmc_step`) shared across both, so the
+        `hmc/*` charts in TensorBoard show one continuous timeline -- you
+        can watch `hmc/step_size` plateau (or not) live during burn-in
+        without waiting for sampling to finish.
+        """
+        mean_step_size = tf.reduce_mean(step_size)
+        saturation_rate = tf.reduce_mean(tf.cast(reach_max_depth, tf.float32))
+        accept_rate = tf.reduce_mean(tf.cast(is_accepted, tf.float32))
+        divergence_rate = tf.reduce_mean(tf.cast(has_divergence, tf.float32))
+
+        @tf.py_function(Tout=[])
+        def _write(
+            mean_step_size: tf.Tensor,
+            saturation_rate: tf.Tensor,
+            accept_rate: tf.Tensor,
+            divergence_rate: tf.Tensor,
+        ) -> None:
+            with self.summary_writer.as_default():
+                tf.summary.scalar("hmc/step_size", mean_step_size, step=self.hmc_step)
+                tf.summary.scalar(
+                    "hmc/tree_depth_saturation_rate",
+                    saturation_rate,
+                    step=self.hmc_step,
+                )
+                tf.summary.scalar("hmc/accept_rate", accept_rate, step=self.hmc_step)
+                tf.summary.scalar(
+                    "hmc/divergence_rate", divergence_rate, step=self.hmc_step
+                )
+            self.hmc_step += 1
+
+        _write(mean_step_size, saturation_rate, accept_rate, divergence_rate)
 
     @tf.function(jit_compile=JIT_COMPILE)
-    def sample_chain(
+    def sample_chain_burnin(
         self,
         position: tf.Tensor,
         kernel: tfp.mcmc.TransitionKernel,
-    ) -> tuple[
-        tf.Tensor,
-        # tf.Tensor,
-        # tf.Tensor,
-        # tf.Tensor,
-        # tf.Tensor,
-        # tf.Tensor,
-        # tf.Tensor
-    ]:
-        (
-            samples,
-            _pkr,
-            # (
-            #     step_sizes_final,
-            #     is_accepted,
-            #     log_accept_ratio,
-            #     log_prior,
-            #     log_like,
-            #     log_prob,
-            # ),
-        ) = tfp.mcmc.sample_chain(
-            num_results=self.n_run_steps,
+    ) -> tuple[tf.Tensor, tf.Tensor, "DualAveragingStepSizeAdaptationResults"]:
+        # Run as its own sample_chain call, and as its own eager Python
+        # call (see train_hmc), for two reasons: (1) tfp.mcmc.sample_chain
+        # never traces its num_burnin_steps steps, so this is the only way
+        # to see the step-size adaptation trajectory; (2) returning to
+        # Python before the run phase starts lets train_hmc print burn-in
+        # diagnostics -- and lets you Ctrl+C -- before committing to the
+        # (usually much longer) run phase.
+        burnin = tfp.mcmc.sample_chain(
+            num_results=self.n_burnin_steps,
             current_state=position,
             kernel=kernel,
-            num_burnin_steps=self.n_burnin_steps,
+            trace_fn=self.trace_fn,
+            return_final_kernel_results=True,
+            name="burnin",
+            parallel_iterations=NPROC,
+        )
+        burnin_step_size, *_ = burnin.trace
+
+        # burnin.all_states is empty when n_burnin_steps == 0 (nothing to
+        # index) -- fall back to the original position, matching what
+        # num_burnin_steps=0 does in a single-call sample_chain.
+        final_state = position if self.n_burnin_steps == 0 else burnin.all_states[-1]
+
+        return final_state, burnin_step_size, burnin.final_kernel_results
+
+    @tf.function(jit_compile=JIT_COMPILE)
+    def sample_chain_run(
+        self,
+        position: tf.Tensor,
+        kernel: tfp.mcmc.TransitionKernel,
+        previous_kernel_results: "DualAveragingStepSizeAdaptationResults",
+    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        run = tfp.mcmc.sample_chain(
+            num_results=self.n_run_steps,
+            current_state=position,
+            previous_kernel_results=previous_kernel_results,
+            kernel=kernel,
             num_steps_between_results=self.n_thinning,
             trace_fn=self.trace_fn,
             name="run",
             parallel_iterations=NPROC,
         )
+        _run_step_size, reach_max_depth, is_accepted, has_divergence = run.trace
 
-        samples = self.map.constrain(samples)
+        samples = self.map.constrain(run.all_states)
 
-        return (
-            samples,
-            # step_sizes_final,
-            # is_accepted,
-            # log_accept_ratio,
-            # log_prior,
-            # log_like,
-            # log_prob,
+        return samples, reach_max_depth, is_accepted, has_divergence
+
+    def report_burnin_diagnostics(self, burnin_step_size: tf.Tensor) -> None:
+        """Log the step-size adaptation health, to be called right after burn-in.
+
+        Called between `sample_chain_burnin` and `sample_chain_run` in
+        `train_hmc` -- deliberately *before* the run phase starts, so a
+        too-short `n_burnin_steps` shows up here and the run (often the
+        most expensive part) can be cancelled instead of run to completion
+        first.
+        """
+        step_size_drift_warn_threshold = 0.05
+
+        # Compare the step-size trace's last two burn-in windows: if it's
+        # still moving this late in burn-in, adaptation hasn't converged
+        # and n_burnin_steps/n_adaption_steps should grow. Too short a
+        # burn-in to form two windows means there isn't enough signal to
+        # judge convergence either way.
+        min_steps_for_plateau_check = 20
+        if self.n_burnin_steps < min_steps_for_plateau_check:
+            self.log.debug(
+                "Skipping burn-in step-size plateau check: "
+                f"n_burnin_steps={self.n_burnin_steps} is too small to assess."
+            )
+            return
+
+        window = max(1, self.n_burnin_steps // 10)
+        penultimate = tf.reduce_mean(burnin_step_size[-2 * window : -window], axis=0)
+        final = tf.reduce_mean(burnin_step_size[-window:], axis=0)
+        relative_change = float(
+            tf.reduce_mean(
+                tf.abs(final - penultimate) / tf.maximum(tf.abs(penultimate), 1e-12)
+            )
         )
+        self.log.info(
+            f"HMC step-size adaptation: {relative_change:.2%} relative "
+            f"change between the last two {window}-step windows of the "
+            f"{self.n_burnin_steps}-step burn-in "
+            f"(n_adaption_steps={self.n_adaption_steps})."
+        )
+        if relative_change > step_size_drift_warn_threshold:
+            self.log.warning(
+                f"Step size is still changing by {relative_change:.2%} "
+                "near the end of burn-in -- adaptation may not have "
+                f"converged within n_burnin_steps={self.n_burnin_steps}. "
+                "Consider increasing n_burnin_steps/n_adaption_steps "
+                "(Ctrl+C now to cancel before the run phase)."
+            )
+
+    def report_run_diagnostics(
+        self,
+        reach_max_depth: tf.Tensor,
+        is_accepted: tf.Tensor,
+        has_divergence: tf.Tensor,
+    ) -> None:
+        """Log NUTS health diagnostics for tuning `n_leapfrog`."""
+        saturation_warn_threshold = 0.01
+
+        saturation_rate = float(tf.reduce_mean(tf.cast(reach_max_depth, tf.float32)))
+        accept_rate = float(tf.reduce_mean(tf.cast(is_accepted, tf.float32)))
+        divergence_rate = float(tf.reduce_mean(tf.cast(has_divergence, tf.float32)))
+        self.log.info(
+            f"HMC run-phase diagnostics: {saturation_rate:.2%} of steps hit "
+            f"max_tree_depth={self.max_tree_depth} (n_leapfrog={self.n_leapfrog}), "
+            f"{accept_rate:.2%} accept rate, {divergence_rate:.2%} divergence rate."
+        )
+        if saturation_rate > saturation_warn_threshold:
+            self.log.warning(
+                f"{saturation_rate:.2%} of run steps hit max_tree_depth="
+                f"{self.max_tree_depth} before reaching a U-turn -- trajectories "
+                "are being truncated by the cap rather than terminating "
+                "naturally. Consider increasing n_leapfrog."
+            )
 
     def train_hmc(
         self,
@@ -1973,54 +2113,12 @@ class TFPosteriorModel(ks.Model):
 
                 samples = self.hmc.samples
 
-                # ind = 0
-                # if self.map.train_delta_m:
-                #     delta_m = samples[..., ind : ind + 1]
-                #     ind += 1
-                # else:
-                #     delta_m = self.hmc.delta_m
-                # if self.map.train_delta_p:
-                #     delta_p = samples[..., ind : ind + 1]
-                #     ind += 1
-                # else:
-                #     delta_p = self.hmc.delta_p
-                # if self.nflow.physical_latents:
-                #     u_delta_av = samples[..., ind : ind + 1]
-                #     ind += 1
-                # else:
-                #     u_delta_av = self.hmc.u_delta_av
-                # u_latents = samples[..., ind:]
-                # if self.nflow.physical_latents:
-                #     us = np.concatenate([u_delta_av, u_latents], axis=-1)
-                # else:
-                #     us = u_latents
-                # us = us.reshape(-1, self.map.n_flow_latents)
-                # # Transform u_latents to z_latents
-                # z_latents = (
-                #     self.nflow.u_to_z(us, permute=True)
-                #     .numpy()
-                #     .reshape(*samples.shape[:-1], self.map.n_flow_latents)
-                # )
-                # if self.pae.physical_latents:
-                #     delta_av = z_latents[..., 0:1]
-                #     z_latents = z_latents[..., 1:]
-                # else:
-                #     delta_av = self.hmc.delta_av
-
                 vars(self)["hmc"] = PosteriorHMCValue(
                     tf.Variable(samples),
-                    # tf.Variable(self.hmc.step_sizes_final),
-                    # tf.Variable(self.hmc.is_accepted),
                     tf.Variable(self.hmc.log_prior),
                     tf.Variable(self.hmc.log_like),
                     tf.Variable(self.hmc.log_prob),
                     tf.Variable(self.hmc.zs),
-                    # tf.Variable(u_delta_av),
-                    # tf.Variable(u_latents),
-                    # tf.Variable(delta_av),
-                    # tf.Variable(z_latents),
-                    # tf.Variable(delta_m),
-                    # tf.Variable(delta_p),
                 )
                 return
         self.log.debug("Running HMC")
@@ -2119,85 +2217,109 @@ class TFPosteriorModel(ks.Model):
         # )
         # self.run_progress.set_description("run")
         self.step_samples = 0
+        self.hmc_step = 0
 
-        sampler = tfp.mcmc.NoUTurnSampler(
-            target_log_prob_fn=self.unnormalized_posterior_log_prob,
-            step_size=step_size,
-            max_tree_depth=self.n_leapfrog,
-            parallel_iterations=NPROC,
-        )
+        # Masked SNe have -inf log-prob everywhere, but TFP's NUTS
+        # tree-doubling loop is a single tf.while_loop shared across the
+        # whole (n_walkers, sn_dim) batch -- it keeps running (re-evaluating
+        # the full decoder/photometry pass for every SN) until the *last*
+        # chain in the batch stops. Left in the batch, masked SNe would ride
+        # along for the full trajectory length of whichever real SN is
+        # slowest to U-turn, wasting the max_tree_depth budget. Restricting
+        # to valid SNe for the scope of sampling avoids that; results are
+        # scattered back to full sn_dim afterwards.
+        with self._restricted_to_valid_sn() as valid_indices:
+            position = (
+                initial_position
+                if valid_indices is None
+                else tf.gather(initial_position, valid_indices, axis=-2)
+            )
+            step = (
+                step_size
+                if valid_indices is None
+                else tf.gather(step_size, valid_indices, axis=-2)
+            )
 
-        kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
-            inner_kernel=sampler,
-            num_adaptation_steps=self.n_adaption_steps,
-            target_accept_prob=self.target_acceptance_rate,
-            reduce_fn=tfp.math.reduce_log_harmonic_mean_exp,
-        )
+            sampler = tfp.mcmc.NoUTurnSampler(
+                target_log_prob_fn=self.unnormalized_posterior_log_prob,
+                step_size=step,
+                max_tree_depth=self.n_leapfrog,
+                parallel_iterations=NPROC,
+            )
 
-        (
-            samples,
-            # step_sizes_final,
-            # is_accepted,
-            # log_accept_ratio,
-            # log_prior,
-            # log_like,
-            # log_prob,
-        ) = self.sample_chain(initial_position, kernel)
+            kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
+                inner_kernel=sampler,
+                num_adaptation_steps=self.n_adaption_steps,
+                target_accept_prob=self.target_acceptance_rate,
+                reduce_fn=tfp.math.reduce_log_harmonic_mean_exp,
+            )
 
-        del kernel
-        del sampler
+            burnin_result = self.sample_chain_burnin(position, kernel)
+            # Reported (and, if self.summary_writer is set, already streamed to
+            # TensorBoard live throughout burn-in above) before the run phase
+            # starts, so a too-short n_burnin_steps is visible here -- cancel
+            # now rather than waiting through the whole run phase to find out.
+            self.report_burnin_diagnostics(burnin_result[1])
 
-        # self.run_progress.close()
-        # self.run_progress = None
-        self.step_samples = None
-        self.sample_progress.close()
-        self.sample_progress = None
-        if self.summary_writer is not None:
-            self.summary_writer.close()
-        self.summary_writer = None
+            run_result = self.sample_chain_run(
+                burnin_result[0], kernel, burnin_result[2]
+            )
+            samples = run_result[0]
+            self.report_run_diagnostics(*run_result[1:])
 
-        clear_session()
+            del kernel
+            del sampler
 
-        self.log.debug(
-            "Calculating prior, likelihood, and probability across all samples"
-        )
+            self.step_samples = None
+            self.sample_progress.close()
+            self.sample_progress = None
+            if self.summary_writer is not None:
+                self.summary_writer.close()
+            self.summary_writer = None
 
-        @tf.function
-        def _fn(state):
-            return self.unnormalized_posterior_log_prob(state, additional_outputs=True)
+            clear_session()
 
-        log_prior, log_like, log_prob = tf.map_fn(
-            _fn,
-            tf.convert_to_tensor(samples),
-            swap_memory=True,
-            fn_output_signature=(tf.float32, tf.float32, tf.float32),
-        )
+            self.log.debug(
+                "Calculating prior, likelihood, and probability across all samples"
+            )
 
-        self.log.debug("Calculating z-latents")
+            @tf.function
+            def _fn(state):
+                return self.unnormalized_posterior_log_prob(
+                    state, additional_outputs=True
+                )
 
-        @tf.function
-        def _fn(u):
-            return self.map.nflow.u_to_z(u, permute=True)
+            log_prior, log_like, log_prob = tf.map_fn(
+                _fn,
+                tf.convert_to_tensor(samples),
+                swap_memory=True,
+                fn_output_signature=(tf.float32, tf.float32, tf.float32),
+            )
 
-        us = samples[..., -self.map.nflow.n_flow_latents :]
-        zs = tf.map_fn(_fn, us, swap_memory=True)
+            self.log.debug("Calculating z-latents")
 
-        # samples = samples.numpy().reshape((
-        #     samples.shape[0] * samples.shape[1],
-        #     *samples.shape[2:],
-        # ))
-        # step_sizes_final = step_sizes_final.numpy().reshape((
-        #     step_sizes_final.shape[0] * step_sizes_final.shape[1],
-        #     *step_sizes_final.shape[2:],
-        # ))
-        # is_accepted = is_accepted.numpy().reshape((
-        #     is_accepted.shape[0] * is_accepted.shape[1],
-        #     *is_accepted.shape[2:],
-        # ))
-        # log_accept_ratio = log_accept_ratio.numpy().reshape((
-        #     log_accept_ratio.shape[0] * log_accept_ratio.shape[1],
-        #     *log_accept_ratio.shape[2:],
-        # ))
+            @tf.function
+            def _fn(u):
+                return self.map.nflow.u_to_z(u, permute=True)
+
+            us = samples[..., -self.map.nflow.n_flow_latents :]
+            zs = tf.map_fn(_fn, us, swap_memory=True)
+
+        if valid_indices is not None:
+            samples = self._scatter_sn(
+                samples, axis=-2, indices=valid_indices, fill=float("nan")
+            )
+            log_prior = self._scatter_sn(
+                log_prior, axis=-1, indices=valid_indices, fill=float("-inf")
+            )
+            log_like = self._scatter_sn(
+                log_like, axis=-1, indices=valid_indices, fill=float("-inf")
+            )
+            log_prob = self._scatter_sn(
+                log_prob, axis=-1, indices=valid_indices, fill=float("-inf")
+            )
+            zs = self._scatter_sn(zs, axis=-2, indices=valid_indices, fill=float("nan"))
+
         log_prior = log_prior.numpy().reshape((
             log_prior.shape[0] * log_prior.shape[1],
             *log_prior.shape[2:],
@@ -2214,58 +2336,13 @@ class TFPosteriorModel(ks.Model):
             zs.shape[0] * zs.shape[1],
             *zs.shape[2:],
         ))
-        # log_prior = log_prior.numpy()
-        # log_like = log_like.numpy()
-        # log_prob = log_prob.numpy()
-
-        # ind = 0
-        # if self.map.train_delta_m:
-        #     delta_m = samples[..., ind : ind + 1]
-        #     ind += 1
-        # else:
-        #     delta_m = self.hmc.delta_m
-        # if self.map.train_delta_p:
-        #     delta_p = samples[..., ind : ind + 1]
-        #     ind += 1
-        # else:
-        #     delta_p = self.hmc.delta_p
-        # if self.nflow.physical_latents:
-        #     u_delta_av = samples[..., ind : ind + 1]
-        #     ind += 1
-        # else:
-        #     u_delta_av = self.hmc.u_delta_av
-        # u_latents = samples[..., ind:]
-        # if self.nflow.physical_latents:
-        #     us = np.concatenate([u_delta_av, u_latents], axis=-1)
-        # else:
-        #     us = u_latents
-        # us = us.reshape(-1, self.map.n_flow_latents)
-        # # Transform u_latents to z_latents
-        # z_latents = (
-        #     self.nflow.u_to_z(us, permute=True)
-        #     .numpy()
-        #     .reshape(*samples.shape[:-1], self.map.n_flow_latents)
-        # )
-        # if self.pae.physical_latents:
-        #     delta_av = z_latents[..., 0:1]
-        #     z_latents = z_latents[..., 1:]
-        # else:
-        #     delta_av = self.hmc.delta_av
 
         vars(self)["hmc"] = PosteriorHMCValue(
             tf.Variable(samples),
-            # tf.Variable(step_sizes_final),
-            # tf.Variable(is_accepted),
             tf.Variable(log_prior),
             tf.Variable(log_like),
             tf.Variable(log_prob),
             tf.Variable(zs),
-            # tf.Variable(u_delta_av),
-            # tf.Variable(u_latents),
-            # tf.Variable(delta_av),
-            # tf.Variable(z_latents),
-            # tf.Variable(delta_m),
-            # tf.Variable(delta_p),
         )
 
         if savepath is not None:
