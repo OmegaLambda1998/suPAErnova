@@ -69,8 +69,13 @@ def jackknife_resample(
 def max_central(
     data: "npt.NDArray", *, weight: "npt.NDArray | None" = None
 ) -> tuple[float, float, float]:
-    # if data[np.isfinite(data)].shape[0] == 0:
-    #     return (np.nan, np.nan, np.nan)
+    finite = np.isfinite(data)
+    if weight is not None:
+        finite &= np.isfinite(weight)
+        weight = weight[finite]
+    data = data[finite]
+    if data.shape[0] == 0:
+        return (np.nan, np.nan, np.nan)
     c = cc.ChainConsumer()
     chain_data = {"data": data}
     chain = cc.Chain(samples=pd.DataFrame(chain_data), name="data")
