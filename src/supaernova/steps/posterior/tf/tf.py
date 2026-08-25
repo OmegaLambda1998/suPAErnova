@@ -249,29 +249,37 @@ class TFPosteriorModel(ks.Model):
 
         # === Inputs ===
         if input_phase is None:
-            input_phase = tf.convert_to_tensor(self.data_time, dtype=tf.float32)
+            input_phase = tf.cast(
+                tf.convert_to_tensor(self.data_time), dtype=tf.float32
+            )
         if input_amp is None:
-            input_amp = tf.convert_to_tensor(self.data_amplitude, dtype=tf.float32)
+            input_amp = tf.cast(
+                tf.convert_to_tensor(self.data_amplitude), dtype=tf.float32
+            )
         if input_sigma is None:
-            input_sigma = tf.convert_to_tensor(self.data_sigma, dtype=tf.float32)
+            input_sigma = tf.cast(
+                tf.convert_to_tensor(self.data_sigma), dtype=tf.float32
+            )
         if input_wavelength is None:
-            input_wavelength = tf.convert_to_tensor(
-                self.data_wavelength, dtype=tf.float32
+            input_wavelength = tf.cast(
+                tf.convert_to_tensor(self.data_wavelength), dtype=tf.float32
             )
         if input_throughput is None:
-            input_throughput = tf.convert_to_tensor(
-                self.data_throughput, dtype=tf.float32
+            input_throughput = tf.cast(
+                tf.convert_to_tensor(self.data_throughput), dtype=tf.float32
             )
         if input_effective_wavelength is None:
-            input_effective_wavelength = tf.convert_to_tensor(
-                self.data_effective_wavelength, dtype=tf.float32
+            input_effective_wavelength = tf.cast(
+                tf.convert_to_tensor(self.data_effective_wavelength), dtype=tf.float32
             )
         if input_spectra_mask is None:
-            input_spectra_mask = tf.convert_to_tensor(
-                self.data_spectra_mask, dtype=tf.bool
+            input_spectra_mask = tf.cast(
+                tf.convert_to_tensor(self.data_spectra_mask), dtype=tf.bool
             )
         if input_phot_mask is None:
-            input_phot_mask = tf.convert_to_tensor(self.data_phot_mask, dtype=tf.bool)
+            input_phot_mask = tf.cast(
+                tf.convert_to_tensor(self.data_phot_mask), dtype=tf.bool
+            )
 
         # --- Masks ---
         # Data Mask
@@ -513,21 +521,21 @@ class TFPosteriorModel(ks.Model):
     ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         training = False if training is None else training
         testing = False if testing is None else testing
-        inputs = tf.convert_to_tensor(inputs, dtype=tf.float32)
+        inputs = tf.cast(tf.convert_to_tensor(inputs), dtype=tf.float32)
         if input_phase is not None:
-            input_phase = tf.convert_to_tensor(input_phase, dtype=tf.float32)
+            input_phase = tf.cast(tf.convert_to_tensor(input_phase), dtype=tf.float32)
         if input_amp is not None:
-            input_amp = tf.convert_to_tensor(input_amp, dtype=tf.float32)
+            input_amp = tf.cast(tf.convert_to_tensor(input_amp), dtype=tf.float32)
         if input_sigma is not None:
-            input_sigma = tf.convert_to_tensor(input_sigma, dtype=tf.float32)
+            input_sigma = tf.cast(tf.convert_to_tensor(input_sigma), dtype=tf.float32)
         if mask is not None:
-            mask = tf.convert_to_tensor(mask, dtype=tf.bool)
+            mask = tf.cast(tf.convert_to_tensor(mask), dtype=tf.bool)
         if sn_mask is not None:
-            sn_mask = tf.convert_to_tensor(sn_mask, dtype=tf.bool)
+            sn_mask = tf.cast(tf.convert_to_tensor(sn_mask), dtype=tf.bool)
         if spec_mask is not None:
-            spec_mask = tf.convert_to_tensor(spec_mask, dtype=tf.bool)
+            spec_mask = tf.cast(tf.convert_to_tensor(spec_mask), dtype=tf.bool)
         if wl_mask is not None:
-            wl_mask = tf.convert_to_tensor(wl_mask, dtype=tf.bool)
+            wl_mask = tf.cast(tf.convert_to_tensor(wl_mask), dtype=tf.bool)
         return super().__call__(
             inputs,
             training=training,
@@ -671,24 +679,15 @@ class TFPosteriorModel(ks.Model):
         self.setup_map()
         if not hasattr(self, "hmc"):
             vars(self)["hmc"] = PosteriorHMCValue(
-                # tf.Variable(  # Samples
-                #     tf.convert_to_tensor(
-                #         [[[0] * self.map.n_pae_latents] * self.sn_dim] * self.max_steps,
-                #         dtype=tf.float32,
-                #     ),
-                #     shape=(
-                #         self.max_steps,
-                #         self.sn_dim,
-                #         self.map.n_pae_latents,
-                #     ),
-                # ),
                 tf.Variable(  # Samples
-                    tf.convert_to_tensor(
-                        [
-                            [[[0] * self.map.n_pae_latents] * self.sn_dim]
-                            * self.n_walkers
-                        ]
-                        * self.n_run_steps,
+                    tf.cast(
+                        tf.convert_to_tensor(
+                            [
+                                [[[0] * self.map.n_pae_latents] * self.sn_dim]
+                                * self.n_walkers
+                            ]
+                            * self.n_run_steps
+                        ),
                         dtype=tf.float32,
                     ),
                     shape=(
@@ -699,8 +698,9 @@ class TFPosteriorModel(ks.Model):
                     ),
                 ),
                 tf.Variable(  # Log Prior
-                    tf.convert_to_tensor(
-                        [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                    tf.cast(
+                        tf.convert_to_tensor([[0] * self.sn_dim] * self.max_steps),
+                        dtype=tf.float32,
                     ),
                     shape=(
                         self.max_steps,
@@ -708,8 +708,9 @@ class TFPosteriorModel(ks.Model):
                     ),
                 ),
                 tf.Variable(  # Log Like
-                    tf.convert_to_tensor(
-                        [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                    tf.cast(
+                        tf.convert_to_tensor([[0] * self.sn_dim] * self.max_steps),
+                        dtype=tf.float32,
                     ),
                     shape=(
                         self.max_steps,
@@ -717,8 +718,9 @@ class TFPosteriorModel(ks.Model):
                     ),
                 ),
                 tf.Variable(  # Log Prob
-                    tf.convert_to_tensor(
-                        [[0] * self.sn_dim] * self.max_steps, dtype=tf.float32
+                    tf.cast(
+                        tf.convert_to_tensor([[0] * self.sn_dim] * self.max_steps),
+                        dtype=tf.float32,
                     ),
                     shape=(
                         self.max_steps,
@@ -726,9 +728,11 @@ class TFPosteriorModel(ks.Model):
                     ),
                 ),
                 tf.Variable(  # ZLatents
-                    tf.convert_to_tensor(
-                        [[[0] * self.map.n_flow_latents] * self.sn_dim]
-                        * self.max_steps,
+                    tf.cast(
+                        tf.convert_to_tensor(
+                            [[[0] * self.map.n_flow_latents] * self.sn_dim]
+                            * self.max_steps
+                        ),
                         dtype=tf.float32,
                     ),
                     shape=(self.max_steps, self.sn_dim, self.map.n_flow_latents),
@@ -1893,7 +1897,6 @@ class TFPosteriorModel(ks.Model):
     ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
 
         input_position = self.map.get_position(tf.convert_to_tensor(pos)[0, ...])
-        pp(self.data_sigma, "sigma")
         log_prob, log_like, log_prior, _, _ = self(
             input_position,
             training=False,
