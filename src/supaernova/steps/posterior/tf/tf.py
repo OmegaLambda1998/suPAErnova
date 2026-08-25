@@ -249,7 +249,6 @@ class TFPosteriorModel(ks.Model):
 
         # === Inputs ===
         if input_phase is None:
-            input_phase = self.data_time
             input_phase = tf.convert_to_tensor(self.data_time, dtype=tf.float32)
         if input_amp is None:
             input_amp = tf.convert_to_tensor(self.data_amplitude, dtype=tf.float32)
@@ -1894,6 +1893,7 @@ class TFPosteriorModel(ks.Model):
     ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
 
         input_position = self.map.get_position(tf.convert_to_tensor(pos)[0, ...])
+        pp(self.data_sigma, "sigma")
         log_prob, log_like, log_prior, _, _ = self(
             input_position,
             training=False,
