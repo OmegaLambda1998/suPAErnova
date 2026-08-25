@@ -250,20 +250,29 @@ class TFPosteriorModel(ks.Model):
         # === Inputs ===
         if input_phase is None:
             input_phase = self.data_time
+            input_phase = tf.convert_to_tensor(self.data_time, dtype=tf.float32)
         if input_amp is None:
-            input_amp = self.data_amplitude
+            input_amp = tf.convert_to_tensor(self.data_amplitude, dtype=tf.float32)
         if input_sigma is None:
-            input_sigma = self.data_sigma
+            input_sigma = tf.convert_to_tensor(self.data_sigma, dtype=tf.float32)
         if input_wavelength is None:
-            input_wavelength = self.data_wavelength
+            input_wavelength = tf.convert_to_tensor(
+                self.data_wavelength, dtype=tf.float32
+            )
         if input_throughput is None:
-            input_throughput = self.data_throughput
+            input_throughput = tf.convert_to_tensor(
+                self.data_throughput, dtype=tf.float32
+            )
         if input_effective_wavelength is None:
-            input_effective_wavelength = self.data_effective_wavelength
+            input_effective_wavelength = tf.convert_to_tensor(
+                self.data_effective_wavelength, dtype=tf.float32
+            )
         if input_spectra_mask is None:
-            input_spectra_mask = self.data_spectra_mask
+            input_spectra_mask = tf.convert_to_tensor(
+                self.data_spectra_mask, dtype=tf.bool
+            )
         if input_phot_mask is None:
-            input_phot_mask = self.data_phot_mask
+            input_phot_mask = tf.convert_to_tensor(self.data_phot_mask, dtype=tf.bool)
 
         # --- Masks ---
         # Data Mask
