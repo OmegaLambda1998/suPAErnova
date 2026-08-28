@@ -5,7 +5,9 @@ from supaernova.steps.pae.tf.photometry import (
     photometry_sigma_setup,
 )
 import os
+import json
 import types
+import shutil
 import contextlib
 from typing import TYPE_CHECKING, override
 
@@ -49,6 +51,21 @@ if TYPE_CHECKING:
     from supaernova.configs.steps.posterior.tf import TFPosteriorConfig
 
 POSTERIORMODELSTEP: "Posterior"
+
+
+def _finite_reduce(x: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+    finite = tf.math.is_finite(x)
+    ones = tf.ones_like(x)
+    zeros = tf.zeros_like(x)
+    count = tf.math.maximum(tf.reduce_sum(tf.where(finite, ones, zeros)), 1)
+    mean = tf.reduce_sum(tf.where(finite, x, zeros)) / count
+    minimum = tf.reduce_min(tf.where(finite, x, np.inf * ones))
+    maximum = tf.reduce_max(tf.where(finite, x, -np.inf * ones))
+    return minimum, mean, maximum
+
+
+def _reduce_trailing(x: tf.Tensor) -> tf.Tensor:
+    return tf.reduce_mean(tf.cast(x, tf.float32), axis=list(range(1, len(x.shape))))
 
 
 @ks.utils.register_keras_serializable("SuPAErnova")
@@ -186,8 +203,12 @@ class TFPosteriorModel(ks.Model):
 
         # HMC Variables
 
-        self.n_leapfrog: int = self.options.n_leapfrog
-        max_leapfrog = (2**self.n_leapfrog) - 1
+        self.n_leapfrog_adaption: int = self.options.n_leapfrog_adaption
+        self.n_leapfrog_burnin: int = self.options.n_leapfrog_burnin
+        self.n_leapfrog_run: int = self.options.n_leapfrog_run
+        max_leapfrog_adaption = (2**self.n_leapfrog_adaption) - 1
+        max_leapfrog_burnin = (2**self.n_leapfrog_burnin) - 1
+        max_leapfrog_run = (2**self.n_leapfrog_run) - 1
 
         self.n_run_steps: int = self.options.n_run_steps
 
@@ -195,26 +216,47 @@ class TFPosteriorModel(ks.Model):
         if isinstance(self.n_burnin_steps, float):
             self.n_burnin_steps = int(self.n_run_steps * self.n_burnin_steps)
 
+        # `n_adaption_steps` is now its own phase, run before burn-in, so a
+        # float is interpreted the same way as `n_burnin_steps` -- a fraction
+        # of `n_run_steps` -- rather than a fraction *of* burn-in.
         self.n_adaption_steps: int = self.options.n_adaption_steps
         if isinstance(self.n_adaption_steps, float):
-            self.n_adaption_steps = int(
-                (
-                    self.n_burnin_steps
-                    + (self.n_run_steps if self.n_burnin_steps == 0 else 0)
-                )
-                * self.n_adaption_steps
-            )
+            self.n_adaption_steps = int(self.n_run_steps * self.n_adaption_steps)
 
         self.max_samples: int = int(
-            max_leapfrog * (self.n_burnin_steps + self.n_run_steps)
+            max_leapfrog_adaption * self.n_adaption_steps
+            + max_leapfrog_burnin * self.n_burnin_steps
+            + max_leapfrog_run * self.n_run_steps
         )
 
-        self.max_tree_depth: int = (2**self.n_leapfrog) - 1
+        self.max_tree_depth_adaption: int = (2**self.n_leapfrog_adaption) - 1
+        self.max_tree_depth_burnin: int = (2**self.n_leapfrog_burnin) - 1
+        self.max_tree_depth_run: int = (2**self.n_leapfrog_run) - 1
 
         self.max_steps: int = self.n_run_steps * self.n_walkers
 
         self.n_thinning: int = self.options.n_thinning
         self.target_acceptance_rate: float = self.options.target_acceptance_rate
+
+        # Chunk sizes for the Python-level sample_chain loop. `None`/`0` ->
+        # one chunk per phase (behaviour matches a single sample_chain call);
+        # a float is a fraction of that phase's step count.
+        self.n_run_chunk_steps: int = self._resolve_chunk_steps(
+            self.options.n_chunk_steps, self.n_run_steps
+        )
+        self.n_burnin_chunk_steps: int = self._resolve_chunk_steps(
+            self.options.n_burnin_chunk_steps
+            if self.options.n_burnin_chunk_steps is not None
+            else self.options.n_chunk_steps,
+            self.n_burnin_steps,
+        )
+        self.n_adaption_chunk_steps: int = self._resolve_chunk_steps(
+            self.options.n_adaption_chunk_steps
+            if self.options.n_adaption_chunk_steps is not None
+            else self.options.n_chunk_steps,
+            self.n_adaption_steps,
+        )
+        self._checkpoint_hmc: bool = self.options.checkpoint_hmc
 
         self.hmc: PosteriorHMCValue
 
@@ -1510,385 +1552,12 @@ class TFPosteriorModel(ks.Model):
         clear_session()
 
     # === HMC Functions ===
-    def update_sample_progress(
-        self,
-        log_prior: tf.Tensor,
-        log_like: tf.Tensor,
-        log_prob: tf.Tensor,
-    ) -> None:
-        if self.sample_progress.n % self.summary_interval != 0:
-            with tf.init_scope():
-                self.sample_progress.n += 1
-            return
 
-        min_log_prior = tf.reduce_min(
-            tf.where(
-                tf.math.is_finite(log_prior),
-                log_prior,
-                np.inf * tf.ones_like(log_prior),
-            )
-        )
-        mean_log_prior = tf.reduce_sum(
-            tf.where(
-                tf.math.is_finite(log_prior),
-                log_prior,
-                tf.zeros_like(log_prior),
-            )
-        ) / tf.math.maximum(
-            tf.reduce_sum(
-                tf.where(
-                    tf.math.is_finite(log_prior),
-                    tf.ones_like(log_prior),
-                    tf.zeros_like(log_prior),
-                )
-            ),
-            1,
-        )
-        max_log_prior = tf.reduce_max(
-            tf.where(
-                tf.math.is_finite(log_prior),
-                log_prior,
-                -np.inf * tf.ones_like(log_prior),
-            )
-        )
-        min_log_like = tf.reduce_min(
-            tf.where(
-                tf.math.is_finite(log_like),
-                log_like,
-                np.inf * tf.ones_like(log_like),
-            )
-        )
-        mean_log_like = tf.reduce_sum(
-            tf.where(
-                tf.math.is_finite(log_like),
-                log_like,
-                tf.zeros_like(log_like),
-            )
-        ) / tf.math.maximum(
-            tf.reduce_sum(
-                tf.where(
-                    tf.math.is_finite(log_like),
-                    tf.ones_like(log_like),
-                    tf.zeros_like(log_like),
-                )
-            ),
-            1,
-        )
-        max_log_like = tf.reduce_max(
-            tf.where(
-                tf.math.is_finite(log_like),
-                log_like,
-                -np.inf * tf.ones_like(log_like),
-            )
-        )
-        min_log_prob = tf.reduce_min(
-            tf.where(
-                tf.math.is_finite(log_prob),
-                log_prob,
-                np.inf * tf.ones_like(log_prob),
-            )
-        )
-        mean_log_prob = tf.reduce_sum(
-            tf.where(
-                tf.math.is_finite(log_prob),
-                log_prob,
-                tf.zeros_like(log_prob),
-            )
-        ) / tf.math.maximum(
-            tf.reduce_sum(
-                tf.where(
-                    tf.math.is_finite(log_prob),
-                    tf.ones_like(log_prob),
-                    tf.zeros_like(log_prob),
-                )
-            ),
-            1,
-        )
-        max_log_prob = tf.reduce_max(
-            tf.where(
-                tf.math.is_finite(log_prob),
-                log_prob,
-                -np.inf * tf.ones_like(log_prob),
-            )
-        )
-
-        @tf.py_function(Tout=[])
-        def _update(
-            min_log_prior: tf.Tensor,
-            mean_log_prior: tf.Tensor,
-            max_log_prior: tf.Tensor,
-            min_log_like: tf.Tensor,
-            mean_log_like: tf.Tensor,
-            max_log_like: tf.Tensor,
-            min_log_prob: tf.Tensor,
-            mean_log_prob: tf.Tensor,
-            max_log_prob: tf.Tensor,
-        ) -> None:
-            self.sample_progress.set_postfix({
-                "log_prob": (
-                    f"{min_log_prob:.3E}",
-                    f"{mean_log_prob:.3E}",
-                    f"{max_log_prob:.3E}",
-                ),
-            })
-            self.sample_progress.update()
-
-            if self.summary_writer is not None:
-                with self.summary_writer.as_default():
-                    tf.summary.scalar(
-                        "samples/samples/min_log_prior",
-                        min_log_prior,
-                        step=self.sample_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "samples/samples/mean_log_prior",
-                        mean_log_prior,
-                        step=self.sample_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "samples/samples/max_log_prior",
-                        max_log_prior,
-                        step=self.sample_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "samples/samples/min_log_like",
-                        min_log_like,
-                        step=self.sample_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "samples/samples/mean_log_like",
-                        mean_log_like,
-                        step=self.sample_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "samples/samples/max_log_like",
-                        max_log_like,
-                        step=self.sample_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "samples/samples/min_log_prob",
-                        min_log_prob,
-                        step=self.sample_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "samples/samples/mean_log_prob",
-                        mean_log_prob,
-                        step=self.sample_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "samples/samples/max_log_prob",
-                        max_log_prob,
-                        step=self.sample_progress.n,
-                    )
-
-        _update(
-            min_log_prior,
-            mean_log_prior,
-            max_log_prior,
-            min_log_like,
-            mean_log_like,
-            max_log_like,
-            min_log_prob,
-            mean_log_prob,
-            max_log_prob,
-        )
-
-    def update_run_progress(
-        self,
-        log_prior: tf.Tensor,
-        log_like: tf.Tensor,
-        log_prob: tf.Tensor,
-        pkr: "DualAveragingStepSizeAdaptationResults",
-    ) -> None:
-        min_log_prior = tf.reduce_min(
-            tf.where(
-                tf.math.is_finite(log_prior),
-                log_prior,
-                np.inf * tf.ones_like(log_prior),
-            )
-        )
-        mean_log_prior = tf.reduce_sum(
-            tf.where(
-                tf.math.is_finite(log_prior),
-                log_prior,
-                tf.zeros_like(log_prior),
-            )
-        ) / tf.math.maximum(
-            tf.reduce_sum(
-                tf.where(
-                    tf.math.is_finite(log_prior),
-                    tf.ones_like(log_prior),
-                    tf.zeros_like(log_prior),
-                )
-            ),
-            1,
-        )
-        max_log_prior = tf.reduce_max(
-            tf.where(
-                tf.math.is_finite(log_prior),
-                log_prior,
-                -np.inf * tf.ones_like(log_prior),
-            )
-        )
-        min_log_like = tf.reduce_min(
-            tf.where(
-                tf.math.is_finite(log_like),
-                log_like,
-                np.inf * tf.ones_like(log_like),
-            )
-        )
-        mean_log_like = tf.reduce_sum(
-            tf.where(
-                tf.math.is_finite(log_like),
-                log_like,
-                tf.zeros_like(log_like),
-            )
-        ) / tf.math.maximum(
-            tf.reduce_sum(
-                tf.where(
-                    tf.math.is_finite(log_like),
-                    tf.ones_like(log_like),
-                    tf.zeros_like(log_like),
-                )
-            ),
-            1,
-        )
-        max_log_like = tf.reduce_max(
-            tf.where(
-                tf.math.is_finite(log_like),
-                log_like,
-                -np.inf * tf.ones_like(log_like),
-            )
-        )
-        min_log_prob = tf.reduce_min(
-            tf.where(
-                tf.math.is_finite(log_prob),
-                log_prob,
-                np.inf * tf.ones_like(log_prob),
-            )
-        )
-        mean_log_prob = tf.reduce_sum(
-            tf.where(
-                tf.math.is_finite(log_prob),
-                log_prob,
-                tf.zeros_like(log_prob),
-            )
-        ) / tf.math.maximum(
-            tf.reduce_sum(
-                tf.where(
-                    tf.math.is_finite(log_prob),
-                    tf.ones_like(log_prob),
-                    tf.zeros_like(log_prob),
-                )
-            ),
-            1,
-        )
-        max_log_prob = tf.reduce_max(
-            tf.where(
-                tf.math.is_finite(log_prob),
-                log_prob,
-                -np.inf * tf.ones_like(log_prob),
-            )
-        )
-
-        log_accept_ratio = pkr.inner_results.log_accept_ratio
-
-        accept_ratio = (
-            tf.math.exp(tfp.math.reduce_logmeanexp(tf.minimum(log_accept_ratio, 0.0)))
-            * tf.cast(self.map.sn_dim, tf.float32)
-            / tf.math.count_nonzero(self.map.converged, dtype=tf.float32)
-        )
-
-        step_size = pkr.inner_results.step_size
-
-        @tf.py_function(Tout=[])
-        def _update(
-            min_log_prior: tf.Tensor,
-            mean_log_prior: tf.Tensor,
-            max_log_prior: tf.Tensor,
-            min_log_like: tf.Tensor,
-            mean_log_like: tf.Tensor,
-            max_log_like: tf.Tensor,
-            min_log_prob: tf.Tensor,
-            mean_log_prob: tf.Tensor,
-            max_log_prob: tf.Tensor,
-            accept_ratio: tf.Tensor,
-            step_size: tf.Tensor,
-        ) -> None:
-            self.run_progress.set_postfix({
-                "log_prob": (
-                    f"{min_log_prob:.3E}",
-                    f"{mean_log_prob:.3E}",
-                    f"{max_log_prob:.3E}",
-                ),
-                "accept_ratio": f"{accept_ratio:.2%}",
-            })
-            self.run_progress.update()
-            if self.summary_writer is not None and self.sample_progress.n > 1:
-                with self.summary_writer.as_default():
-                    tf.summary.scalar(
-                        "run/min_log_prior",
-                        min_log_prior,
-                        step=self.run_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "run/mean_log_prior",
-                        mean_log_prior,
-                        step=self.run_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "run/max_log_prior",
-                        max_log_prior,
-                        step=self.run_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "run/min_log_like",
-                        min_log_like,
-                        step=self.run_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "run/mean_log_like",
-                        mean_log_like,
-                        step=self.run_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "run/max_log_like",
-                        max_log_like,
-                        step=self.run_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "run/min_log_prob",
-                        min_log_prob,
-                        step=self.run_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "run/mean_log_prob",
-                        mean_log_prob,
-                        step=self.run_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "run/max_log_prob",
-                        max_log_prob,
-                        step=self.run_progress.n,
-                    )
-                    tf.summary.scalar(
-                        "accept_ratio", accept_ratio, step=self.run_progress.n
-                    )
-                    self.step_samples = self.sample_progress.n
-
-        _update(
-            min_log_prior,
-            mean_log_prior,
-            max_log_prior,
-            min_log_like,
-            mean_log_like,
-            max_log_like,
-            min_log_prob,
-            mean_log_prob,
-            max_log_prob,
-            accept_ratio,
-            step_size,
-        )
+    @staticmethod
+    def _resolve_chunk_steps(raw: float, total: int) -> int:
+        if isinstance(raw, float):
+            return max(1, min(total, int(total * raw)))
+        return max(1, min(total, int(raw)))
 
     def unnormalized_posterior_log_prob(
         self,
@@ -1910,160 +1579,407 @@ class TFPosteriorModel(ks.Model):
             additional_outputs=True,
         )
 
-        if self.summary_writer is not None:
-            self.update_sample_progress(log_prior, log_like, log_prob)
-
         if additional_outputs:
             return log_prior, log_like, log_prob
         return log_prob
 
     def trace_fn(
         self, _state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
-    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        # new_step_size: lets us check whether step-size adaptation has
-        #   plateaued by the end of burn-in (diagnoses n_burnin_steps).
-        # reach_max_depth: whether this step's NUTS trajectory was cut short
-        #   by max_tree_depth rather than terminating on a U-turn/divergence
-        #   (diagnoses n_leapfrog).
-        # is_accepted / has_divergence: cheap standard health checks that
-        #   help interpret the other two (e.g. a saturating chain with a
-        #   low accept rate points at step size/geometry, not just a small
-        #   n_leapfrog).
-        new_step_size = pkr.new_step_size
-        reach_max_depth = pkr.inner_results.reach_max_depth
-        is_accepted = pkr.inner_results.is_accepted
-        has_divergence = pkr.inner_results.has_divergence
+    ) -> tuple[
+        tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor
+    ]:
+        lp_min, lp_mean, lp_max = _finite_reduce(pkr.inner_results.target_log_prob)
+        return (
+            pkr.new_step_size,
+            pkr.inner_results.reach_max_depth,
+            pkr.inner_results.is_accepted,
+            pkr.inner_results.has_divergence,
+            lp_min,
+            lp_mean,
+            lp_max,
+        )
+
+    def _emit_sample_summaries(self, trace: "Sequence[tf.Tensor]") -> None:
+        n = int(trace[0].shape[0])
+        if n == 0:
+            return
+
+        # tag -> per-step [n] series. `hmc/*` are means over the chain batch;
+        # `samples/samples/*` come straight from trace_fn's _finite_reduce.
+        series = {
+            "hmc/step_size": _reduce_trailing(trace[0]),
+            "hmc/tree_depth_saturation_rate": _reduce_trailing(trace[1]),
+            "hmc/accept_rate": _reduce_trailing(trace[2]),
+            "hmc/divergence_rate": _reduce_trailing(trace[3]),
+            "samples/samples/min_log_prob": trace[4],
+            "samples/samples/mean_log_prob": trace[5],
+            "samples/samples/max_log_prob": trace[6],
+        }
 
         if self.summary_writer is not None:
-            self.write_hmc_step_summary(
-                new_step_size, reach_max_depth, is_accepted, has_divergence
-            )
-
-        return (new_step_size, reach_max_depth, is_accepted, has_divergence)
-
-    def write_hmc_step_summary(
-        self,
-        step_size: tf.Tensor,
-        reach_max_depth: tf.Tensor,
-        is_accepted: tf.Tensor,
-        has_divergence: tf.Tensor,
-    ) -> None:
-        """Stream one NUTS step's diagnostics to TensorBoard as they happen.
-
-        Called from `trace_fn` during both burn-in and the run phase, on a
-        single counter (`self.hmc_step`) shared across both, so the
-        `hmc/*` charts in TensorBoard show one continuous timeline -- you
-        can watch `hmc/step_size` plateau (or not) live during burn-in
-        without waiting for sampling to finish.
-        """
-        mean_step_size = tf.reduce_mean(step_size)
-        saturation_rate = tf.reduce_mean(tf.cast(reach_max_depth, tf.float32))
-        accept_rate = tf.reduce_mean(tf.cast(is_accepted, tf.float32))
-        divergence_rate = tf.reduce_mean(tf.cast(has_divergence, tf.float32))
-
-        @tf.py_function(Tout=[])
-        def _write(
-            mean_step_size: tf.Tensor,
-            saturation_rate: tf.Tensor,
-            accept_rate: tf.Tensor,
-            divergence_rate: tf.Tensor,
-        ) -> None:
             with self.summary_writer.as_default():
-                tf.summary.scalar("hmc/step_size", mean_step_size, step=self.hmc_step)
-                tf.summary.scalar(
-                    "hmc/tree_depth_saturation_rate",
-                    saturation_rate,
-                    step=self.hmc_step,
-                )
-                tf.summary.scalar("hmc/accept_rate", accept_rate, step=self.hmc_step)
-                tf.summary.scalar(
-                    "hmc/divergence_rate", divergence_rate, step=self.hmc_step
-                )
-            self.hmc_step += 1
+                for i in range(n):
+                    for tag, values in series.items():
+                        base = (
+                            self.hmc_step
+                            if tag.startswith("hmc/")
+                            else self.sample_step
+                        )
+                        tf.summary.scalar(tag, values[i], step=base + i)
+            self.summary_writer.flush()
 
-        _write(mean_step_size, saturation_rate, accept_rate, divergence_rate)
+        self.hmc_step += n
+        self.sample_step += n
 
-    @tf.function(jit_compile=JIT_COMPILE)
-    def sample_chain_burnin(
-        self,
-        position: tf.Tensor,
-        kernel: tfp.mcmc.TransitionKernel,
-    ) -> tuple[tf.Tensor, tf.Tensor, "DualAveragingStepSizeAdaptationResults"]:
-        # Run as its own sample_chain call, and as its own eager Python
-        # call (see train_hmc), for two reasons: (1) tfp.mcmc.sample_chain
-        # never traces its num_burnin_steps steps, so this is the only way
-        # to see the step-size adaptation trajectory; (2) returning to
-        # Python before the run phase starts lets train_hmc print burn-in
-        # diagnostics -- and lets you Ctrl+C -- before committing to the
-        # (usually much longer) run phase.
-        burnin = tfp.mcmc.sample_chain(
-            num_results=self.n_burnin_steps,
-            current_state=position,
-            kernel=kernel,
-            trace_fn=self.trace_fn,
-            return_final_kernel_results=True,
-            name="burnin",
-            parallel_iterations=NPROC,
-        )
-        burnin_step_size, *_ = burnin.trace
-
-        # burnin.all_states is empty when n_burnin_steps == 0 (nothing to
-        # index) -- fall back to the original position, matching what
-        # num_burnin_steps=0 does in a single-call sample_chain.
-        final_state = position if self.n_burnin_steps == 0 else burnin.all_states[-1]
-
-        return final_state, burnin_step_size, burnin.final_kernel_results
+        if self.sample_progress is not None:
+            self.sample_progress.update(n)
+            self.sample_progress.set_postfix({
+                "log_prob": f"{float(series['samples/samples/mean_log_prob'][-1]):.3E}",
+                "accept": f"{float(series['hmc/accept_rate'][-1]):.2%}",
+            })
 
     @tf.function(jit_compile=JIT_COMPILE)
-    def sample_chain_run(
+    def _sample_chain_chunk(
         self,
-        position: tf.Tensor,
+        state: tf.Tensor,
         kernel: tfp.mcmc.TransitionKernel,
-        previous_kernel_results: "DualAveragingStepSizeAdaptationResults",
-    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        run = tfp.mcmc.sample_chain(
-            num_results=self.n_run_steps,
-            current_state=position,
+        previous_kernel_results: "DualAveragingStepSizeAdaptationResults | None",
+        num_results: int,
+        num_burnin_steps: int,
+        num_steps_between_results: int,
+        seed: tf.Tensor,
+    ) -> tuple[
+        tf.Tensor, "Sequence[tf.Tensor]", "DualAveragingStepSizeAdaptationResults"
+    ]:
+        chunk = tfp.mcmc.sample_chain(
+            num_results=num_results,
+            num_burnin_steps=num_burnin_steps,
+            current_state=state,
             previous_kernel_results=previous_kernel_results,
             kernel=kernel,
-            num_steps_between_results=self.n_thinning,
+            num_steps_between_results=num_steps_between_results,
             trace_fn=self.trace_fn,
-            name="run",
+            return_final_kernel_results=True,
+            seed=seed,
             parallel_iterations=NPROC,
         )
-        _run_step_size, reach_max_depth, is_accepted, has_divergence = run.trace
+        return chunk.all_states, chunk.trace, chunk.final_kernel_results
 
-        samples = self.map.constrain(run.all_states)
+    def _run_sampling_phase(
+        self,
+        *,
+        phase: "Literal['adaption', 'burnin', 'run']",
+        kernel: tfp.mcmc.TransitionKernel,
+        state: tf.Tensor,
+        total_steps: int,
+        chunk_steps: int,
+        thinning: int,
+        hmc_savepath: "Path | None",
+        pkr: "DualAveragingStepSizeAdaptationResults | None" = None,
+        steps_done: int = 0,
+        run_states: "list[tf.Tensor] | None" = None,
+    ) -> tuple[
+        tf.Tensor,
+        "DualAveragingStepSizeAdaptationResults | None",
+        "tuple[tf.Tensor, ...] | None",
+        "tf.Tensor | None",
+    ]:
+        traces: list[Sequence[tf.Tensor]] = []
+        run_states = list(run_states) if run_states is not None else []
+        keep_states = phase == "run"
 
-        return samples, reach_max_depth, is_accepted, has_divergence
+        while steps_done < total_steps:
+            n = min(chunk_steps, total_steps - steps_done)
+            # No leading gap before the very first recorded step of a phase
+            # (matches a single-call sample_chain); re-insert the thinning
+            # gap at every later chunk boundary.
+            lead_gap = 0 if steps_done == 0 else thinning
+            self._hmc_seed, chunk_seed = tfp.random.split_seed(self._hmc_seed, n=2)
 
-    def report_burnin_diagnostics(self, burnin_step_size: tf.Tensor) -> None:
-        """Log the step-size adaptation health, to be called right after burn-in.
+            all_states, trace, pkr = self._sample_chain_chunk(
+                state, kernel, pkr, n, lead_gap, thinning, chunk_seed
+            )
+            state = all_states[-1]
+            steps_done += n
+            traces.append(trace)
+            if keep_states:
+                run_states.append(all_states)
 
-        Called between `sample_chain_burnin` and `sample_chain_run` in
-        `train_hmc` -- deliberately *before* the run phase starts, so a
-        too-short `n_burnin_steps` shows up here and the run (often the
-        most expensive part) can be cancelled instead of run to completion
+            self._emit_sample_summaries(trace)
+
+            if self._checkpoint_hmc and hmc_savepath is not None:
+                self._save_hmc_run_state(
+                    phase=phase,
+                    state=state,
+                    pkr=pkr,
+                    steps_done=steps_done,
+                    run_states=run_states,
+                    hmc_savepath=hmc_savepath,
+                )
+
+        full_trace = None
+        if traces:
+            full_trace = tuple(
+                tf.concat([t[k] for t in traces], axis=0) for k in range(len(traces[0]))
+            )
+        all_states = tf.concat(run_states, axis=0) if run_states else None
+        return state, pkr, full_trace, all_states
+
+    # === HMC checkpoint / restore ===
+    #
+    # An in-progress HMC run is checkpointed between chunks (when
+    # ``checkpoint_hmc`` is set) as a small ``hmc/run/run_state.npz`` +
+    # ``run_state.json`` pair, so an interrupted run resumes without repeating
+    # completed burn-in / sampling. The pair is deleted once the final
+    # ``PosteriorHMCValue`` checkpoint is written. tfp kernel results are a
+    # nested namedtuple of tensors: ``tf.nest.flatten`` on save,
+    # ``tf.nest.pack_sequence_as`` against a fresh ``bootstrap_results``
+    # template on restore.
+
+    def _save_hmc_run_state(
+        self,
+        *,
+        phase: str,
+        state: tf.Tensor,
+        pkr: "DualAveragingStepSizeAdaptationResults",
+        steps_done: int,
+        run_states: "list[tf.Tensor]",
+        hmc_savepath: "Path",
+    ) -> None:
+        """Atomically write the intermediate HMC run state after one chunk."""
+        run_dir = hmc_savepath / "run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        leaves = tf.nest.flatten(pkr)
+        arrays: dict[str, "npt.NDArray[Any]"] = {
+            "state": np.asarray(state),
+            "hmc_seed": np.asarray(self._hmc_seed),
+        }
+        for i, leaf in enumerate(leaves):
+            arrays[f"pkr_{i}"] = np.asarray(leaf)
+        if phase == "run" and run_states:
+            arrays["run_states"] = np.asarray(tf.concat(run_states, axis=0))
+
+        meta = {
+            "phase": phase,
+            "steps_done": int(steps_done),
+            "hmc_step": int(self.hmc_step),
+            "sample_step": int(self.sample_step),
+            "n_pkr_leaves": len(leaves),
+            "n_adaption_steps": int(self.n_adaption_steps),
+            "n_burnin_steps": int(self.n_burnin_steps),
+            "n_run_steps": int(self.n_run_steps),
+            "n_walkers": int(self.n_walkers),
+        }
+
+        tmp_npz = run_dir / "run_state.npz.tmp"
+        with tmp_npz.open("wb") as handle:
+            np.savez(handle, **arrays)
+        tmp_npz.replace(run_dir / "run_state.npz")
+        (run_dir / "run_state.json").write_text(json.dumps(meta))
+
+    def _read_hmc_run_state(
+        self, hmc_savepath: "Path | None"
+    ) -> "dict[str, Any] | None":
+        """Load an intermediate HMC run-state checkpoint if a usable one exists.
+
+        Args:
+            hmc_savepath: ``<savepath>/hmc`` or None.
+
+        Returns:
+            ``{"meta": <json dict>, "data": <NpzFile>}``, or None (start
+            fresh) when checkpointing is off, no savepath is given, no
+            checkpoint is present, or the checkpoint was written for a
+            different sampler configuration.
+        """
+        if not self._checkpoint_hmc or hmc_savepath is None:
+            return None
+        run_dir = hmc_savepath / "run"
+        npz_path = run_dir / "run_state.npz"
+        meta_path = run_dir / "run_state.json"
+        if not (npz_path.exists() and meta_path.exists()):
+            return None
+
+        meta = json.loads(meta_path.read_text())
+        if (
+            meta.get("n_adaption_steps") != int(self.n_adaption_steps)
+            or meta.get("n_burnin_steps") != int(self.n_burnin_steps)
+            or meta.get("n_run_steps") != int(self.n_run_steps)
+            or meta.get("n_walkers") != int(self.n_walkers)
+        ):
+            self.log.warning(
+                f"Ignoring HMC run-state checkpoint at {run_dir}: it was "
+                "written for a different sampler configuration."
+            )
+            return None
+
+        totals = {
+            "adaption": self.n_adaption_steps,
+            "burnin": self.n_burnin_steps,
+            "run": self.n_run_steps,
+        }
+        total = totals[meta["phase"]]
+        self.log.info(
+            f"Resuming HMC from {run_dir} "
+            f"(phase={meta['phase']}, {meta['steps_done']}/{total} steps done)."
+        )
+        return {"meta": meta, "data": np.load(npz_path)}
+
+    def _hmc_resume_plan(
+        self,
+        hmc_savepath: "Path | None",
+        position: tf.Tensor,
+        kernel_adaption: tfp.mcmc.TransitionKernel,
+        kernel_burnin: tfp.mcmc.TransitionKernel,
+        kernel_run: tfp.mcmc.TransitionKernel,
+    ) -> "dict[str, Any]":
+        """Resolve where to (re)start HMC, folding in the resume checkpoint.
+
+        Advances `self.hmc_step` / `self.sample_step` / `self._hmc_seed` and
+        the progress bar to match a restored checkpoint, then reports the
+        per-phase starting parameters.
+
+        Args:
+            hmc_savepath: ``<savepath>/hmc`` or None.
+            position: the fresh (unconstrained, restricted-SN) start position.
+            kernel_adaption: the adaption kernel (for the resume template).
+            kernel_burnin: the burn-in kernel (for the resume template).
+            kernel_run: the run kernel (for the resume template).
+
+        Returns:
+            ``skip_adaption`` / ``skip_burnin`` (bool), ``adaption_state`` /
+            ``adaption_pkr`` / ``adaption_steps_done`` (start of the adaption
+            phase), ``burnin_state`` / ``burnin_pkr`` / ``burnin_steps_done``
+            (start of the burn-in phase, or -- when ``skip_burnin`` -- its
+            hand-off to the run phase), and ``run_steps_done`` /
+            ``run_states_seed`` (resume state for the run phase).
+        """
+        plan: dict[str, Any] = {
+            "skip_adaption": False,
+            "skip_burnin": False,
+            "adaption_state": position,
+            "adaption_pkr": None,
+            "adaption_steps_done": 0,
+            "burnin_state": position,
+            "burnin_pkr": None,
+            "burnin_steps_done": 0,
+            "run_steps_done": 0,
+            "run_states_seed": None,
+        }
+
+        resume = self._read_hmc_run_state(hmc_savepath)
+        if resume is None:
+            return plan
+
+        meta, data = resume["meta"], resume["data"]
+        self.hmc_step = int(meta["hmc_step"])
+        self.sample_step = int(meta["sample_step"])
+        self._hmc_seed = tf.constant(data["hmc_seed"], dtype=tf.int32)
+        state = tf.constant(data["state"])
+
+        phase_order = ("adaption", "burnin", "run")
+        totals = {
+            "adaption": self.n_adaption_steps,
+            "burnin": self.n_burnin_steps,
+            "run": self.n_run_steps,
+        }
+        done_phase_offset = sum(
+            totals[p] for p in phase_order[: phase_order.index(meta["phase"])]
+        )
+        self.sample_progress.update(meta["steps_done"] + done_phase_offset)
+
+        if meta["phase"] == "run":
+            plan["skip_adaption"] = True
+            plan["skip_burnin"] = True
+            plan["burnin_state"] = state
+            plan["burnin_pkr"] = self._restore_pkr(
+                kernel_run, state, data, meta["n_pkr_leaves"]
+            )
+            plan["run_steps_done"] = int(meta["steps_done"])
+            if "run_states" in data.files:
+                plan["run_states_seed"] = [tf.constant(data["run_states"])]
+        elif meta["phase"] == "burnin":
+            plan["skip_adaption"] = True
+            plan["burnin_state"] = state
+            plan["burnin_pkr"] = self._restore_pkr(
+                kernel_burnin, state, data, meta["n_pkr_leaves"]
+            )
+            plan["burnin_steps_done"] = int(meta["steps_done"])
+        else:  # "adaption"
+            plan["adaption_state"] = state
+            plan["adaption_pkr"] = self._restore_pkr(
+                kernel_adaption, state, data, meta["n_pkr_leaves"]
+            )
+            plan["adaption_steps_done"] = int(meta["steps_done"])
+        return plan
+
+    @staticmethod
+    def _restore_pkr(
+        kernel: tfp.mcmc.TransitionKernel,
+        state: tf.Tensor,
+        data: "Any",
+        n_leaves: int,
+    ) -> "DualAveragingStepSizeAdaptationResults":
+        """Repack a flattened kernel-results checkpoint onto a fresh template.
+
+        Args:
+            kernel: the kernel whose ``bootstrap_results`` supplies the
+                nested structure to pack into.
+            state: current chain state (unconstrained).
+            data: the loaded ``NpzFile`` holding ``pkr_<i>`` leaves.
+            n_leaves: leaf count recorded when the checkpoint was written.
+
+        Returns:
+            The repacked kernel results, ready to pass as
+            ``previous_kernel_results``.
+
+        Raises:
+            RuntimeError: if the checkpoint's leaf count does not match the
+                current kernel (incompatible sampler configuration).
+        """
+        template = kernel.bootstrap_results(state)
+        flat_template = tf.nest.flatten(template)
+        if len(flat_template) != n_leaves:
+            msg = (
+                "HMC run-state checkpoint is incompatible with the current "
+                f"kernel ({n_leaves} saved kernel-result leaves vs "
+                f"{len(flat_template)} expected). Delete the 'hmc/run' "
+                "directory to restart the HMC run from scratch."
+            )
+            raise RuntimeError(msg)
+        leaves = [
+            tf.constant(data[f"pkr_{i}"], dtype=leaf.dtype)
+            for i, leaf in enumerate(flat_template)
+        ]
+        return tf.nest.pack_sequence_as(template, leaves)
+
+    def report_adaption_diagnostics(self, adaption_step_size: tf.Tensor) -> None:
+        """Log the step-size adaptation health, to be called right after adaption.
+
+        Called from `_sample_hmc` between the adaption and burn-in phases --
+        deliberately *before* burn-in/run start, so a too-short
+        `n_adaption_steps` shows up here and the (often much more expensive)
+        burn-in and run phases can be cancelled instead of run to completion
         first.
         """
         step_size_drift_warn_threshold = 0.05
 
-        # Compare the step-size trace's last two burn-in windows: if it's
-        # still moving this late in burn-in, adaptation hasn't converged
-        # and n_burnin_steps/n_adaption_steps should grow. Too short a
-        # burn-in to form two windows means there isn't enough signal to
-        # judge convergence either way.
+        # Compare the step-size trace's last two adaption windows: if it's
+        # still moving this late in adaption, it hasn't converged and
+        # n_adaption_steps should grow. Too short an adaption phase to form
+        # two windows means there isn't enough signal to judge convergence
+        # either way.
         min_steps_for_plateau_check = 20
-        if self.n_burnin_steps < min_steps_for_plateau_check:
+        if self.n_adaption_steps < min_steps_for_plateau_check:
             self.log.debug(
-                "Skipping burn-in step-size plateau check: "
-                f"n_burnin_steps={self.n_burnin_steps} is too small to assess."
+                "Skipping adaption step-size plateau check: "
+                f"n_adaption_steps={self.n_adaption_steps} is too small to assess."
             )
             return
 
-        window = max(1, self.n_burnin_steps // 10)
-        penultimate = tf.reduce_mean(burnin_step_size[-2 * window : -window], axis=0)
-        final = tf.reduce_mean(burnin_step_size[-window:], axis=0)
+        window = max(1, self.n_adaption_steps // 10)
+        penultimate = tf.reduce_mean(adaption_step_size[-2 * window : -window], axis=0)
+        final = tf.reduce_mean(adaption_step_size[-window:], axis=0)
         relative_change = float(
             tf.reduce_mean(
                 tf.abs(final - penultimate) / tf.maximum(tf.abs(penultimate), 1e-12)
@@ -2072,16 +1988,15 @@ class TFPosteriorModel(ks.Model):
         self.log.info(
             f"HMC step-size adaptation: {relative_change:.2%} relative "
             f"change between the last two {window}-step windows of the "
-            f"{self.n_burnin_steps}-step burn-in "
-            f"(n_adaption_steps={self.n_adaption_steps})."
+            f"{self.n_adaption_steps}-step adaption phase."
         )
         if relative_change > step_size_drift_warn_threshold:
             self.log.warning(
                 f"Step size is still changing by {relative_change:.2%} "
-                "near the end of burn-in -- adaptation may not have "
-                f"converged within n_burnin_steps={self.n_burnin_steps}. "
-                "Consider increasing n_burnin_steps/n_adaption_steps "
-                "(Ctrl+C now to cancel before the run phase)."
+                "near the end of adaption -- it may not have converged "
+                f"within n_adaption_steps={self.n_adaption_steps}. Consider "
+                "increasing n_adaption_steps (Ctrl+C now to cancel before "
+                "the burn-in/run phases)."
             )
 
     def report_run_diagnostics(
@@ -2098,43 +2013,30 @@ class TFPosteriorModel(ks.Model):
         divergence_rate = float(tf.reduce_mean(tf.cast(has_divergence, tf.float32)))
         self.log.info(
             f"HMC run-phase diagnostics: {saturation_rate:.2%} of steps hit "
-            f"max_tree_depth={self.max_tree_depth} (n_leapfrog={self.n_leapfrog}), "
+            f"max_tree_depth={self.max_tree_depth_run} (n_leapfrog_run={self.n_leapfrog_run}), "
             f"{accept_rate:.2%} accept rate, {divergence_rate:.2%} divergence rate."
         )
         if saturation_rate > saturation_warn_threshold:
             self.log.warning(
                 f"{saturation_rate:.2%} of run steps hit max_tree_depth="
-                f"{self.max_tree_depth} before reaching a U-turn -- trajectories "
+                f"{self.max_tree_depth_run} before reaching a U-turn -- trajectories "
                 "are being truncated by the cap rather than terminating "
-                "naturally. Consider increasing n_leapfrog."
+                "naturally. Consider increasing n_leapfrog_run."
             )
 
-    def train_hmc(
-        self,
-        *,
-        savepath: "Path | None" = None,
-    ) -> None:
-        self.setup_hmc()
-        self.n_chains = self.n_walkers
-        if savepath is not None:
-            hmc_savepath = savepath / "hmc"
-            hmc_savepath.mkdir(parents=True, exist_ok=True)
-            if (hmc_savepath / self.ckpt_path).exists():
-                self.log.debug(f"Loading HMC from {hmc_savepath}")
-                self.load_checkpoint(hmc_savepath, load_hmc=True)
+    def _hmc_initial_position(self) -> tuple[tf.Tensor, tf.Tensor]:
+        """Build the per-(walker, SN) start position and step size for HMC.
 
-                samples = self.hmc.samples
+        Both come from the MAP result: the start position is the MAP best
+        (unconstrained, replicated per walker, jittered by the step size when
+        ``n_walkers > 1``); the step size is either the MAP shift
+        (``step_size_scale == "shift"``) or a min/max blend of a configured
+        scale and the per-parameter posterior spread.
 
-                vars(self)["hmc"] = PosteriorHMCValue(
-                    tf.Variable(samples),
-                    tf.Variable(self.hmc.log_prior),
-                    tf.Variable(self.hmc.log_like),
-                    tf.Variable(self.hmc.log_prob),
-                    tf.Variable(self.hmc.zs),
-                )
-                return
-        self.log.debug("Running HMC")
-
+        Returns:
+            ``(initial_position, step_size)``, both shaped
+            ``[n_walkers, sn_dim, n_params]``.
+        """
         initial_position = self.map.position.best
 
         if self.step_size_scale == "shift":
@@ -2165,17 +2067,10 @@ class TFPosteriorModel(ks.Model):
 
             self.log.debug(f"Step Size: {step_size_inner}")
 
-            # step_size_inner currently has shape (n_params)
-            # We have n_walkers * n_sn chains
-            # We want each sn to have their own step size, across their walkers
-            # So we need step_size to have shape (n_sn, n_params)
-
-            # shape = (1, n_params)
-            step_size = tf.expand_dims(step_size_inner, axis=0)
-
-            # shape = (n_sn, n_params)
+            # step_size_inner has shape (n_params); we want (n_sn, n_params)
+            # so each SN has its own step size across its walkers.
             step_size = tf.repeat(
-                step_size,
+                tf.expand_dims(step_size_inner, axis=0),
                 repeats=initial_position.shape[-2],
                 axis=0,
             )
@@ -2184,52 +2079,212 @@ class TFPosteriorModel(ks.Model):
         initial_position = tf.repeat(initial_position, repeats=self.n_walkers, axis=0)
 
         # Give each walker its own copy of the (per-SN) step size, so
-        # DualAveragingStepSizeAdaptation adapts a fully independent step
-        # size per (walker, SN) pair instead of pooling every walker's
-        # accept ratio into one shared per-SN step size, where a single
-        # stuck/divergent walker could otherwise drag the step size down
-        # for every walker sampling that SN.
+        # DualAveragingStepSizeAdaptation adapts a fully independent step size
+        # per (walker, SN) pair instead of pooling every walker's accept ratio
+        # into one shared per-SN step size, where a single stuck/divergent
+        # walker could otherwise drag the step size down for every walker
+        # sampling that SN.
         step_size = tf.repeat(
             tf.expand_dims(step_size, axis=0), repeats=self.n_walkers, axis=0
         )
 
-        if self.n_walkers > 1:
-            # Start each walker from an independently-jittered point
-            # around the MAP estimate (scaled by the per-SN step size)
-            # rather than every walker replicating the exact same
-            # starting position. Identical starts mean extra walkers are
-            # pseudo-replicates of a single trajectory rather than
-            # independent explorations of the posterior.
-            initial_position += tf.random.normal(
-                tf.shape(initial_position), stddev=step_size
-            )
+        # if self.n_walkers > 1:
+        #     # Start each walker from an independently-jittered point around the
+        #     # MAP estimate (scaled by the per-SN step size) rather than every
+        #     # walker replicating the exact same starting position -- identical
+        #     # starts make extra walkers pseudo-replicates of a single
+        #     # trajectory rather than independent explorations of the posterior.
+        #     initial_position += tf.random.normal(
+        #         tf.shape(initial_position), stddev=(1 - 1 / self.n_walkers) * step_size
+        #     )
 
+        return initial_position, step_size
+
+    def _sample_hmc(
+        self,
+        position: tf.Tensor,
+        step: tf.Tensor,
+        hmc_savepath: "Path | None",
+    ) -> tf.Tensor:
+        sampler_adaption = tfp.mcmc.NoUTurnSampler(
+            target_log_prob_fn=self.unnormalized_posterior_log_prob,
+            step_size=step,
+            max_tree_depth=self.n_leapfrog_adaption,
+            parallel_iterations=NPROC,
+        )
+        kernel_adaption = tfp.mcmc.DualAveragingStepSizeAdaptation(
+            inner_kernel=sampler_adaption,
+            num_adaptation_steps=self.n_adaption_steps,
+            target_accept_prob=self.target_acceptance_rate,
+        )
+        # Burn-in and run both sample with the step size the adaption phase
+        # converged to -- num_adaptation_steps=0 freezes it immediately, so
+        # DualAveragingStepSizeAdaptation just forwards the inner NUTS
+        # kernel's results without further adapting. Burn-in exists purely to
+        # let the chain equilibrate under its own (typically larger than run,
+        # smaller than adaption) max_tree_depth before the cheap run phase
+        # starts. A separate kernel/sampler is used per phase --
+        # max_tree_depth is baked into NoUTurnSampler at construction, but
+        # previous_kernel_results (step size, adaptation step counter, etc.)
+        # carries over unaffected, since none of that state depends on
+        # max_tree_depth.
+        sampler_burnin = tfp.mcmc.NoUTurnSampler(
+            target_log_prob_fn=self.unnormalized_posterior_log_prob,
+            step_size=step,
+            max_tree_depth=self.n_leapfrog_burnin,
+            parallel_iterations=NPROC,
+        )
+        kernel_burnin = tfp.mcmc.DualAveragingStepSizeAdaptation(
+            inner_kernel=sampler_burnin,
+            num_adaptation_steps=0,
+            target_accept_prob=self.target_acceptance_rate,
+        )
+        sampler_run = tfp.mcmc.NoUTurnSampler(
+            target_log_prob_fn=self.unnormalized_posterior_log_prob,
+            step_size=step,
+            max_tree_depth=self.n_leapfrog_run,
+            parallel_iterations=NPROC,
+        )
+        kernel_run = tfp.mcmc.DualAveragingStepSizeAdaptation(
+            inner_kernel=sampler_run,
+            num_adaptation_steps=0,
+            target_accept_prob=self.target_acceptance_rate,
+        )
+
+        plan = self._hmc_resume_plan(
+            hmc_savepath, position, kernel_adaption, kernel_burnin, kernel_run
+        )
+
+        if plan["skip_adaption"]:
+            adaption_state = plan["adaption_state"]
+            adaption_pkr = plan["adaption_pkr"]
+        else:
+            adaption_state, adaption_pkr, adaption_trace, _ = self._run_sampling_phase(
+                phase="adaption",
+                kernel=kernel_adaption,
+                state=plan["adaption_state"],
+                total_steps=self.n_adaption_steps,
+                chunk_steps=self.n_adaption_chunk_steps,
+                thinning=0,
+                hmc_savepath=hmc_savepath,
+                pkr=plan["adaption_pkr"],
+                steps_done=plan["adaption_steps_done"],
+            )
+            # None when the adaption loop ran no chunks (already complete on
+            # resume): fall back to the restored results.
+            adaption_pkr = (
+                adaption_pkr if adaption_pkr is not None else plan["adaption_pkr"]
+            )
+            # Reported before burn-in/run start, so a too-short
+            # n_adaption_steps is visible here -- Ctrl+C now rather than
+            # waiting through the whole (usually much longer) burn-in/run.
+            # Skipped when resuming part-way through adaption (the trace is
+            # then partial).
+            full_adaption = adaption_trace is not None and (
+                int(adaption_trace[0].shape[0]) >= self.n_adaption_steps
+            )
+            if full_adaption:
+                self.report_adaption_diagnostics(adaption_trace[0])
+
+        if plan["skip_burnin"]:
+            burnin_state = plan["burnin_state"]
+            burnin_pkr = plan["burnin_pkr"]
+        else:
+            burnin_start_state = (
+                plan["burnin_state"] if plan["skip_adaption"] else adaption_state
+            )
+            burnin_start_pkr = (
+                plan["burnin_pkr"] if plan["skip_adaption"] else adaption_pkr
+            )
+            burnin_state, burnin_pkr, _, _ = self._run_sampling_phase(
+                phase="burnin",
+                kernel=kernel_burnin,
+                state=burnin_start_state,
+                total_steps=self.n_burnin_steps,
+                chunk_steps=self.n_burnin_chunk_steps,
+                thinning=0,
+                hmc_savepath=hmc_savepath,
+                pkr=burnin_start_pkr,
+                steps_done=plan["burnin_steps_done"],
+            )
+            # None when the burn-in loop ran no chunks (n_burnin_steps == 0,
+            # or already complete on resume): fall back to whatever it was
+            # handed.
+            burnin_pkr = burnin_pkr if burnin_pkr is not None else burnin_start_pkr
+
+        _, _, run_trace, all_states = self._run_sampling_phase(
+            phase="run",
+            kernel=kernel_run,
+            state=burnin_state,
+            total_steps=self.n_run_steps,
+            chunk_steps=self.n_run_chunk_steps,
+            thinning=self.n_thinning,
+            hmc_savepath=hmc_savepath,
+            pkr=burnin_pkr,
+            steps_done=plan["run_steps_done"],
+            run_states=plan["run_states_seed"],
+        )
+        # run_trace = (step_size, reach_max_depth, is_accepted,
+        #              has_divergence, lp_min, lp_mean, lp_max)
+        self.report_run_diagnostics(run_trace[1], run_trace[2], run_trace[3])
+        return self.map.constrain(all_states)
+
+    def train_hmc(
+        self,
+        *,
+        savepath: "Path | None" = None,
+    ) -> None:
+        self.setup_hmc()
+        self.n_chains = self.n_walkers
+        if savepath is not None:
+            hmc_savepath = savepath / "hmc"
+            hmc_savepath.mkdir(parents=True, exist_ok=True)
+            if (hmc_savepath / self.ckpt_path).exists():
+                self.log.debug(f"Loading HMC from {hmc_savepath}")
+                self.load_checkpoint(hmc_savepath, load_hmc=True)
+
+                samples = self.hmc.samples
+
+                vars(self)["hmc"] = PosteriorHMCValue(
+                    tf.Variable(samples),
+                    tf.Variable(self.hmc.log_prior),
+                    tf.Variable(self.hmc.log_like),
+                    tf.Variable(self.hmc.log_prob),
+                    tf.Variable(self.hmc.zs),
+                )
+                return
+        self.log.debug("Running HMC")
+
+        initial_position, step_size = self._hmc_initial_position()
+
+        n_total_steps = self.n_adaption_steps + self.n_burnin_steps + self.n_run_steps
         self.log.debug(
-            f"With {self.n_burnin_steps} [{self.max_tree_depth * self.n_burnin_steps}] burn-in steps [samples] ({self.n_adaption_steps} [{self.max_tree_depth * self.n_adaption_steps}] of which will be used for step-size adaption) and {self.n_run_steps} [{self.max_tree_depth * self.n_run_steps}] run steps [samples], a maximum of {(self.n_burnin_steps + self.n_run_steps)} [{self.max_samples}] steps [samples] will be drawn per-walker for a max leapfrog depth of {self.max_tree_depth}. Across all {self.n_walkers} walkers a maximum of {self.n_walkers * (self.n_burnin_steps + self.n_run_steps)} [{self.n_walkers * self.max_samples}] steps [samples] will be drawn."
+            f"With {self.n_adaption_steps} [{self.max_tree_depth_adaption * self.n_adaption_steps}] step-size adaption steps [samples] (max leapfrog depth {self.max_tree_depth_adaption}), {self.n_burnin_steps} [{self.max_tree_depth_burnin * self.n_burnin_steps}] burn-in steps [samples] (max leapfrog depth {self.max_tree_depth_burnin}) and {self.n_run_steps} [{self.max_tree_depth_run * self.n_run_steps}] run steps [samples] (max leapfrog depth {self.max_tree_depth_run}), a maximum of {n_total_steps} [{self.max_samples}] steps [samples] will be drawn per-walker. Across all {self.n_walkers} walkers a maximum of {self.n_walkers * n_total_steps} [{self.n_walkers * self.max_samples}] steps [samples] will be drawn."
         )
 
         self.summary_writer = None
-        self.summary_interval = 1
         if self.profile and savepath is not None:
             log_dir = savepath.parent / self.log_path / savepath.stem / "hmc"
             self.summary_writer = tf.summary.create_file_writer(
                 str(log_dir),
             )
         self.sample_progress = tqdm(
-            total=self.max_samples,
+            total=n_total_steps,
             leave=False,
             dynamic_ncols=True,
             position=0,
         )
-        # self.run_progress = tqdm(
-        #     total=self.n_run_steps + 1,
-        #     leave=False,
-        #     dynamic_ncols=True,
-        #     position=1,
-        # )
-        # self.run_progress.set_description("run")
-        self.step_samples = 0
+        # hmc_step keys the `hmc/*` TensorBoard charts (shared across burn-in
+        # and the run so they form one continuous timeline); sample_step keys
+        # `samples/samples/*_log_prob`. Both advance in eager Python from
+        # _emit_sample_summaries, once per recorded step.
         self.hmc_step = 0
+        self.sample_step = 0
+        # Every HMC run is seeded (stateless) so chunked runs are
+        # deterministic and a resumed run reproduces an uninterrupted one.
+        self._hmc_seed = tfp.random.sanitize_seed(self.seed)
+
+        hmc_ckpt_path = hmc_savepath if savepath is not None else None
 
         # Masked SNe have -inf log-prob everywhere, but TFP's NUTS
         # tree-doubling loop is a single tf.while_loop shared across the
@@ -2252,37 +2307,8 @@ class TFPosteriorModel(ks.Model):
                 else tf.gather(step_size, valid_indices, axis=-2)
             )
 
-            sampler = tfp.mcmc.NoUTurnSampler(
-                target_log_prob_fn=self.unnormalized_posterior_log_prob,
-                step_size=step,
-                max_tree_depth=self.n_leapfrog,
-                parallel_iterations=NPROC,
-            )
+            samples = self._sample_hmc(position, step, hmc_ckpt_path)
 
-            kernel = tfp.mcmc.DualAveragingStepSizeAdaptation(
-                inner_kernel=sampler,
-                num_adaptation_steps=self.n_adaption_steps,
-                target_accept_prob=self.target_acceptance_rate,
-                reduce_fn=tfp.math.reduce_log_harmonic_mean_exp,
-            )
-
-            burnin_result = self.sample_chain_burnin(position, kernel)
-            # Reported (and, if self.summary_writer is set, already streamed to
-            # TensorBoard live throughout burn-in above) before the run phase
-            # starts, so a too-short n_burnin_steps is visible here -- cancel
-            # now rather than waiting through the whole run phase to find out.
-            self.report_burnin_diagnostics(burnin_result[1])
-
-            run_result = self.sample_chain_run(
-                burnin_result[0], kernel, burnin_result[2]
-            )
-            samples = run_result[0]
-            self.report_run_diagnostics(*run_result[1:])
-
-            del kernel
-            del sampler
-
-            self.step_samples = None
             self.sample_progress.close()
             self.sample_progress = None
             if self.summary_writer is not None:
@@ -2359,4 +2385,7 @@ class TFPosteriorModel(ks.Model):
 
         if savepath is not None:
             self.save_checkpoint(hmc_savepath, save_hmc=True)
+            # The full HMC result is now checkpointed -- drop the
+            # intermediate per-chunk run state.
+            shutil.rmtree(hmc_savepath / "run", ignore_errors=True)
         clear_session()
