@@ -202,12 +202,25 @@ class PosteriorConfig(BackendConfig):
     n_delta_m_chains: int
     n_delta_av_chains: int
     # - HMC -
-    n_leapfrog: PositiveInt
+    n_leapfrog_adaption: PositiveInt
+    n_leapfrog_burnin: PositiveInt
+    n_leapfrog_run: PositiveInt
     n_run_steps: PositiveInt
     n_burnin_steps: NonNegativeInt | NonNegativeFloat
     n_adaption_steps: PositiveInt | PositiveFloat
     n_walkers: PositiveInt | PositiveFloat = 1.0
     n_thinning: NonNegativeInt = 0
+    # HMC sampling is driven as a Python loop over chunks so TensorBoard
+    # writes, the progress bar and (optional) checkpoints happen between
+    # chunks in eager Python rather than inside the traced sample_chain loop.
+    # 0 -> one chunk per phase (matches a single sample_chain call);
+    # a float in (0, 1] -> that fraction of the phase's step count.
+    n_chunk_steps: NonNegativeInt | NonNegativeFloat = 0.1
+    n_adaption_chunk_steps: NonNegativeInt | NonNegativeFloat | None = None
+    n_burnin_chunk_steps: NonNegativeInt | NonNegativeFloat | None = None
+    # Write an intermediate checkpoint after every chunk so an interrupted
+    # HMC run can resume without repeating completed burn-in / sampling.
+    checkpoint_hmc: bool = True
     log_likelihood_scale: PositiveFloat = 1.0
     log_likelihood_spec_sum: bool = False
     log_likelihood_sum: bool = False

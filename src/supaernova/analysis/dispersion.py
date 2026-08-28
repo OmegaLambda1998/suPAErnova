@@ -598,14 +598,15 @@ class DispersionPlotter(Plotter):
                 p_h_ax,
             ) = ax
 
-            if mask is not None:
-                mask = mask.astype(bool)
-                x = x[mask]
-                y = y[mask]
-                yerr = yerr[mask]
-                if yerr_lower is not None and yerr_upper is not None:
-                    yerr_lower = yerr_lower[mask]
-                    yerr_upper = yerr_upper[mask]
+            if mask is None:
+                mask = np.isfinite(y)
+            mask = mask.astype(bool)
+            x = x[mask]
+            y = y[mask]
+            yerr = yerr[mask]
+            if yerr_lower is not None and yerr_upper is not None:
+                yerr_lower = yerr_lower[mask]
+                yerr_upper = yerr_upper[mask]
 
             pull_y = np.abs(y)
             pull_yerr = yerr
