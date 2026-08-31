@@ -496,8 +496,7 @@ class DispersionPlotter(Plotter):
         )
 
         # === SNPAE Mask ===
-        snpae_mask = np.ones_like(pae_mask)
-        snpae_mask &= pae_mask
+        snpae_mask = np.isfinite(pae_weighted_amplitudes)
 
         # === UMask ===
         max_us = pae_us[0]
@@ -505,7 +504,7 @@ class DispersionPlotter(Plotter):
             (max_us > model.u_latent_bounds[0]) & (max_us < model.u_latent_bounds[-1]),
             axis=-1,
         )
-        snpae_mask &= u_mask
+        # snpae_mask &= u_mask
 
         # === Peak Mask ===
         max_delta_p = hmcs[0].hmc.delta_p[
@@ -528,7 +527,7 @@ class DispersionPlotter(Plotter):
             0,
         ][pae_order]
         peak_mask = np.abs(pae_peak_phase) < 5
-        snpae_mask &= peak_mask
+        # snpae_mask &= peak_mask
 
         # === RHat Mask ===
         unmasked_r_hat = hmcs[0].hmc.r_hat[pae_order, ...]
@@ -542,7 +541,7 @@ class DispersionPlotter(Plotter):
         nmad_r_hat = 0.6745 * (pae_r_hat - median_r_hat) / mad_r_hat
         r_hat = np.max(nmad_r_hat, axis=-1)
         r_hat_mask = r_hat < np.percentile(r_hat[snpae_mask], 99)
-        snpae_mask &= r_hat_mask
+        # snpae_mask &= r_hat_mask
 
         pae_twins_mask = np.ones_like(pae_mask, dtype=bool)
         pae_salt_mask = np.ones_like(pae_mask, dtype=bool)

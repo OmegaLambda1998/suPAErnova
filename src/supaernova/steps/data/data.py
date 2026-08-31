@@ -850,16 +850,21 @@ class Data(Step[DataConfig]):
         )
         no_filt_defined = pd.isna(data["filt"]).all()
         if no_filt_defined:
-            # Rank each SN's spectra by |phase|, closest to peak first, same as sim.py
-            phase_rank = np.argsort(
-                np.argsort(np.abs(data["phase"][..., 0]), axis=-1), axis=-1
+            # A spectrum can only be selected if its SN passed the redshift cut
+            # and its own phase is within the valid phase window; push everything
+            # else to the back of the ranking so a masked-out row can never win.
+            valid_mask = (sn_mask & spec_mask)[..., 0]
+            phase_for_rank = np.where(
+                valid_mask, np.abs(data["phase"][..., 0]), np.inf
             )
-            data["spectra_mask"] = (phase_rank < self.n_spectra).astype(
+            # Rank each SN's spectra by |phase|, closest to peak first, same as sim.py
+            phase_rank = np.argsort(np.argsort(phase_for_rank, axis=-1), axis=-1)
+            data["spectra_mask"] = (
+                (phase_rank < self.n_spectra) & valid_mask
+            ).astype(spec_mask.dtype)[..., None]
+            data["phot_mask"] = ((phase_rank < self.n_phot) & valid_mask).astype(
                 spec_mask.dtype
             )[..., None]
-            data["phot_mask"] = (phase_rank < self.n_phot).astype(spec_mask.dtype)[
-                ..., None
-            ]
         else:
             # Rows with a `filt` value are photometric observations in that filter,
             # rows without one are genuine spectra
