@@ -76,6 +76,8 @@ class DispersionPlotter(Plotter):
             wl_mask=wl_mask,
             phase=True,
         )
+        input_mask &= model.data_spectra_mask | model.data_phot_mask
+
         pae_names = sn_name[:, 0, 0][pae_order]
         if twins is not None:
             sort = np.argsort(pae_names)

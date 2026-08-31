@@ -344,7 +344,13 @@ class TFPosteriorModel(ks.Model):
             else sn_mask
         )
 
-        posterior_mask = input_mask & input_sn_mask & input_spec_mask & input_wl_mask
+        posterior_mask = (
+            input_mask
+            & input_sn_mask
+            & input_spec_mask
+            & input_wl_mask
+            & (input_spectra_mask | input_phot_mask)
+        )
 
         mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
 
@@ -603,7 +609,9 @@ class TFPosteriorModel(ks.Model):
             Boolean tensor of shape `(sn_dim,)`, True where a SN has at
             least one unmasked spec/wl point.
         """
-        mask = self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask
+        mask = (self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask) & (
+            self.data_spectra_mask | self.data_phot_mask
+        )
         mask_spec = tf.math.reduce_any(mask, axis=-1)
         return tf.math.reduce_any(mask_spec, axis=-1)
 
