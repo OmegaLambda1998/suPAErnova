@@ -394,7 +394,7 @@ class SpectraPlotter(Plotter):
         # Mean
         scale = (~y.mask).sum(axis=(0, 1))
         y_mean = y.sum(axis=(0, 1)) / scale
-        yerr_mean = np.ma.sqrt((yerr * yerr).sum(axis=(0, 1)) / scale)
+        yerr_mean = np.ma.sqrt((yerr * yerr).sum(axis=(0, 1))) / scale
         y_var = ((y - y_mean) ** 2).sum(axis=(0, 1)) / scale
         y_std = np.sqrt(y_var)
         y_sem = np.sqrt(y_var / scale)
