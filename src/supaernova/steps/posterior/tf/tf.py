@@ -1847,6 +1847,14 @@ class TFPosteriorModel(ks.Model):
         run_states = list(run_states) if run_states is not None else []
         keep_states = phase == "run"
 
+        # The Python chunk loop only earns its keep when it has something to do
+        # between chunks: write a resume checkpoint, or emit per-chunk
+        # TensorBoard summaries. With neither, run the whole phase in one
+        # sample_chain call -- no chunk-boundary retraces, no per-chunk
+        # concat/emit overhead.
+        if not self._checkpoint_hmc and getattr(self, "summary_writer", None) is None:
+            chunk_steps = max(chunk_steps, total_steps)
+
         # Fresh run phase (not a resume that pre-seeded run_states): drop any
         # per-chunk state shards left behind by an earlier interrupted run.
         if keep_states and hmc_savepath is not None and not run_states:
@@ -2311,17 +2319,6 @@ class TFPosteriorModel(ks.Model):
         # previous_kernel_results (step size, adaptation step counter, etc.)
         # carries over unaffected, since none of that state depends on
         # max_tree_depth.
-        sampler_burnin = tfp.mcmc.NoUTurnSampler(
-            target_log_prob_fn=self.unnormalized_posterior_log_prob,
-            step_size=step,
-            max_tree_depth=self.n_leapfrog_burnin,
-            parallel_iterations=NPROC,
-        )
-        kernel_burnin = tfp.mcmc.DualAveragingStepSizeAdaptation(
-            inner_kernel=sampler_burnin,
-            num_adaptation_steps=0,
-            target_accept_prob=self.target_acceptance_rate,
-        )
         sampler_run = tfp.mcmc.NoUTurnSampler(
             target_log_prob_fn=self.unnormalized_posterior_log_prob,
             step_size=step,
@@ -2333,6 +2330,25 @@ class TFPosteriorModel(ks.Model):
             num_adaptation_steps=0,
             target_accept_prob=self.target_acceptance_rate,
         )
+        # Reuse the run kernel for burn-in when the tree depth matches -- one
+        # fewer distinct kernel object means one fewer full retrace of the
+        # sample_chain graph. (The pkr state carried across phases doesn't
+        # depend on max_tree_depth, so this is only a construction-time
+        # dedup, not a behaviour change.)
+        if self.n_leapfrog_burnin == self.n_leapfrog_run:
+            kernel_burnin = kernel_run
+        else:
+            sampler_burnin = tfp.mcmc.NoUTurnSampler(
+                target_log_prob_fn=self.unnormalized_posterior_log_prob,
+                step_size=step,
+                max_tree_depth=self.n_leapfrog_burnin,
+                parallel_iterations=NPROC,
+            )
+            kernel_burnin = tfp.mcmc.DualAveragingStepSizeAdaptation(
+                inner_kernel=sampler_burnin,
+                num_adaptation_steps=0,
+                target_accept_prob=self.target_acceptance_rate,
+            )
 
         plan = self._hmc_resume_plan(
             hmc_savepath, position, kernel_adaption, kernel_burnin, kernel_run

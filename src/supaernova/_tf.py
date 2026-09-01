@@ -34,14 +34,24 @@ from tensorflow_probability import (
 )
 
 ks.utils.set_random_seed(1)
-tf.config.experimental.enable_op_determinism()
+
+# Opt-in fast-math mode. Off by default: op-determinism + TF32-disabled keep
+# CUDA and ROCm bit-comparable and every run reproducible. Set
+# SNPAE_FAST_MATH=1 to trade that for speed on a single backend -- re-enables
+# nondeterministic (faster) reduction/atomics kernels and, on NVIDIA Ampere+,
+# TF32 fp32 matmul/conv. Results then vary run-to-run and backend-to-backend.
+FAST_MATH = os.environ.get("SNPAE_FAST_MATH", "0").lower() in {"1", "true", "yes"}
+
+if not FAST_MATH:
+    tf.config.experimental.enable_op_determinism()
 
 # TF32 is an NVIDIA-only reduced-precision math mode (Ampere and newer) that
 # TensorFlow enables by default for fp32 matmul/conv. It has no ROCm
 # equivalent, so leaving it on makes CUDA runs systematically less precise
-# than ROCm runs for the exact same "float32" model/gradients. Disable it so
-# both backends compute fp32 ops at full precision.
-tf.config.experimental.enable_tensor_float_32_execution(False)
+# than ROCm runs for the exact same "float32" model/gradients. Disable it
+# (unless fast-math is requested) so both backends compute fp32 ops at full
+# precision.
+tf.config.experimental.enable_tensor_float_32_execution(FAST_MATH)
 
 GPUS = tf.config.list_physical_devices("GPU")
 tf.config.set_soft_device_placement(True)
