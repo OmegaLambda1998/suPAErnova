@@ -602,6 +602,18 @@ class TFPosteriorModel(ks.Model):
         if not hasattr(self, "map"):
             vars(self)["map"] = PosteriorMap(self)
 
+    def get_mask_spec(self) -> tf.Tensor:
+        """Compute the per-(sn, spec) mask.
+
+        Returns:
+            Boolean tensor of shape `(sn_dim, spec_dim)`, True where a
+            spec/phot row has at least one unmasked wl point.
+        """
+        mask = (self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask) & (
+            self.data_spectra_mask | self.data_phot_mask
+        )
+        return tf.math.reduce_any(mask, axis=-1)
+
     def get_mask_sn(self) -> tf.Tensor:
         """Compute the per-SN mask.
 
@@ -609,11 +621,7 @@ class TFPosteriorModel(ks.Model):
             Boolean tensor of shape `(sn_dim,)`, True where a SN has at
             least one unmasked spec/wl point.
         """
-        mask = (self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask) & (
-            self.data_spectra_mask | self.data_phot_mask
-        )
-        mask_spec = tf.math.reduce_any(mask, axis=-1)
-        return tf.math.reduce_any(mask_spec, axis=-1)
+        return tf.math.reduce_any(self.get_mask_spec(), axis=-1)
 
     @contextlib.contextmanager
     def _restricted_to_valid_sn(self) -> "Iterator[tf.Tensor | None]":
@@ -724,6 +732,87 @@ class TFPosteriorModel(ks.Model):
         updated = tf.tensor_scatter_nd_update(full, indices[:, None], moved)
         inv_perm = list(np.argsort(perm))
         return tf.transpose(updated, inv_perm)
+
+    @contextlib.contextmanager
+    def _repacked_to_valid_spec(self) -> "Iterator[None]":
+        """Temporarily shrink every spec_dim-indexed attribute to its valid rows.
+
+        The decoder/photometry pass runs densely over the full (spec_dim,
+        wl_dim) grid for every SN, but spec_dim is padded to the max
+        number of observations across all SNe -- most SNe use only a
+        fraction of it. Every layer in the decoder is a Dense op that
+        broadcasts unmodified over spec_dim (axis 1), so repacking valid
+        rows to the front and trimming to the largest per-SN valid count
+        needed by the (already sn_dim-restricted) batch reduces decoder
+        and photometry FLOPs proportionally, with no effect on the
+        result: the likelihood reduction collapses spec_dim away before
+        producing HMC's per-SN log-prob, so nothing needs to be scattered
+        back afterwards. Callers must be nested inside a scope where
+        `self.spec_dim` matches the current attributes' shape.
+
+        Yields:
+            None; spec_dim-indexed attributes are mutated in place for the
+            scope of the context and restored on exit.
+        """
+        new_spec_dim = self.spec_dim
+        if self.sn_dim:
+            n_valid = tf.math.count_nonzero(self.get_mask_spec(), axis=-1)
+            new_spec_dim = max(int(tf.reduce_max(n_valid)), 1)
+
+        if new_spec_dim >= self.spec_dim:
+            yield
+        else:
+            # Valid rows first (stable keeps relative order); trim to new_spec_dim.
+            perm = tf.argsort(
+                tf.cast(self.get_mask_spec(), tf.int32),
+                axis=-1,
+                direction="DESCENDING",
+                stable=True,
+            )[:, :new_spec_dim]
+
+            spec_attrs = (
+                "data_time",
+                "data_amplitude",
+                "data_sigma",
+                "data_wavelength",
+                "data_throughput",
+                "data_effective_wavelength",
+                "data_spectra_mask",
+                "data_phot_mask",
+                "data_mask",
+                "spec_mask",
+                "wl_mask",
+                "sigma_recon",
+            )
+            originals = {attr: getattr(self, attr) for attr in spec_attrs}
+            original_cached_amp = self.cached_amp
+            original_cached_sigma = self.cached_sigma
+            original_spec_dim = self.spec_dim
+
+            try:
+                for attr in spec_attrs:
+                    setattr(
+                        self,
+                        attr,
+                        tf.gather(originals[attr], perm, axis=1, batch_dims=1),
+                    )
+                self.cached_amp = tuple(
+                    tf.gather(t, perm, axis=1, batch_dims=1)
+                    for t in original_cached_amp
+                )
+                self.cached_sigma = tuple(
+                    tf.gather(t, perm, axis=1, batch_dims=1)
+                    for t in original_cached_sigma
+                )
+                self.spec_dim = new_spec_dim
+
+                yield
+            finally:
+                for attr in spec_attrs:
+                    setattr(self, attr, originals[attr])
+                self.cached_amp = original_cached_amp
+                self.cached_sigma = original_cached_sigma
+                self.spec_dim = original_spec_dim
 
     def setup_hmc(self) -> None:
         self.setup_map()
@@ -2303,7 +2392,16 @@ class TFPosteriorModel(ks.Model):
         # slowest to U-turn, wasting the max_tree_depth budget. Restricting
         # to valid SNe for the scope of sampling avoids that; results are
         # scattered back to full sn_dim afterwards.
-        with self._restricted_to_valid_sn() as valid_indices:
+        # spec_dim is padded to the max observation count across all SNe;
+        # repacking valid rows to the front and trimming to what the
+        # (already sn_dim-restricted) batch actually needs cuts decoder
+        # and photometry FLOPs proportionally on every HMC step. spec_dim
+        # is fully reduced away before log-prob/samples/zs are produced,
+        # so no scatter-back is needed for it.
+        with (
+            self._restricted_to_valid_sn() as valid_indices,
+            self._repacked_to_valid_spec(),
+        ):
             position = (
                 initial_position
                 if valid_indices is None
