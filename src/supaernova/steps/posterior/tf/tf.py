@@ -1694,10 +1694,15 @@ class TFPosteriorModel(ks.Model):
 
         ``samples`` is ``[n_run_steps, n_walkers, sn, n_params]``. ``call`` and
         ``get_position`` broadcast over a single leading axis, so the
-        (steps, walkers) axes are folded into one batch axis and the whole run
-        is evaluated in a handful of large forward passes -- replacing a
-        sequential ``tf.map_fn`` over the ``n_run_steps`` axis that re-ran the
-        full decoder/photometry pass once per recorded step.
+        (steps, walkers) axes are folded into one batch axis and the run is
+        evaluated a group of steps at a time -- fewer, larger forward passes
+        than the old sequential ``tf.map_fn`` over the ``n_run_steps`` axis,
+        while each pass stays close to the per-step sampling footprint so
+        peak decoder memory does not blow up.
+
+        The group size starts at ``_recompute_step_batch`` recorded steps and
+        halves on OOM, down to a single step (which matches what the sampler
+        itself held).
 
         Args:
             samples: Constrained sample tensor from ``_sample_hmc``.
@@ -1706,41 +1711,63 @@ class TFPosteriorModel(ks.Model):
             ``(log_prior, log_like, log_prob, zs)``; the log terms are
             ``[n_run_steps, n_walkers, sn]`` and ``zs`` is
             ``[n_run_steps, n_walkers, sn, n_flow_latents]``.
+
+        Raises:
+            tf.errors.ResourceExhaustedError: If a single recorded step
+                (``n_walkers`` rows) still does not fit in device memory.
         """
         self.log.debug(
             "Calculating prior, likelihood, and probability across all samples"
         )
-        n_steps = int(samples.shape[0])
-        n_walkers = int(samples.shape[1])
-        flat_samples = tf.reshape(samples, (n_steps * n_walkers, *samples.shape[2:]))
-        # Keep each pass near the per-step sampling batch
-        # (n_walkers * sn * spec * wl) so peak decoder memory stays bounded.
-        rows_per_batch = max(1, 2048 // max(1, n_walkers)) * n_walkers
+        n_steps, n_walkers = int(samples.shape[0]), int(samples.shape[1])
+        flat = tf.reshape(samples, (n_steps * n_walkers, *samples.shape[2:]))
 
-        parts: tuple[list[tf.Tensor], list[tf.Tensor], list[tf.Tensor]] = ([], [], [])
-        for start in range(0, n_steps * n_walkers, rows_per_batch):
-            batch = flat_samples[start : start + rows_per_batch]
-            for store, value in zip(
-                parts,
-                self.unnormalized_posterior_log_prob(batch, additional_outputs=True),
-                strict=True,
-            ):
+        # One recorded step is `n_walkers` rows -- exactly the batch the
+        # sampler's target evaluated per leapfrog step. Group a few steps per
+        # pass; back off to a single step if the GPU can't hold the group.
+        step_batch = int(getattr(self, "_recompute_step_batch", 8))
+        while True:
+            try:
+                parts = self._recompute_pass(flat, max(1, step_batch) * n_walkers)
+                break
+            except tf.errors.ResourceExhaustedError:
+                if step_batch <= 1:
+                    raise
+                step_batch = max(1, step_batch // 2)
+                self.log.warning(
+                    f"OOM in sample-diagnostics recompute; retrying with "
+                    f"step_batch={step_batch}"
+                )
+                clear_session()
+
+        return tuple(  # type: ignore[return-value]
+            tf.reshape(p, (n_steps, n_walkers, *p.shape[1:])) for p in parts
+        )
+
+    def _recompute_pass(
+        self, flat: tf.Tensor, rows: int
+    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        """One attempt at the batched recompute: ``rows`` sample-rows per pass.
+
+        Args:
+            flat: Samples flattened to ``[n_steps * n_walkers, sn, n_params]``.
+            rows: Number of sample-rows to evaluate per forward pass.
+
+        Returns:
+            ``(log_prior, log_like, log_prob, zs)`` concatenated over the
+            leading (flattened) axis.
+        """
+        n_flow = self.map.nflow.n_flow_latents
+        stores: list[list[tf.Tensor]] = [[], [], [], []]
+        for start in range(0, int(flat.shape[0]), rows):
+            batch = flat[start : start + rows]
+            lp, ll, lprob = self.unnormalized_posterior_log_prob(
+                batch, additional_outputs=True
+            )
+            zsb = self.map.nflow.u_to_z(batch[..., -n_flow:], permute=True)
+            for store, value in zip(stores, (lp, ll, lprob, zsb), strict=True):
                 store.append(value)
-
-        def _unflatten(collected: "list[tf.Tensor]") -> tf.Tensor:
-            flat = tf.concat(collected, axis=0)
-            return tf.reshape(flat, (n_steps, n_walkers, *flat.shape[1:]))
-
-        log_prior, log_like, log_prob = (_unflatten(p) for p in parts)
-
-        self.log.debug("Calculating z-latents")
-        # The nflow bijector broadcasts over arbitrary leading dims -- one call
-        # over the whole [steps, walkers, sn, n_flow] tensor replaces the
-        # per-step tf.map_fn.
-        us = samples[..., -self.map.nflow.n_flow_latents :]
-        zs = self.map.nflow.u_to_z(us, permute=True)
-
-        return log_prior, log_like, log_prob, zs
+        return tuple(tf.concat(s, axis=0) for s in stores)  # type: ignore[return-value]
 
     def trace_fn(
         self, _state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
