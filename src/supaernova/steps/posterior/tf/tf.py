@@ -2498,6 +2498,7 @@ class TFPosteriorModel(ks.Model):
         )
 
         self.summary_writer = None
+        self.sample_progress = None
         if self.profile and savepath is not None:
             log_dir = savepath.parent / self.log_path / savepath.stem / "hmc"
             self.summary_writer = tf.summary.create_file_writer(
