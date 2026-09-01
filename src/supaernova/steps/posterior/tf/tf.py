@@ -2028,12 +2028,17 @@ class TFPosteriorModel(ks.Model):
             f"(phase={meta['phase']}, {meta['steps_done']}/{total} steps done)."
         )
 
+        data = np.load(npz_path)
         run_states = None
         shards = sorted(run_dir.glob("states_*.npy"))
         if shards:
             run_states = np.concatenate([np.load(shard) for shard in shards], axis=0)
+        elif "run_states" in data.files:
+            # Legacy checkpoint: recorded states lived inside run_state.npz
+            # rather than as append-only shards.
+            run_states = data["run_states"]
 
-        return {"meta": meta, "data": np.load(npz_path), "run_states": run_states}
+        return {"meta": meta, "data": data, "run_states": run_states}
 
     def _hmc_resume_plan(
         self,
@@ -2436,7 +2441,11 @@ class TFPosteriorModel(ks.Model):
         )
         # run_trace = (step_size, reach_max_depth, is_accepted,
         #              has_divergence, lp_min, lp_mean, lp_max)
-        self.report_run_diagnostics(run_trace[1], run_trace[2], run_trace[3])
+        # run_trace is None when the run phase ran no chunks -- i.e. it was
+        # already complete on resume (all recorded states came from the
+        # checkpoint); there are then no fresh diagnostics to report.
+        if run_trace is not None:
+            self.report_run_diagnostics(run_trace[1], run_trace[2], run_trace[3])
         return self.map.constrain(all_states)
 
     def train_hmc(
