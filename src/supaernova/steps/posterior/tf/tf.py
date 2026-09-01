@@ -2554,7 +2554,8 @@ class TFPosteriorModel(ks.Model):
 
             samples = self._sample_hmc(position, step, hmc_ckpt_path)
 
-            self.sample_progress.close()
+            if self.sample_progress is not None:
+                self.sample_progress.close()
             self.sample_progress = None
             if self.summary_writer is not None:
                 self.summary_writer.close()
