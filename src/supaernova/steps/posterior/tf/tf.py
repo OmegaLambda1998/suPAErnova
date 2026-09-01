@@ -2503,12 +2503,12 @@ class TFPosteriorModel(ks.Model):
             self.summary_writer = tf.summary.create_file_writer(
                 str(log_dir),
             )
-        self.sample_progress = tqdm(
-            total=n_total_steps,
-            leave=False,
-            dynamic_ncols=True,
-            position=0,
-        )
+            self.sample_progress = tqdm(
+                total=n_total_steps,
+                leave=False,
+                dynamic_ncols=True,
+                position=0,
+            )
         # hmc_step keys the `hmc/*` TensorBoard charts (shared across burn-in
         # and the run so they form one continuous timeline); sample_step keys
         # `samples/samples/*_log_prob`. Both advance in eager Python from
