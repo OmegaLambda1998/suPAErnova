@@ -71,6 +71,8 @@ class SpectraPlotter(Plotter):
         sn_mask: "npt.NDArray[float] | None" = None,
         spec_mask: "npt.NDArray[float] | None" = None,
         wl_mask: "npt.NDArray[float] | None" = None,
+        spectra_mask: "npt.NDArray[float] | None" = None,
+        phot_mask: "npt.NDArray[float] | None" = None,
         phase: bool = False,
     ) -> tuple[
         "npt.NDArray[float]",
@@ -102,6 +104,18 @@ class SpectraPlotter(Plotter):
                     compare = CONSTRAINTS[comparison]
                     input_wl_mask &= compare(value, constraint)
 
+        # Selected Spectra/Photometry Mask
+        # A row can only be used if it was actually selected as a spectrum or
+        # photometry point (e.g. the closest-to-peak spectrum when n_spectra=1) -
+        # a row failing this can still pass mask/sn_mask/spec_mask/wl_mask (those
+        # only check physical validity, not selection).
+        input_spectra_mask = (
+            data.spectra_mask.copy() if spectra_mask is None else spectra_mask.copy()
+        )
+        input_phot_mask = (
+            data.phot_mask.copy() if phot_mask is None else phot_mask.copy()
+        )
+
         data.clear()
 
         # Phase Range Mask
@@ -120,6 +134,7 @@ class SpectraPlotter(Plotter):
         input_spec_mask &= input_wl_mask.any(axis=-1, keepdims=True)
         input_sn_mask &= input_spec_mask.any(axis=-2, keepdims=True)
         input_mask &= input_sn_mask & input_spec_mask & input_wl_mask
+        input_mask &= (input_spectra_mask | input_phot_mask).astype(np.bool)
 
         return (
             wl,
