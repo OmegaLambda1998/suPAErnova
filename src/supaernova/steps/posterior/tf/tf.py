@@ -444,17 +444,19 @@ class TFPosteriorModel(ks.Model):
             if self.fractional_error
             else 1
         )
-        synth_sigma = tf.sqrt(
-            tf.square(synth_scale * sigma_recon) + (input_sigma * input_sigma)
-        )
-
+        # `synth_scale * sigma_recon` is a coherent, wavelength-correlated SED-shape
+        # error, not independent per-pixel noise, so it must not be averaged down
+        # across a passband. Pass it to `photometry` as `sigma_correlated`, separate
+        # from the independent measurement error `input_sigma`; they recombine in
+        # quadrature after the band integration. For pure-spectrum rows the result
+        # is identical to `sqrt((synth_scale * sigma_recon)**2 + input_sigma**2)`.
         (
             synth_amp,
             synth_sigma,
         ) = photometry(
             tf.repeat(input_wavelength[None, ...], synth_amp.shape[0], axis=0),
             synth_amp,
-            synth_sigma,
+            input_sigma,
             tf.repeat(input_throughput[None, ...], synth_amp.shape[0], axis=0),
             tf.repeat(
                 input_effective_wavelength[None, ...], synth_amp.shape[0], axis=0
@@ -463,6 +465,7 @@ class TFPosteriorModel(ks.Model):
             tf.repeat(input_phot_mask[None, ...], synth_amp.shape[0], axis=0),
             self.cached_amp,
             self.cached_sigma,
+            sigma_correlated=synth_scale * sigma_recon,
         )
 
         # Set missing values to 0 for all times
