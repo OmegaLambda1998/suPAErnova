@@ -529,7 +529,7 @@ class DispersionPlotter(Plotter):
             0,
         ][pae_order]
         peak_mask = np.abs(pae_peak_phase) < 5
-        # snpae_mask &= peak_mask
+        snpae_mask &= peak_mask
 
         # === RHat Mask ===
         unmasked_r_hat = hmcs[0].hmc.r_hat[pae_order, ...]
