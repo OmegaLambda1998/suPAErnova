@@ -121,6 +121,20 @@ class PosteriorMap(tf.Module):
         self.spec_mask: npt.NDArray[bool] = config.spec_mask
         self.wl_mask: npt.NDArray[bool] = config.wl_mask
 
+        # The encoder mean-pools over every unmasked row, so rows which are neither
+        # a spectrum nor photometry (e.g. epochs dropped by a sim's `spec_cadence`,
+        # whose amplitude is 0) would drag the initial latents towards nonsense.
+        # Encode from spectra only, falling back to photometry for SNe without any.
+        spectra_mask = np.asarray(config.data_spectra_mask, dtype=bool)
+        observed_mask = spectra_mask | np.asarray(config.data_phot_mask, dtype=bool)
+        encoder_mask = np.asarray(self.data_mask, dtype=bool) & spectra_mask
+        has_spectra = np.any(encoder_mask, axis=(-2, -1), keepdims=True)
+        self.encoder_mask: npt.NDArray[bool] = np.where(
+            has_spectra,
+            encoder_mask,
+            np.asarray(self.data_mask, dtype=bool) & observed_mask,
+        )
+
         self.sn_dim = config.sn_dim
         self.spec_dim = config.spec_dim
         self.wl_dim = config.wl_dim
@@ -438,7 +452,7 @@ class PosteriorMap(tf.Module):
                 z_latents = self.pae.encoder(
                     pae_input,
                     training=False,
-                    mask=self.data_mask,
+                    mask=self.encoder_mask,
                     sn_mask=self.sn_mask,
                     spec_mask=self.spec_mask,
                     wl_mask=self.wl_mask,

@@ -1,4 +1,4 @@
-from supaernova.steps.pae.tf.photometry import photometry
+from supaernova.steps.pae.tf.photometry import photometry as tf_photometry
 from supaernova.utils.photometry import Filter
 from supaernova.utils import pp, resolve_path
 from supaernova.analysis.spectra import SpectraPlotter
@@ -109,6 +109,9 @@ class Sim(Step[SimConfig]):
         self.spec_dim: int
         self.wl_dim: int
 
+        # Simulated data before photometry, for `callbacks.photometry` hooks
+        self.spectra: dict[str, Any]
+
         # === Result Variables ===
         self.results: SimStepResult
 
@@ -159,6 +162,11 @@ class Sim(Step[SimConfig]):
             Filter(resolve_path(path, relative_path=self.data_dir))
             for path in self.options.filters or []
         ]
+        filter_names = {f.name.lower() for f in self.filters}
+        unknown = {k.lower() for k in self.options.phot_cadence or {}} - filter_names
+        if unknown:
+            msg = f"phot_cadence has filters not in `filters`: {unknown}"
+            raise ValueError(msg)
 
         self.min_redshift = self.real_data.min_redshift
         self.max_redshift = self.real_data.max_redshift
@@ -174,6 +182,94 @@ class Sim(Step[SimConfig]):
         self.test_data = LazySNPAEDataTuple(
             self.out_test / f"kfold_{i:d}.npz" for i in range(self.n_kfolds)
         )
+
+    def cadence_mask(self, cadence: float, offset: int) -> "npt.NDArray[np.bool_]":
+        """Select the simulated epochs observed at an observer-frame `cadence`.
+
+        Args:
+            cadence: Observer-frame cadence in days. Must be at least the simulated cadence.
+            offset: Index of the first observed epoch.
+
+        Returns:
+            Boolean mask of shape (spec_dim,), True for observed epochs.
+        """
+        # Both cadences are observer-frame, so the redshift cancels
+        step = round(cadence / self.options.cadence)
+        if step < 1:
+            msg = f"Cadence {cadence} is shorter than the simulated cadence {self.options.cadence}"
+            raise ValueError(msg)
+        mask = np.zeros(self.spec_dim, dtype=np.bool_)
+        mask[offset::step] = True
+        return mask
+
+    @callback
+    def photometry(self) -> None:
+        """Integrate the simulated spectra in `self.spectra` through `self.filters`.
+
+        Runs before spectra and photometry are combined into `amplitude` / `sigma`,
+        so a `callbacks.photometry` `pre` hook can modify the spectra alone (e.g.
+        instrumental resolution) by editing `self.spectra` in place.
+        """
+        data = self.spectra
+        n_filters = len(self.filters) + 1
+        throughput = np.repeat(
+            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
+        )
+        effective_wavelength = np.repeat(
+            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
+        )
+        wl = data["wavelength"]
+        for i, f in enumerate(self.filters):
+            tp = np.interp(wl, f.wavelength / (1 + self.redshift), f.throughput)
+            throughput[..., i] = tp
+
+            ef = (
+                np.abs(wl - f.effective_wavelength / (1 + self.redshift))
+                == np.min(np.abs(wl - f.effective_wavelength / (1 + self.redshift)))
+            ).astype(tp.dtype)
+            effective_wavelength[..., i] = ef
+
+        # Drop photometry off each filter's cadence by removing its effective
+        # wavelength bin, rather than its throughput: `photometry()` gives a
+        # zero-throughput filter sigma=1 at its effective wavelength.
+        phot_cadence = {
+            k.lower(): v for k, v in (self.options.phot_cadence or {}).items()
+        }
+        phot_offset = {k.lower(): v for k, v in self.options.phot_offset.items()}
+        for i, f in enumerate(self.filters):
+            name = f.name.lower()
+            if name in phot_cadence:
+                keep = self.cadence_mask(phot_cadence[name], phot_offset.get(name, 0))
+                effective_wavelength[:, ~keep, :, i] = 0
+
+        data["throughput"] = throughput
+        data["effective_wavelength"] = effective_wavelength
+
+        # Mask out epochs with neither a spectrum nor any photometry (e.g. dropped by
+        # `spec_cadence` / `phot_cadence` / `n_spectra` / `n_phot`); otherwise they
+        # stay in `mask` with amplitude = sigma = 0.
+        has_phot = np.any(
+            effective_wavelength[..., : len(self.filters)], axis=(-2, -1)
+        )[..., None]
+        observed = data["spectra_mask"].astype(bool) | (
+            data["phot_mask"].astype(bool) & has_phot
+        )
+        data["mask"] &= observed
+
+        amp, sigma = tf_photometry(
+            data["wavelength"],
+            data["amplitude"],
+            data["sigma"],
+            data["throughput"],
+            data["effective_wavelength"],
+            data["spectra_mask"],
+            data["phot_mask"],
+        )
+        amp = amp.numpy()
+        sigma = sigma.numpy()
+        amp[~data["mask"]] = 0
+        data["amplitude"] = amp
+        data["sigma"] = sigma
 
     @override
     def _has_run(self, *args: "Any", **kwargs: "Any") -> bool:
@@ -236,12 +332,10 @@ class Sim(Step[SimConfig]):
         phot_mask = (phase_rank < self.n_phot).astype(real_data.spec_mask.dtype)[
             ..., None
         ]
-        # spectra_mask = np.zeros_like(synth_phase, dtype=int)
-        # spectra_mask[:, : self.n_spectra, :] = 1
-        # spectra_mask = spectra_mask[:, phase_shuffle, :]
-        # phot_mask = np.zeros_like(synth_phase, dtype=int)
-        # phot_mask[:, : self.n_phot, :] = 1
-        # phot_mask = phot_mask[:, phase_shuffle, :]
+        if self.options.spec_cadence is not None:
+            spectra_mask *= self.cadence_mask(
+                self.options.spec_cadence, self.options.spec_offset
+            )[None, :, None]
 
         synth_mask = np.ones((self.sn_dim, self.spec_dim, self.wl_dim), dtype=np.bool)
         synth_mask &= np.isfinite(synth_time)
@@ -289,10 +383,19 @@ class Sim(Step[SimConfig]):
         # `wavelengths` rather than floats, so bin sums are O(1) cumsum lookups.
         wl_edges = np.arange(wstep, wavelengths[-1], wstep)
         b_idx_arr = np.searchsorted(wavelengths, wl_edges, side="left")
+        # Close the final bins, which the half-open ranges above stop short of,
+        # so the last wavelength column and the last epoch get a sigma. The time
+        # edges stop half a cadence early: when 1 / cadence_time is a hair over an
+        # integer, the last epoch (and edge) land at 1 - eps, leaving a sliver bin
+        # [1 - eps, 1) with no real data which would otherwise be skipped.
+        b_idx_arr = np.append(b_idx_arr, len(wavelengths))
+        t_edges = np.append(
+            np.arange(cadence_time, 1 - cadence_time / 2, cadence_time), np.inf
+        )
 
         synth_sigma = np.zeros_like(synth_amp)
         tlo = 0
-        for t in tqdm(np.arange(cadence_time, 1, cadence_time)):
+        for t in tqdm(t_edges):
             row_mask = (real_time0 >= tlo) & (real_time0 < t)
             if np.count_nonzero(row_mask & row_has_any_data) == 0:
                 continue
@@ -370,16 +473,20 @@ class Sim(Step[SimConfig]):
             self.sn_dim, axis=0
         )
         data["phase"] = synth_phase
-        data["wl_mask_min"] = self.min_wavelength * np.ones((
-            self.sn_dim,
-            self.spec_dim,
-            1,
-        ))
-        data["wl_mask_max"] = self.max_wavelength * np.ones((
-            self.sn_dim,
-            self.spec_dim,
-            1,
-        ))
+        data["wl_mask_min"] = self.min_wavelength * np.ones(
+            (
+                self.sn_dim,
+                self.spec_dim,
+                1,
+            )
+        )
+        data["wl_mask_max"] = self.max_wavelength * np.ones(
+            (
+                self.sn_dim,
+                self.spec_dim,
+                1,
+            )
+        )
         data["amplitude"] = synth_amp
         data["sigma"] = synth_sigma
         data["salt_flux"] = synth_amp
@@ -407,40 +514,9 @@ class Sim(Step[SimConfig]):
         )
         data["time"] = synth_time
 
-        n_filters = len(self.filters) + 1
-        throughput = np.repeat(
-            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
-        )
-        effective_wavelength = np.repeat(
-            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
-        )
-        wl = data["wavelength"]
-        for i, f in enumerate(self.filters):
-            tp = np.interp(wl, f.wavelength, f.throughput)
-            throughput[..., i] = tp
-
-            ef = (
-                np.abs(wl - f.effective_wavelength)
-                == np.min(np.abs(wl - f.effective_wavelength))
-            ).astype(tp.dtype)
-            effective_wavelength[..., i] = ef
-
-        data["throughput"] = throughput
-        data["effective_wavelength"] = effective_wavelength
-        amp, sigma = photometry(
-            data["wavelength"],
-            data["amplitude"],
-            data["sigma"],
-            data["throughput"],
-            data["effective_wavelength"],
-            data["spectra_mask"],
-            data["phot_mask"],
-        )
-        amp = amp.numpy()
-        sigma = sigma.numpy()
-        amp[~data["mask"]] = 0
-        data["amplitude"] = amp
-        data["sigma"] = sigma
+        # Exposed to `callbacks.photometry` hooks via `self.spectra`
+        self.spectra = data
+        self.photometry()
 
         self.data.model_validate(data)
 
@@ -484,17 +560,21 @@ class Sim(Step[SimConfig]):
                 )
             )[0]
 
-            self.train_data[kfold].model_validate({
-                key: val[inds_train, ...]
-                for key, val in self.data.model_dump().items()
-                if isinstance(val, np.ndarray)
-            })
+            self.train_data[kfold].model_validate(
+                {
+                    key: val[inds_train, ...]
+                    for key, val in self.data.model_dump().items()
+                    if isinstance(val, np.ndarray)
+                }
+            )
 
-            self.test_data[kfold].model_validate({
-                key: val[inds_test, ...]
-                for key, val in self.data.model_dump().items()
-                if isinstance(val, np.ndarray)
-            })
+            self.test_data[kfold].model_validate(
+                {
+                    key: val[inds_test, ...]
+                    for key, val in self.data.model_dump().items()
+                    if isinstance(val, np.ndarray)
+                }
+            )
 
     @override
     def _is_saved(self, *args: "Any", **kwargs: "Any") -> bool:
@@ -888,6 +968,9 @@ class SimStep(Variant[SimStepConfig, Sim]):
                     if dataset:
                         data = data[0]
                     data.load()
+                    # e.g. a callback put every SN into one subset
+                    if data.amplitude.shape[0] == 0:
+                        continue
 
                     o.base_wl = self.bases[name]["wl"]
                     o.base_amp = self.bases[name]["amp"]

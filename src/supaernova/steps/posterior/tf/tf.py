@@ -166,7 +166,7 @@ class TFPosteriorModel(ks.Model):
 
         # MAP Variables
         self.map: PosteriorMap
-        self.norm_prob: float | None = None
+        self.norm_prob: float | None = self.options.map_loss_scale
         self.tolerance: float = self.options.tolerance
         self.x_tolerance: float = self.options.x_tolerance
         self.f_relative_tolerance: float = self.options.f_relative_tolerance
@@ -1335,19 +1335,17 @@ class TFPosteriorModel(ks.Model):
             initial_position = self.map.position.current
             initial_position = self.map.unconstrain(initial_position)
             log_prob = self._forward(self.map.get_position(initial_position))
-            num_log_prob = tf.where(
-                tf.math.is_finite(log_prob),
-                tf.ones_like(log_prob),
-                tf.zeros_like(log_prob),
+            # Use the median rather than the mean: a few SNe with a terrible
+            # starting point (|log_prob| ~ 1e12) would otherwise set the scale,
+            # shrinking every other SN's gradient below `tolerance` so L-BFGS
+            # "converges" without taking a step.
+            median_log_prob = tfp.stats.percentile(
+                tf.math.abs(tf.boolean_mask(log_prob, tf.math.is_finite(log_prob))),
+                50.0,
+                interpolation="midpoint",
             )
-            log_prob = tf.where(
-                tf.math.is_finite(log_prob),
-                tf.math.abs(log_prob),
-                tf.zeros_like(log_prob),
-            )
-            mean_log_prob = tf.reduce_sum(log_prob) / tf.reduce_sum(num_log_prob)
-            scale_log_prob = tf.math.log(mean_log_prob) / tf.math.log(
-                tf.constant(10, dtype=mean_log_prob.dtype)
+            scale_log_prob = tf.math.log(median_log_prob) / tf.math.log(
+                tf.constant(10, dtype=median_log_prob.dtype)
             )
             scale_log_prob_min = tf.math.floor(scale_log_prob)
             scale_log_prob_max = tf.math.ceil(scale_log_prob)
@@ -1365,6 +1363,10 @@ class TFPosteriorModel(ks.Model):
             )
             norm_prob = tf.math.pow(10, -log_prob_scale)
             self.norm_prob = norm_prob
+            self.log.info(
+                f"MAP loss scale: {float(norm_prob):.0e} "
+                f"(median |log_prob| = {float(median_log_prob):.3e})"
+            )
 
         if savepath is not None:
             stage_savepath = savepath / "map" / f"{stage.fname}_{chain}"
@@ -1775,7 +1777,14 @@ class TFPosteriorModel(ks.Model):
     def trace_fn(
         self, _state: tf.Tensor, pkr: "DualAveragingStepSizeAdaptationResults"
     ) -> tuple[
-        tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
+        tf.Tensor,
     ]:
         lp_min, lp_mean, lp_max = _finite_reduce(pkr.inner_results.target_log_prob)
         return (
@@ -1786,6 +1795,9 @@ class TFPosteriorModel(ks.Model):
             lp_min,
             lp_mean,
             lp_max,
+            # During adaption `new_step_size` is the noisy dual-averaging
+            # iterate; this is the averaged step that burn-in/run freeze to.
+            tf.exp(pkr.log_averaging_step),
         )
 
     def _emit_sample_summaries(self, trace: "Sequence[tf.Tensor]") -> None:
@@ -1803,6 +1815,7 @@ class TFPosteriorModel(ks.Model):
             "samples/samples/min_log_prob": trace[4],
             "samples/samples/mean_log_prob": trace[5],
             "samples/samples/max_log_prob": trace[6],
+            "hmc/averaged_step_size": _reduce_trailing(trace[7]),
         }
 
         if self.summary_writer is not None:
@@ -2182,6 +2195,11 @@ class TFPosteriorModel(ks.Model):
     def report_adaption_diagnostics(self, adaption_step_size: tf.Tensor) -> None:
         """Log the step-size adaptation health, to be called right after adaption.
 
+        `adaption_step_size` must be the *averaged* dual-averaging step
+        (`exp(log_averaging_step)`), which is what burn-in/run freeze to --
+        not `new_step_size`, whose noisy iterate never settles no matter how
+        long adaption runs.
+
         Called from `_sample_hmc` between the adaption and burn-in phases --
         deliberately *before* burn-in/run start, so a too-short
         `n_adaption_steps` shows up here and the (often much more expensive)
@@ -2190,7 +2208,7 @@ class TFPosteriorModel(ks.Model):
         """
         step_size_drift_warn_threshold = 0.05
 
-        # Compare the step-size trace's last two adaption windows: if it's
+        # Compare the averaged step-size trace's last two adaption windows: if it's
         # still moving this late in adaption, it hasn't converged and
         # n_adaption_steps should grow. Too short an adaption phase to form
         # two windows means there isn't enough signal to judge convergence
@@ -2213,12 +2231,12 @@ class TFPosteriorModel(ks.Model):
         )
         self.log.info(
             f"HMC step-size adaptation: {relative_change:.2%} relative "
-            f"change between the last two {window}-step windows of the "
+            f"averaged step-size change between the last two {window}-step windows of the "
             f"{self.n_adaption_steps}-step adaption phase."
         )
         if relative_change > step_size_drift_warn_threshold:
             self.log.warning(
-                f"Step size is still changing by {relative_change:.2%} "
+                f"Averaged step size is still changing by {relative_change:.2%} "
                 "near the end of adaption -- it may not have converged "
                 f"within n_adaption_steps={self.n_adaption_steps}. Consider "
                 "increasing n_adaption_steps (Ctrl+C now to cancel before "
@@ -2418,7 +2436,7 @@ class TFPosteriorModel(ks.Model):
                 int(adaption_trace[0].shape[0]) >= self.n_adaption_steps
             )
             if full_adaption:
-                self.report_adaption_diagnostics(adaption_trace[0])
+                self.report_adaption_diagnostics(adaption_trace[7])
 
         if plan["skip_burnin"]:
             burnin_state = plan["burnin_state"]
@@ -2459,7 +2477,8 @@ class TFPosteriorModel(ks.Model):
             run_states=plan["run_states_seed"],
         )
         # run_trace = (step_size, reach_max_depth, is_accepted,
-        #              has_divergence, lp_min, lp_mean, lp_max)
+        #              has_divergence, lp_min, lp_mean, lp_max,
+        #              averaged_step_size)
         # run_trace is None when the run phase ran no chunks -- i.e. it was
         # already complete on resume (all recorded states came from the
         # checkpoint); there are then no fresh diagnostics to report.
