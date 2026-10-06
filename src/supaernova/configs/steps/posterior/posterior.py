@@ -276,6 +276,11 @@ class PosteriorConfig(BackendConfig):
     max_iterations: PositiveInt = 2500
     max_line_search_iterations: PositiveInt | None = None
     num_correction_pairs: PositiveInt | None = None
+    # Scale applied to the negative log-probability minimised by L-BFGS.
+    # `tolerance` is compared against the gradient of this scaled loss.
+    # If None, use the nearest power of 10 to 1 / median(|log_prob|) at the initial positions.
+    # 0.01 reproduces the legacy behaviour.
+    map_loss_scale: PositiveFloat | None = None
     # See [Betancourt et al (2014)](https://arxiv.org/abs/1411.6669).
     # Since we run MAP first, our initial guess is very good and we want small, precise steps.
     # So use a large acceptance rate.

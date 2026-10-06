@@ -32,6 +32,20 @@ class SimConfig(StepConfig):
     cadence: PositiveFloat
     n_spectra: NonNegativeInt | Literal[-1] = -1
     n_phot: NonNegativeInt | Literal[-1] = -1
+    # Observer-frame cadences (days) at which spectra / each filter's photometry are
+    # kept, starting from epoch index `*_offset`. Applied before spectra and
+    # photometry are combined, so each can be dropped without affecting the other.
+    spec_cadence: PositiveFloat | None = None
+    spec_offset: NonNegativeInt = 0
+    phot_cadence: dict[str, PositiveFloat] | None = None
+    phot_offset: dict[str, NonNegativeInt] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_phot_offset(self) -> "SimConfig":
+        unknown = set(self.phot_offset) - set(self.phot_cadence or {})
+        if unknown:
+            self._raise(f"phot_offset has filters without a phot_cadence: {unknown}")
+        return self
 
 
 class SimStepConfig(VariantConfig):
