@@ -150,6 +150,13 @@ class DataConfig(StepConfig):
     filters: list[Path] | None = None
     n_phot: NonNegativeInt | Literal[-1] = -1
     n_spectra: NonNegativeInt | Literal[-1] = -1
+    # Keep every `*_every`th of each SN's valid spectra (in phase order), starting
+    # from index `*_offset`, as spectra / photometry. Index-based analogue of Sim's
+    # `spec_cadence` / `phot_cadence`, e.g. 2/0 and 2/1 alternate spec and phot.
+    spec_every: PositiveInt | None = None
+    spec_offset: NonNegativeInt = 0
+    phot_every: PositiveInt | None = None
+    phot_offset: NonNegativeInt = 0
     analysis: DataStepAnalysis | None = None
     cosmological_model: str = "WMAP7"
     salt_model: str | Path = "salt2"
@@ -220,6 +227,16 @@ class DataConfig(StepConfig):
             self.colourlaw = resolve_path(self.colourlaw, relative_path=self.data_dir)
             if not self.colourlaw.exists():
                 err = f"`colourlaw` resolved to {self.colourlaw}, which does not exist."
+                self._raise(err)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_every(self):
+        for kind in ["spec", "phot"]:
+            every = getattr(self, f"{kind}_every")
+            offset = getattr(self, f"{kind}_offset")
+            if every is not None and offset >= every:
+                err = f"`{kind}_offset`: {offset} must be less than `{kind}_every`: {every}"
                 self._raise(err)
         return self
 

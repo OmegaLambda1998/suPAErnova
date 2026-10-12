@@ -854,17 +854,39 @@ class Data(Step[DataConfig]):
             # and its own phase is within the valid phase window; push everything
             # else to the back of the ranking so a masked-out row can never win.
             valid_mask = (sn_mask & spec_mask)[..., 0]
-            phase_for_rank = np.where(
-                valid_mask, np.abs(data["phase"][..., 0]), np.inf
-            )
-            # Rank each SN's spectra by |phase|, closest to peak first, same as sim.py
-            phase_rank = np.argsort(np.argsort(phase_for_rank, axis=-1), axis=-1)
+
+            def rank(order: "npt.NDArray[float]") -> "npt.NDArray[int]":
+                return np.argsort(np.argsort(order, axis=-1), axis=-1)
+
+            # Each SN's valid spectra in phase order, for `spec_every` / `phot_every`
+            time_rank = rank(np.where(valid_mask, data["phase"][..., 0], np.inf))
+
+            def slot(every: int | None, offset: int) -> "npt.NDArray[bool]":
+                if every is None:
+                    return valid_mask
+                return valid_mask & (time_rank % every == offset)
+
+            spec_slot = slot(self.options.spec_every, self.options.spec_offset)
+            phot_slot = slot(self.options.phot_every, self.options.phot_offset)
+
+            # Rank each slot's spectra by |phase|, closest to peak first, same as sim.py
+            def peak_rank(slot_mask: "npt.NDArray[bool]") -> "npt.NDArray[int]":
+                return rank(np.where(slot_mask, np.abs(data["phase"][..., 0]), np.inf))
+
             data["spectra_mask"] = (
-                (phase_rank < self.n_spectra) & valid_mask
+                (peak_rank(spec_slot) < self.n_spectra) & spec_slot
             ).astype(spec_mask.dtype)[..., None]
-            data["phot_mask"] = ((phase_rank < self.n_phot) & valid_mask).astype(
-                spec_mask.dtype
-            )[..., None]
+            data["phot_mask"] = (
+                (peak_rank(phot_slot) < self.n_phot) & phot_slot
+            ).astype(spec_mask.dtype)[..., None]
+
+            # Mask out spectra selected as neither a spectrum nor photometry (e.g.
+            # dropped by `n_spectra` / `*_every`), otherwise they stay in `mask`
+            # with amplitude = sigma = 0. Photometry needs at least one filter.
+            observed = data["spectra_mask"].astype(bool)
+            if len(self.filters) > 0:
+                observed |= data["phot_mask"].astype(bool)
+            data["mask"] &= observed
         else:
             # Rows with a `filt` value are photometric observations in that filter,
             # rows without one are genuine spectra

@@ -219,13 +219,14 @@ class Sim(Step[SimConfig]):
             np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
         )
         wl = data["wavelength"]
+        filter_z = 0 if self.options.rest_frame_filters else self.redshift
         for i, f in enumerate(self.filters):
-            tp = np.interp(wl, f.wavelength / (1 + self.redshift), f.throughput)
+            tp = np.interp(wl, f.wavelength / (1 + filter_z), f.throughput)
             throughput[..., i] = tp
 
             ef = (
-                np.abs(wl - f.effective_wavelength / (1 + self.redshift))
-                == np.min(np.abs(wl - f.effective_wavelength / (1 + self.redshift)))
+                np.abs(wl - f.effective_wavelength / (1 + filter_z))
+                == np.min(np.abs(wl - f.effective_wavelength / (1 + filter_z)))
             ).astype(tp.dtype)
             effective_wavelength[..., i] = ef
 

@@ -29,6 +29,10 @@ class SimConfig(StepConfig):
     analysis: SimStepAnalysis | None = None
     redshift: PositiveFloat = 0
     filters: list[Path] | None = None
+    # Apply `filters` to the rest-frame spectra unshifted (e.g. rest-frame Landolt
+    # bands, to match the real data), rather than blueshifting them by `redshift`.
+    # `redshift` still sets the cadence's time dilation.
+    rest_frame_filters: bool = False
     cadence: PositiveFloat
     n_spectra: NonNegativeInt | Literal[-1] = -1
     n_phot: NonNegativeInt | Literal[-1] = -1
