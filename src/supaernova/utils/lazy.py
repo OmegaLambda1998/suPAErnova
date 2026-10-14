@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 
 class LazyObj[O, I]:
     meta_keys: "ClassVar[set[str]]" = {
+        # `isinstance` falls back to `__class__`, which would otherwise trigger a load
+        "__class__",
         "obj",
         "load",
         "clear",
@@ -163,7 +165,7 @@ class LazyPydantic[O: BaseModel, L: LazyFile[Mapping[str, Any], Any]](LazyFile[O
     def _lazy_load(self) -> None:
         super()._lazy_load()
         self._obj.load()
-        self.obj = self.model.model_validate(self._obj)
+        self.obj = self.model.model_validate(self._obj.obj)
 
     def model_validate(self, *args: Any, **kwargs: Any) -> O:
         self.obj = self.model.model_validate(*args, **kwargs)
