@@ -47,6 +47,8 @@ class Sim(Step[SimConfig]):
 
         # Output Paths
         self.out_data: Path = self.paths.results / "data.npz"
+        # True latents of each simulated SN, keyed by `sn_name`
+        self.out_truth: Path = self.paths.results / "truth.npz"
         self.out_train: Path = self.paths.results / "train"
         self.out_train.mkdir(parents=True, exist_ok=True)
         self.out_test: Path = self.paths.results / "test"
@@ -111,6 +113,8 @@ class Sim(Step[SimConfig]):
 
         # Simulated data before photometry, for `callbacks.photometry` hooks
         self.spectra: dict[str, Any]
+        # True u / z / ΔM / Δp latents, saved to `out_truth`
+        self.truth: dict[str, npt.NDArray[Any]]
 
         # === Result Variables ===
         self.results: SimStepResult
@@ -138,6 +142,12 @@ class Sim(Step[SimConfig]):
         self.nflow = nflow.model
         self.pae = pae.model
         self.real_data = data
+
+        if (
+            self.options.sample_delta_m or self.options.sample_delta_p
+        ) and not self.pae.physical_latents:
+            msg = "sample_delta_m / sample_delta_p require a PAE with physical_latents"
+            raise ValueError(msg)
 
         self.n_sn = (
             self.options.n_sn
@@ -201,6 +211,33 @@ class Sim(Step[SimConfig]):
         mask = np.zeros(self.spec_dim, dtype=np.bool_)
         mask[offset::step] = True
         return mask
+
+    def sample_physical_latents(self) -> "npt.NDArray[np.float64]":
+        """Draw each simulated SN's ΔM and Δp.
+
+        Each latent enabled by `sample_delta_m` / `sample_delta_p` is drawn from a
+        Gaussian fit to the PAE-encoded training SNe; the rest are 0.
+
+        Returns:
+            Array of shape (sn_dim, 2), columns ΔM and Δp in decoder units.
+        """
+        phys = np.zeros((self.sn_dim, 2))
+        sample = (self.options.sample_delta_m, self.options.sample_delta_p)
+        if not any(sample):
+            return phys
+
+        # Encoded [ΔM, Δp] of the unmasked PAE training SNe
+        encoded = np.asarray(self.nflow.train_cov_latents)[
+            np.asarray(self.nflow.train_mask)[:, 0]
+        ]
+        for i, (name, enabled) in enumerate(zip(("ΔM", "Δp"), sample, strict=True)):
+            if not enabled:
+                continue
+            mean = float(np.mean(encoded[:, i]))
+            std = float(np.std(encoded[:, i]))
+            self.log.debug(f"Sampling {name} ~ N({mean:.4g}, {std:.4g})")
+            phys[:, i] = self.rng.normal(mean, std, self.sn_dim)
+        return phys
 
     @callback
     def photometry(self) -> None:
@@ -290,7 +327,13 @@ class Sim(Step[SimConfig]):
         us = np.astype(us, np.float32)
         synth_zs = self.nflow.u_to_z(us)
 
-        arr = np.concatenate((us, synth_zs), axis=-1)
+        # Drawn after `us` so runs without sampling keep the same RNG stream
+        synth_phys = self.sample_physical_latents()
+        # Only sampled ΔM / Δp go into the name, so unsampled sims keep their names
+        sampled = [self.options.sample_delta_m, self.options.sample_delta_p]
+        arr = np.concatenate(
+            (us, synth_zs, synth_phys[:, sampled].astype(us.dtype)), axis=-1
+        )
 
         def encode(x, sigfigs):
             return f"{x:.{sigfigs}g}".replace(".", "-")
@@ -310,9 +353,18 @@ class Sim(Step[SimConfig]):
                 break
             sigfigs[collisions] += 1
 
+        self.truth = {
+            "sn_name": synth_names,
+            "u": us,
+            "z": np.asarray(synth_zs),
+            "delta_m": synth_phys[:, 0],
+            "delta_p": synth_phys[:, 1],
+        }
+
         synth_zs = np.repeat(synth_zs[:, None, :], self.spec_dim, axis=-2)
         synth_zs = np.concatenate(
-            (synth_zs, np.zeros((self.sn_dim, self.spec_dim, 2))), axis=-1
+            (synth_zs, np.repeat(synth_phys[:, None, :], self.spec_dim, axis=-2)),
+            axis=-1,
         )
         cadence_time = self.cadence / (self.max_phase - self.min_phase)
         synth_time = -np.inf * np.ones(
@@ -584,6 +636,11 @@ class Sim(Step[SimConfig]):
                 f"{self.name} is not saved as {self.out_data} does not exist"
             )
             return False
+        if not self.out_truth.exists():
+            self.log.debug(
+                f"{self.name} is not saved as {self.out_truth} does not exist"
+            )
+            return False
         if not self.out_train.exists():
             self.log.debug(
                 f"{self.name} is not saved as {self.out_train} does not exist"
@@ -616,6 +673,10 @@ class Sim(Step[SimConfig]):
             )
 
         self.data.clear()
+
+        if self.force or not self.out_truth.exists():
+            self.log.debug(f"Saving true latents to {self.out_truth}")
+            np.savez_compressed(self.out_truth, **self.truth)
 
         for i, train_data in enumerate(self.train_data):
             out_train = self.out_train / f"kfold_{i:d}.npz"

@@ -43,6 +43,10 @@ class SimConfig(StepConfig):
     spec_offset: NonNegativeInt = 0
     phot_cadence: dict[str, PositiveFloat] | None = None
     phot_offset: dict[str, NonNegativeInt] = Field(default_factory=dict)
+    # Draw each SN's ΔM / Δp from a Gaussian fit to the PAE-encoded training SNe,
+    # instead of 0. Requires a PAE with `physical_latents`.
+    sample_delta_m: bool = False
+    sample_delta_p: bool = False
 
     @model_validator(mode="after")
     def validate_phot_offset(self) -> "SimConfig":
