@@ -410,30 +410,58 @@ class Sim(Step[SimConfig]):
             real_data.mask & real_data.sn_mask & real_data.spec_mask & real_data.wl_mask
         )
 
-        # SNR() previously ran once per (time, wavelength) bin over the *entire*
-        # real-data array, an O(n_time_bins * n_wl_bins * n_real_points) cost.
-        # Precompute the per-point contribution once and aggregate bins via
-        # cumulative sums instead, cutting this to ~O(n_real_points).
-        n_real_sn = data_mask.shape[0]
+        # Per (time, wavelength) bin, fit the real data's noise as
+        # σ² = σ₀² + amp² / k²: a flux-independent background σ₀ plus a source
+        # term capped at SNR k. A constant SNR (σ ∝ amp) would give faint, or
+        # ReLU-zeroed, synthetic pixels σ ≈ 0, which background-dominated real
+        # spectra never have. Real σ is heavy-tailed (a few noisy spectra), so
+        # rather than least squares over every point, which tracks the mean σ²
+        # and overshoots the typical σ by ~1.5x, fit a line through the median
+        # (amp², σ²) of `n_noise_groups` equal-count flux groups.
+        n_noise_groups = 5
+
+        def fit_noise(
+            amp2: "npt.NDArray[np.float64]", sigma2: "npt.NDArray[np.float64]"
+        ) -> tuple[float, float, bool]:
+            """Fit σ² = σ₀² + amp² / k² to one bin's real data.
+
+            Returns:
+                (1 / k², σ₀², whether the background had to be fixed)
+            """
+            groups = np.array_split(np.argsort(amp2), n_noise_groups)
+            x = np.array([np.median(amp2[g]) for g in groups])
+            y = np.array([np.median(sigma2[g]) for g in groups])
+            var_x = np.sum(np.square(x - x.mean()))
+            if var_x <= 0:
+                return 0.0, float(np.median(sigma2)), False
+            inv_k2 = np.sum((x - x.mean()) * (y - y.mean())) / var_x
+            sigma0_2 = y.mean() - inv_k2 * x.mean()
+            # σ² can't fall with flux
+            if inv_k2 < 0:
+                return 0.0, float(y.mean()), False
+            # A negative background is unphysical (and would leave zero-flux pixels
+            # noiseless), so pin it to the faintest group and refit the slope.
+            if sigma0_2 < 0:
+                sigma0_2 = y[0]
+                inv_k2 = max(np.sum(x * (y - sigma0_2)) / np.sum(x * x), 0.0)
+                return float(inv_k2), float(sigma0_2), True
+            return float(inv_k2), float(sigma0_2), False
+
         wavelengths = synth_wl[0, 0, :]
         wstep = (wavelengths[-1] - wavelengths[0]) / len(wavelengths)
 
-        with np.errstate(divide="ignore", invalid="ignore"):
-            point_ratio = np.where(
-                data_mask,
-                real_data.amplitude
-                * real_data.amplitude
-                / (real_data.sigma * real_data.sigma),
-                0.0,
-            )
-        point_ratio = np.where(np.isfinite(point_ratio), point_ratio, 0.0)
-        mask_f = data_mask.astype(point_ratio.dtype)
-        row_has_any_data = np.any(data_mask, axis=-1)
+        real_amp2 = np.square(real_data.amplitude.astype(np.float64))
+        real_sigma2 = np.square(real_data.sigma.astype(np.float64))
+        valid = (
+            data_mask.astype(bool) & np.isfinite(real_amp2) & np.isfinite(real_sigma2)
+        )
+        row_has_any_data = np.any(valid, axis=-1)
         real_time0 = real_data.time[..., 0]
         synth_time0 = synth_time[..., 0]
+        n_pinned_background = 0
 
         # Candidate wavelength-bin upper edges, expressed as column indices into
-        # `wavelengths` rather than floats, so bin sums are O(1) cumsum lookups.
+        # `wavelengths` rather than floats.
         wl_edges = np.arange(wstep, wavelengths[-1], wstep)
         b_idx_arr = np.searchsorted(wavelengths, wl_edges, side="left")
         # Close the final bins, which the half-open ranges above stop short of,
@@ -450,51 +478,54 @@ class Sim(Step[SimConfig]):
         tlo = 0
         for t in tqdm(t_edges):
             row_mask = (real_time0 >= tlo) & (real_time0 < t)
-            if np.count_nonzero(row_mask & row_has_any_data) == 0:
+            synth_row_mask = (synth_time0 >= tlo) & (synth_time0 < t)
+            # Like wavelength bins, a time bin without real data merges into the next
+            if not np.any(row_mask & row_has_any_data):
+                continue
+            tlo = t
+            if not np.any(synth_row_mask):
                 continue
 
-            col_sum = np.sum(np.where(row_mask[..., None], point_ratio, 0.0), axis=1)
-            col_cnt = np.sum(np.where(row_mask[..., None], mask_f, 0.0), axis=1)
-            cum_sum = np.concatenate(
-                [np.zeros((n_real_sn, 1)), np.cumsum(col_sum, axis=1)], axis=1
-            )
-            cum_cnt = np.concatenate(
-                [np.zeros((n_real_sn, 1)), np.cumsum(col_cnt, axis=1)], axis=1
-            )
+            # Only this time bin's real rows, as (row, wl) arrays
+            bin_valid = valid[row_mask]
+            bin_amp2 = real_amp2[row_mask]
+            bin_sigma2 = real_sigma2[row_mask]
 
-            synth_row_mask = (synth_time0 >= tlo) & (synth_time0 < t)
-
-            # `a_idx` only advances on a successful bin, so an empty candidate
-            # bin (no wl columns, no real data, or no synth rows) gets merged
-            # into the next candidate instead of being dropped - matching the
-            # original loop's `wlo`/`tlo` behaviour exactly.
+            # `a_idx` only advances on a successful bin, so a candidate bin with
+            # no wl columns or too little real data gets merged into the next
+            # candidate instead of being dropped.
             a_idx = 0
+            fit = None
             for b_idx in b_idx_arr:
                 if b_idx <= a_idx:
                     continue
-
-                cnt_diff = cum_cnt[:, b_idx] - cum_cnt[:, a_idx]
-                if np.sum(cnt_diff) == 0:
-                    continue
-                if not np.any(synth_row_mask):
+                in_bin = bin_valid[:, a_idx:b_idx]
+                if np.count_nonzero(in_bin) < n_noise_groups:
                     continue
 
-                sum_diff = cum_sum[:, b_idx] - cum_sum[:, a_idx]
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    val = sum_diff / cnt_diff
-                finite = np.isfinite(val)
-                if not np.any(finite):
-                    continue
-                coadd = np.sqrt(np.where(finite, val, 0.0))
-                data_snr = np.sum(coadd) / np.count_nonzero(finite)
-                if data_snr == 0:
-                    continue
-
-                synth_sigma[synth_row_mask, a_idx:b_idx] = (
-                    synth_amp[synth_row_mask, a_idx:b_idx] / data_snr
+                *fit, pinned = fit_noise(
+                    bin_amp2[:, a_idx:b_idx][in_bin], bin_sigma2[:, a_idx:b_idx][in_bin]
+                )
+                n_pinned_background += pinned
+                inv_k2, sigma0_2 = fit
+                synth_sigma[synth_row_mask, a_idx:b_idx] = np.sqrt(
+                    sigma0_2
+                    + inv_k2 * np.square(synth_amp[synth_row_mask, a_idx:b_idx])
                 )
                 a_idx = b_idx
-            tlo = t
+
+            # Trailing columns with too little data of their own share the last fit
+            if fit is not None and a_idx < len(wavelengths):
+                inv_k2, sigma0_2 = fit
+                synth_sigma[synth_row_mask, a_idx:] = np.sqrt(
+                    sigma0_2 + inv_k2 * np.square(synth_amp[synth_row_mask, a_idx:])
+                )
+
+        if n_pinned_background:
+            self.log.debug(
+                f"{n_pinned_background} noise bins fit a negative background; "
+                "pinned σ₀ to their faintest flux group"
+            )
 
         synth_sigma = np.where(
             np.isfinite(synth_sigma), synth_sigma, np.zeros_like(synth_sigma)

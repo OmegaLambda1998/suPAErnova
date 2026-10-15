@@ -543,7 +543,7 @@ class DispersionPlotter(Plotter):
         nmad_r_hat = 0.6745 * (pae_r_hat - median_r_hat) / mad_r_hat
         r_hat = np.max(nmad_r_hat, axis=-1)
         r_hat_mask = r_hat < 100
-        snpae_mask &= r_hat_mask
+        # snpae_mask &= r_hat_mask
 
         pae_twins_mask = np.ones_like(pae_mask, dtype=bool)
         pae_salt_mask = np.ones_like(pae_mask, dtype=bool)

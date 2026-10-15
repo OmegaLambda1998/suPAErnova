@@ -349,7 +349,10 @@ class TFPosteriorModel(ks.Model):
             & input_sn_mask
             & input_spec_mask
             & input_wl_mask
-            & (input_spectra_mask | input_phot_mask)
+            # A spectral pixel with σ ≤ 0 is noiseless, so would pin the fit and add
+            # an unbounded -log σ to the likelihood. Photometric rows only carry σ
+            # at their effective-wavelength bin, so are left to `photometry`.
+            & ((input_spectra_mask & (input_sigma > 0)) | input_phot_mask)
         )
 
         mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
@@ -612,8 +615,9 @@ class TFPosteriorModel(ks.Model):
             Boolean tensor of shape `(sn_dim, spec_dim)`, True where a
             spec/phot row has at least one unmasked wl point.
         """
+        # Matches `posterior_mask` in `call`
         mask = (self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask) & (
-            self.data_spectra_mask | self.data_phot_mask
+            (self.data_spectra_mask & (self.data_sigma > 0)) | self.data_phot_mask
         )
         return tf.math.reduce_any(mask, axis=-1)
 
