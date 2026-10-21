@@ -1,18 +1,18 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Literal, cast
 from logging import Logger
 from pathlib import Path
+from typing import Literal, cast
 
 import toml
-from pydantic import FilePath, DirectoryPath
+from pydantic import DirectoryPath, FilePath
 
-from supaernova.utils import deepmerge, resolve_path
-from supaernova.typing import T, Config
 from supaernova.logging import setup_logging
+from supaernova.typing import Config
+from supaernova.utils import deepmerge, resolve_path
 
 from .base import BaseConfig
-from .paths import PathConfig
 from .globals import GlobalConfig
+from .paths import PathConfig
 
 
 class InputConfig(BaseConfig):

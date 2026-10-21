@@ -1,9 +1,9 @@
 # Copyright 2025 Patrick Armstrong
-from typing import TYPE_CHECKING
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import toml
 import click
+import toml
 
 from . import main
 from .utils import resolve_path

@@ -1,22 +1,22 @@
 # Copyright 2025 Patrick Armstrong
 
 import sys
+import traceback
+from pathlib import Path
 from time import time
 from typing import TYPE_CHECKING
-from pathlib import Path
-import traceback
 
 from pydantic import ValidationError
 from tqdm.contrib.logging import logging_redirect_tqdm
 
-from .steps import Step
-from .utils import resolve_path
-from .logging import setup_logging
-from .configs.run import RunConfig
+from .configs.globals import GlobalConfig
 from .configs.input import InputConfig
 from .configs.paths import PathConfig
+from .configs.run import RunConfig
 from .configs.steps import StepConfig
-from .configs.globals import GlobalConfig
+from .logging import setup_logging
+from .steps import Step
+from .utils import resolve_path
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -142,7 +142,7 @@ def main(
             log.info(f"SuPAErnovae took {exec_time:.2f}{unit}")
             return config
     except ValidationError as e:
-        log.error(e)  # noqa: TRY400
+        log.error(e)
         sys.exit(1)
     except Exception:
         log.exception(traceback.format_exc())

@@ -1,8 +1,8 @@
 # Copyright 2025 Patrick Armstrong
 
+import logging
 import sys
 from typing import TYPE_CHECKING
-import logging
 
 import coloredlogs
 
