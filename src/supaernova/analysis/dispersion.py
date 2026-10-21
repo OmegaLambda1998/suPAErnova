@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 class DispersionPlot(SpectraPlot):
-    subset: Literal["train", "test"]
+    subset: Literal["train", "test", "all"]
     legacy: tuple[Path, ...] | None = None
     twins: str | None = None
     reduce: Literal["mean", "median", "max_central"] = "max_central"

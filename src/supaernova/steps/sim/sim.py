@@ -329,11 +329,9 @@ class Sim(Step[SimConfig]):
 
         # Drawn after `us` so runs without sampling keep the same RNG stream
         synth_phys = self.sample_physical_latents()
-        # Only sampled ΔM / Δp go into the name, so unsampled sims keep their names
-        sampled = [self.options.sample_delta_m, self.options.sample_delta_p]
-        arr = np.concatenate(
-            (us, synth_zs, synth_phys[:, sampled].astype(us.dtype)), axis=-1
-        )
+        # ΔM / Δp always go into the name (as `_0_0` when unsampled), so every
+        # sim's names share one format
+        arr = np.concatenate((us, synth_zs, synth_phys.astype(us.dtype)), axis=-1)
 
         def encode(x, sigfigs):
             return f"{x:.{sigfigs}g}".replace(".", "-")
