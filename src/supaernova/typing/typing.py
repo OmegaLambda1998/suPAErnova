@@ -1,7 +1,7 @@
-from pathlib import Path
-from collections.abc import Mapping, Iterable
+from typing import Any
 
-from pydantic import BaseModel, JsonValue
+from typing_extensions import TypeVar
 
-type T = JsonValue | BaseModel | Path | Mapping[str, "T"] | Iterable["T"]
+T = TypeVar("T", default=Any)
 type Config[T] = dict[str, T]
+type Cfg = Config[Any]

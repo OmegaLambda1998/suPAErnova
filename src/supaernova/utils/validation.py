@@ -1,8 +1,8 @@
-from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
 from inspect import signature
 from pathlib import Path
-from collections.abc import Callable
+from types import ModuleType
+from typing import Any
 
 Fn = Callable[..., Any]
 type ConfigInputObject[F: Fn] = str | Path | F
@@ -19,16 +19,17 @@ def validate_signature[F: Fn](obj: F, dummy_obj: F, attr: str | None = None) -> 
         if dummy_param in {"args", "kwargs", "self"}:
             continue
         if dummy_param not in fn_signature.parameters:
-            err = f"Function `{obj.__name__}` is missing argument `{dummy_param}` of type `{dummy_sig.annotation}`"
+            err = f"Function `{obj.__name__}` is missing argument `{dummy_param}` of type `{dummy_sig.annotation}`"  # ty: ignore [unresolved-attribute]
             raise ValueError(err)
         fn_sig = fn_signature.parameters[dummy_param]
         if fn_sig.annotation != dummy_sig.annotation:
-            err = f"Argument `{dummy_param}` of function `{obj.__name__}` should be of type `{dummy_sig}`, but is instead of type `{fn_sig}`"
+            err = f"Argument `{dummy_param}` of function `{obj.__name__}` should be of type `{dummy_sig}`, but is instead of type `{fn_sig}`"  # ty: ignore [unresolved-attribute]
             raise ValueError(err)
     dummy_rtn = dummy_signature.return_annotation
     fn_rtn = fn_signature.return_annotation
     if fn_rtn != dummy_rtn:
-        err = f"Function `{obj.__name__}` should have a return type of `{dummy_rtn}`, but instead has a return type of `{fn_rtn}`"
+        err = f"Function `{obj.__name__}` should have a return type of `{dummy_rtn}`, but instead has a return type of `{fn_rtn}`"  # ty: ignore [unresolved-attribute]
+
         raise ValueError(err)
     return obj
 
@@ -51,7 +52,7 @@ def extract_from_file[F: Fn](name: str, file: Path, _type_hint: type[F]) -> F:
     with file.open("r", encoding="utf-8") as io:
         code = io.read()
     mod = ModuleType(str(file))
-    exec(code, mod.__dict__)
+    exec(code, mod.__dict__)  # noqa: S102
     return extract_from_module(name, mod, _type_hint)
 
 
@@ -73,5 +74,6 @@ def validate_object[F: Fn](
         else:
             obj = extract_from_module(obj, mod, type_hint)
     if isinstance(obj, Path):
-        obj = extract_from_file(dummy_obj.__name__, obj, type_hint)
+        obj = extract_from_file(dummy_obj.__name__, obj, type_hint)  # ty: ignore [unresolved-attribute]
+
     return validate_signature(obj, dummy_obj, attr=attr)

@@ -1,15 +1,15 @@
-from typing import override
-from functools import cached_property
 from collections.abc import Callable
+from functools import cached_property
+from typing import override
 
 from pydantic import computed_field
 
 from supaernova._tf import ks, tf
-from supaernova.utils.validation import ConfigInputObject, validate_object
 from supaernova.steps.posterior.tf import (
     loss as snpae_losses,
 )
 from supaernova.typing.backends.tf import Loss, LossFunc
+from supaernova.utils.validation import ConfigInputObject, validate_object
 
 from .posterior import PosteriorConfig
 

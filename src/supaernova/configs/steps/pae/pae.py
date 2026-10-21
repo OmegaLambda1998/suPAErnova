@@ -1,29 +1,29 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, Literal, ClassVar, Annotated
-from pathlib import Path
 import importlib
 import itertools
 from collections.abc import Callable
+from pathlib import Path
+from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
 from numpy import typing as npt
 from pydantic import (
-    Field,
-    PositiveInt,
-    PositiveFloat,
     AfterValidator,
+    Field,
     NonNegativeFloat,
+    PositiveFloat,
+    PositiveInt,
     field_validator,
     model_validator,
 )
 
-from supaernova.utils.lazy import LazyObj, LazyLambda
-from supaernova.configs.base import BaseConfig
-from supaernova.analysis.spectra import ComparisonPlot
-from supaernova.configs.steps.data import LazySNPAEData, DataStepConfig
-from supaernova.configs.steps.steps import StepResult, StepAnalysis
-from supaernova.configs.steps.models import ModelConfig, BackendConfig
 from supaernova.analysis.distribution import DistributionPlot
+from supaernova.analysis.spectra import ComparisonPlot
+from supaernova.configs.base import BaseConfig
+from supaernova.configs.steps.data import DataStepConfig, LazySNPAEData
+from supaernova.configs.steps.models import BackendConfig, ModelConfig
+from supaernova.configs.steps.steps import StepAnalysis, StepResult
+from supaernova.utils.lazy import LazyLambda, LazyObj
 
 
 def clear(value: LazyObj) -> LazyObj:
@@ -50,28 +50,28 @@ class PAEStage(BaseConfig):
     learning_rate_weight_decay_rate: PositiveFloat
 
     data: Annotated[LazySNPAEData, AfterValidator(clear)]
-    mask: npt.NDArray[bool]
-    sn_mask: npt.NDArray[bool]
-    spec_mask: npt.NDArray[bool]
-    wl_mask: npt.NDArray[bool]
+    mask: npt.NDArray[np.bool_]
+    sn_mask: npt.NDArray[np.bool_]
+    spec_mask: npt.NDArray[np.bool_]
+    wl_mask: npt.NDArray[np.bool_]
 
     train_data: Annotated[LazySNPAEData, AfterValidator(clear)]
-    train_mask: npt.NDArray[bool]
-    train_sn_mask: npt.NDArray[bool]
-    train_spec_mask: npt.NDArray[bool]
-    train_wl_mask: npt.NDArray[bool]
+    train_mask: npt.NDArray[np.bool_]
+    train_sn_mask: npt.NDArray[np.bool_]
+    train_spec_mask: npt.NDArray[np.bool_]
+    train_wl_mask: npt.NDArray[np.bool_]
 
     test_data: Annotated[LazySNPAEData, AfterValidator(clear)]
-    test_mask: npt.NDArray[bool]
-    test_sn_mask: npt.NDArray[bool]
-    test_spec_mask: npt.NDArray[bool]
-    test_wl_mask: npt.NDArray[bool]
+    test_mask: npt.NDArray[np.bool_]
+    test_sn_mask: npt.NDArray[np.bool_]
+    test_spec_mask: npt.NDArray[np.bool_]
+    test_wl_mask: npt.NDArray[np.bool_]
 
     val_data: Annotated[LazySNPAEData, AfterValidator(clear)]
-    val_mask: npt.NDArray[bool]
-    val_sn_mask: npt.NDArray[bool]
-    val_spec_mask: npt.NDArray[bool]
-    val_wl_mask: npt.NDArray[bool]
+    val_mask: npt.NDArray[np.bool_]
+    val_sn_mask: npt.NDArray[np.bool_]
+    val_spec_mask: npt.NDArray[np.bool_]
+    val_wl_mask: npt.NDArray[np.bool_]
 
     # --- Optional ---
     savepath: Path | None = None
@@ -92,20 +92,20 @@ class PAEStageResult(StepResult):
     # === Field Variables ===
     # --- Required ---
     stage: int
-    ind: npt.NDArray[int]
-    sn_name: npt.NDArray[str]
-    spectra_id: npt.NDArray[str]
-    input_amp: npt.NDArray[float]
-    input_d_amp: npt.NDArray[float]
-    input_phase: npt.NDArray[float]
-    input_mask: npt.NDArray[float]
-    input_sn_mask: npt.NDArray[float]
-    input_spec_mask: npt.NDArray[float]
-    input_wl_mask: npt.NDArray[float]
-    input_colourlaw: npt.NDArray[float] | None
-    latents: npt.NDArray[float]
-    output_amp: npt.NDArray[float]
-    diff_amp: npt.NDArray[float]
+    ind: npt.NDArray[np.int64]
+    sn_name: npt.NDArray[np.str_]
+    spectra_id: npt.NDArray[np.str_]
+    input_amp: npt.NDArray[np.float64]
+    input_d_amp: npt.NDArray[np.float64]
+    input_phase: npt.NDArray[np.float64]
+    input_mask: npt.NDArray[np.float64]
+    input_sn_mask: npt.NDArray[np.float64]
+    input_spec_mask: npt.NDArray[np.float64]
+    input_wl_mask: npt.NDArray[np.float64]
+    input_colourlaw: npt.NDArray[np.float64] | None
+    latents: npt.NDArray[np.float64]
+    output_amp: npt.NDArray[np.float64]
+    diff_amp: npt.NDArray[np.float64]
     loss: float
     pred_loss: float
     model_loss: float
@@ -272,8 +272,8 @@ class PAEConfig(BackendConfig):
 
     # === Model Validators ===
     # --- Before ---
-    @classmethod
     @model_validator(mode="before")
+    @classmethod
     def _validate_bounds(cls, data: Any) -> Any:
         if isinstance(data, dict):
             for var in ["redshift", "phase", "wavelength"]:

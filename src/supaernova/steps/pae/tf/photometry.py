@@ -1,7 +1,4 @@
-from typing import TYPE_CHECKING
-
-from supaernova._tf import tf, tfp, ks, JIT_COMPILE
-from supaernova.utils.tf import db, pp
+from supaernova._tf import JIT_COMPILE, tf, tfp
 
 
 @tf.function(jit_compile=JIT_COMPILE)

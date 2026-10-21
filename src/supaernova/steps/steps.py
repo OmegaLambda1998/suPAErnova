@@ -1,22 +1,21 @@
 # Copyright 2025 Patrick Armstrong
-from typing import TYPE_CHECKING, Any, ClassVar
-from pathlib import Path
-import pkgutil
 import importlib
+import pkgutil
 from collections.abc import Iterable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
 from supaernova.configs.callbacks import callback
 
 if TYPE_CHECKING:
-    from typing import Any
     from logging import Logger
-    from collections.abc import Callable
+    from typing import Any
 
-    from supaernova.configs.paths import PathConfig
-    from supaernova.configs.steps import StepConfig, StepResult, StepAnalysis
     from supaernova.configs.globals import GlobalConfig
+    from supaernova.configs.paths import PathConfig
+    from supaernova.configs.steps import StepAnalysis, StepConfig, StepResult
 
 # Data subsets results are computed for, mapped to the prefix of the matching
 # step attributes (``train_data``, ``test_mask``, ...). ``all`` is the full,
@@ -68,9 +67,7 @@ class Step[C: StepConfig]:
         self.cleanup: bool = self.config.clean
         self.debug: bool = self.config.debug
         self.force: bool = self.config.force
-        self.callbacks: dict[str, str | dict[str, Callable[[Any], None]]] = (
-            config.callbacks
-        )
+        self.callbacks = config.callbacks
         self.skip: bool = self.options.skip
 
         self.seed: int = config.seed
@@ -93,7 +90,6 @@ class Step[C: StepConfig]:
 
     def _setup(self, *args: "Any", **kwargs: "Any") -> None:
         self.log.warning(f"{self.__class__} has no _setup implementation")
-        pass
 
     @callback
     def setup(self, *args: "Any", **kwargs: "Any") -> None:
@@ -116,7 +112,6 @@ class Step[C: StepConfig]:
 
     def _run(self, *args: "Any", **kwargs: "Any") -> None:
         self.log.warning(f"{self.__class__} has no _run implementation")
-        pass
 
     @callback
     def run(self, *args: "Any", **kwargs: "Any") -> None:
@@ -140,7 +135,6 @@ class Step[C: StepConfig]:
 
     def _save(self, *args: "Any", **kwargs: "Any") -> None:
         self.log.warning(f"{self.__class__} has no _save implementation")
-        pass
 
     @callback
     def save(self, *args: "Any", **kwargs: "Any") -> None:
@@ -163,7 +157,6 @@ class Step[C: StepConfig]:
 
     def _load(self, *args: "Any", **kwargs: "Any") -> None:
         self.log.warning(f"{self.__class__} has no _load implementation")
-        pass
 
     @callback
     def load(self, *args: "Any", **kwargs: "Any") -> None:
@@ -190,7 +183,6 @@ class Step[C: StepConfig]:
 
     def _result(self, *args: "Any", **kwargs: "Any") -> None:
         self.log.warning(f"{self.__class__} has no _results implementation")
-        pass
 
     @callback
     def result(self, *args: "Any", **kwargs: "Any") -> None:
@@ -216,7 +208,6 @@ class Step[C: StepConfig]:
 
     def _analyse(self, *args: "Any", **kwargs: "Any") -> None:
         self.log.warning(f"{self.__class__} has no _analyse implementation")
-        pass
 
     @callback
     def analyse(self, *args: "Any", **kwargs: "Any") -> None:
@@ -240,7 +231,6 @@ class Step[C: StepConfig]:
 
     def _clean(self, *args: "Any", **kwargs: "Any") -> None:
         self.log.warning(f"{self.__class__} has no _clean implementation")
-        pass
 
     @callback
     def clean(self, *args: "Any", **kwargs: "Any") -> None:
@@ -273,7 +263,6 @@ class Step[C: StepConfig]:
         **kwargs: "Any",
     ) -> None:
         self.log.warning(f"{self.__class__} has no _clear implementation")
-        pass
 
     @callback
     def clear(

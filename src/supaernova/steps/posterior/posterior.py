@@ -1,39 +1,39 @@
+import importlib
 import json
 import shutil
-from typing import TYPE_CHECKING, Any, Literal, ClassVar, override
-import importlib
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, override
 
 import numpy as np
 import pandas as pd
 
-from supaernova.utils import pp, max_central
 from supaernova.analysis import Plotter
-from supaernova.steps.models import Model, ModelStep
-from supaernova.analysis.spectra import SpectraPlotter
-from supaernova.configs.callbacks import callback
-from supaernova.configs.steps.data import SNPAEData, DataStepResult
 from supaernova.analysis.dispersion import DispersionPlotter
 from supaernova.analysis.distribution import DistributionPlotter
+from supaernova.analysis.spectra import SpectraPlotter
+from supaernova.configs.callbacks import callback
+from supaernova.configs.steps.data import DataStepResult, SNPAEData
 from supaernova.configs.steps.posterior import (
     PosteriorConfig,
     PosteriorMAPStage,
-    PosteriorStepConfig,
-    PosteriorStepResult,
     PosteriorStepAnalysis,
+    PosteriorStepConfig,
     PosteriorStepHMCResult,
+    PosteriorStepResult,
 )
+from supaernova.steps.models import Model, ModelStep
+from supaernova.utils import max_central, pp
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from collections.abc import Callable
+    from pathlib import Path
 
     from numpy import typing as npt
 
     from supaernova.analysis import Axis, Figure
-    from supaernova.steps.pae import PAEModel, PAEStepResult
+    from supaernova.configs.steps.data import DataStepResult, LazySNPAEData
     from supaernova.steps.nflow import NFlowModel, NFlowStepResult
-    from supaernova.configs.steps.data import LazySNPAEData, DataStepResult
+    from supaernova.steps.pae import PAEModel, PAEStepResult
 
     from .tf import TFPosteriorModel
 
@@ -192,28 +192,28 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.pae: PAEModel
 
         self.data: LazySNPAEData
-        self.mask: npt.NDArray[bool]
-        self.sn_mask: npt.NDArray[bool]
-        self.spec_mask: npt.NDArray[bool]
-        self.wl_mask: npt.NDArray[bool]
+        self.mask: npt.NDArray[np.bool_]
+        self.sn_mask: npt.NDArray[np.bool_]
+        self.spec_mask: npt.NDArray[np.bool_]
+        self.wl_mask: npt.NDArray[np.bool_]
 
         self.train_data: LazySNPAEData
-        self.train_mask: npt.NDArray[bool]
-        self.train_sn_mask: npt.NDArray[bool]
-        self.train_spec_mask: npt.NDArray[bool]
-        self.train_wl_mask: npt.NDArray[bool]
+        self.train_mask: npt.NDArray[np.bool_]
+        self.train_sn_mask: npt.NDArray[np.bool_]
+        self.train_spec_mask: npt.NDArray[np.bool_]
+        self.train_wl_mask: npt.NDArray[np.bool_]
 
         self.test_data: LazySNPAEData
-        self.test_mask: npt.NDArray[bool]
-        self.test_sn_mask: npt.NDArray[bool]
-        self.test_spec_mask: npt.NDArray[bool]
-        self.test_wl_mask: npt.NDArray[bool]
+        self.test_mask: npt.NDArray[np.bool_]
+        self.test_sn_mask: npt.NDArray[np.bool_]
+        self.test_spec_mask: npt.NDArray[np.bool_]
+        self.test_wl_mask: npt.NDArray[np.bool_]
 
         self.val_data: LazySNPAEData
-        self.val_mask: npt.NDArray[bool]
-        self.val_sn_mask: npt.NDArray[bool]
-        self.val_spec_mask: npt.NDArray[bool]
-        self.val_wl_mask: npt.NDArray[bool]
+        self.val_mask: npt.NDArray[np.bool_]
+        self.val_sn_mask: npt.NDArray[np.bool_]
+        self.val_spec_mask: npt.NDArray[np.bool_]
+        self.val_wl_mask: npt.NDArray[np.bool_]
 
         self.min_redshift: float
         self.max_redshift: float
@@ -248,7 +248,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.spec_dim: int
         self.wl_dim: int
 
-        self.step_sizes: dict[str, npt.NDArray[float]]
+        self.step_sizes: dict[str, npt.NDArray[np.float64]]
 
         self.model: PosteriorModel
 
@@ -308,12 +308,12 @@ class Posterior(ModelStep[PosteriorConfig]):
 
         if self.validation_frac > 0:
             ind_split = int(data.sn_dim * self.validation_frac)
-            self.val_data.model_validate({
-                k: v[-ind_split:] for k, v in self.train_data.model_dump().items()
-            })
-            self.train_data.model_validate({
-                k: v[:-ind_split] for k, v in self.train_data.model_dump().items()
-            })
+            self.val_data.model_validate(
+                {k: v[-ind_split:] for k, v in self.train_data.model_dump().items()}
+            )
+            self.train_data.model_validate(
+                {k: v[:-ind_split] for k, v in self.train_data.model_dump().items()}
+            )
 
         self.min_redshift = self.options.min_redshift or max(
             nflow.min_redshift,
@@ -386,7 +386,6 @@ class Posterior(ModelStep[PosteriorConfig]):
             # --- ULatent Bounds ---
             nearest = 5
             nflow_subset = nflow.models[subset]
-            z_latents = nflow_subset.z_latents
             u_latents = nflow_subset.u_latents
             mask = getattr(self.nflow, f"{subset}_mask")[..., None]
             sn_mask = getattr(self.nflow, f"{subset}_sn_mask")
@@ -505,95 +504,109 @@ class Posterior(ModelStep[PosteriorConfig]):
 
         # --- Stages ---
         i = 0
-        self.map_stage_setup = PosteriorMAPStage.model_validate({
-            "stage": i,
-            "name": "setup",
-            "fname": "setup",
-            "n_chains": 1,
-            "init": True,
-            "setup": True,
-        })
-        i += 1
-
-        self.map_stage_init = PosteriorMAPStage.model_validate({
-            "stage": i,
-            "name": "init",
-            "fname": "init",
-            "n_chains": 1,
-            "init": True,
-        })
-        i += 1
-
-        self.map_stage_constant = PosteriorMAPStage.model_validate({
-            "stage": i,
-            "name": "constant",
-            "fname": "constant",
-            "n_chains": 1,
-            "init_u_delta_av": "constant",
-            "init_latents": "u_constant",
-            "init_delta_av": "constant",
-            "init_delta_m": "constant",
-            "init_delta_p": "constant",
-            "init_bias": "constant",
-        })
-        i += 1
-
-        if self.legacy_path is not None:
-            self.map_stage_legacy = PosteriorMAPStage.model_validate({
+        self.map_stage_setup = PosteriorMAPStage.model_validate(
+            {
                 "stage": i,
-                "name": "legacy",
-                "fname": "legacy",
+                "name": "setup",
+                "fname": "setup",
+                "n_chains": 1,
+                "init": True,
+                "setup": True,
+            }
+        )
+        i += 1
+
+        self.map_stage_init = PosteriorMAPStage.model_validate(
+            {
+                "stage": i,
+                "name": "init",
+                "fname": "init",
+                "n_chains": 1,
+                "init": True,
+            }
+        )
+        i += 1
+
+        self.map_stage_constant = PosteriorMAPStage.model_validate(
+            {
+                "stage": i,
+                "name": "constant",
+                "fname": "constant",
                 "n_chains": 1,
                 "init_u_delta_av": "constant",
                 "init_latents": "u_constant",
-                "init_delta_av": "legacy",
-                "init_delta_m": "legacy",
-                "init_delta_p": "legacy",
+                "init_delta_av": "constant",
+                "init_delta_m": "constant",
+                "init_delta_p": "constant",
                 "init_bias": "constant",
-            })
+            }
+        )
+        i += 1
+
+        if self.legacy_path is not None:
+            self.map_stage_legacy = PosteriorMAPStage.model_validate(
+                {
+                    "stage": i,
+                    "name": "legacy",
+                    "fname": "legacy",
+                    "n_chains": 1,
+                    "init_u_delta_av": "constant",
+                    "init_latents": "u_constant",
+                    "init_delta_av": "legacy",
+                    "init_delta_m": "legacy",
+                    "init_delta_p": "legacy",
+                    "init_bias": "constant",
+                }
+            )
             i += 1
         else:
             self.map_stage_legacy = None
-        self.map_stage_random = PosteriorMAPStage.model_validate({
-            "stage": i,
-            "name": "random",
-            "fname": "random",
-            "n_chains": self.n_random_chains,
-            "init_u_delta_av": "random",
-            "init_latents": "u_random",
-            "init_delta_av": "data",
-            "init_delta_m": "random",
-            "init_delta_p": "random",
-            "init_bias": "current",
-        })
+        self.map_stage_random = PosteriorMAPStage.model_validate(
+            {
+                "stage": i,
+                "name": "random",
+                "fname": "random",
+                "n_chains": self.n_random_chains,
+                "init_u_delta_av": "random",
+                "init_latents": "u_random",
+                "init_delta_av": "data",
+                "init_delta_m": "random",
+                "init_delta_p": "random",
+                "init_bias": "current",
+            }
+        )
         i += 1
 
-        self.map_stage_delta_av = PosteriorMAPStage.model_validate({
-            "stage": i,
-            "name": "delta_av",
-            "fname": "delta_av",
-            "n_chains": self.n_delta_av_chains,
-            "init_u_delta_av": "data",
-            "init_latents": "z_constant",
-            "init_delta_av": "scale",
-            "init_delta_m": "constant",
-            "init_delta_p": "constant",
-            "init_bias": "current",
-        })
+        self.map_stage_delta_av = PosteriorMAPStage.model_validate(
+            {
+                "stage": i,
+                "name": "delta_av",
+                "fname": "delta_av",
+                "n_chains": self.n_delta_av_chains,
+                "init_u_delta_av": "data",
+                "init_latents": "z_constant",
+                "init_delta_av": "scale",
+                "init_delta_m": "constant",
+                "init_delta_p": "constant",
+                "init_bias": "current",
+            }
+        )
         i += 1
 
-        self.map_stage_delta_m = PosteriorMAPStage.model_validate({
-            "stage": i,
-            "name": "delta_m",
-            "fname": "delta_m",
-            "n_chains": self.n_delta_m_chains,
-            "init_u_delta_av": "constant",
-            "init_latents": "u_constant",
-            "init_delta_av": "data",
-            "init_delta_m": "scale",
-            "init_delta_p": "constant",
-            "init_bias": "current",
-        })
+        self.map_stage_delta_m = PosteriorMAPStage.model_validate(
+            {
+                "stage": i,
+                "name": "delta_m",
+                "fname": "delta_m",
+                "n_chains": self.n_delta_m_chains,
+                "init_u_delta_av": "constant",
+                "init_latents": "u_constant",
+                "init_delta_av": "data",
+                "init_delta_m": "scale",
+                "init_delta_p": "constant",
+                "init_bias": "current",
+            }
+        )
         i += 1
 
         self.map_stages = (
@@ -719,10 +732,12 @@ class Posterior(ModelStep[PosteriorConfig]):
                 }
 
                 samples = model.hmc.samples
-                samples = samples.numpy().reshape((
-                    samples.shape[0] * samples.shape[1],
-                    *samples.shape[2:],
-                ))
+                samples = samples.numpy().reshape(
+                    (
+                        samples.shape[0] * samples.shape[1],
+                        *samples.shape[2:],
+                    )
+                )
 
                 delta_m = samples[..., 0]
                 delta_p = samples[..., 1]
@@ -980,12 +995,14 @@ class Posterior(ModelStep[PosteriorConfig]):
 
         train_data = train.data.model_dump()
         test_data = test.data.model_dump()
-        data = PooledSNPAEData.model_validate({
-            k: np.concatenate((v, test_data[k]), axis=0)
-            if isinstance(v, np.ndarray)
-            else v
-            for k, v in train_data.items()
-        })
+        data = PooledSNPAEData.model_validate(
+            {
+                k: np.concatenate((v, test_data[k]), axis=0)
+                if isinstance(v, np.ndarray)
+                else v
+                for k, v in train_data.items()
+            }
+        )
         train.data.clear()
         test.data.clear()
 
@@ -1014,14 +1031,16 @@ class Posterior(ModelStep[PosteriorConfig]):
             train_results = self.results["train"][str(s)]
             test_results = self.results["test"][str(s)]
             # HMC arrays are [samples, sn, ...], except r_hat which is [sn, ...]
-            hmc = PosteriorStepHMCResult.model_validate({
-                k: np.concatenate(
-                    (v, getattr(test_results.hmc, k)), axis=0 if k == "r_hat" else 1
-                )
-                if isinstance(v, np.ndarray)
-                else v
-                for k, v in train_results.hmc.model_dump().items()
-            })
+            hmc = PosteriorStepHMCResult.model_validate(
+                {
+                    k: np.concatenate(
+                        (v, getattr(test_results.hmc, k)), axis=0 if k == "r_hat" else 1
+                    )
+                    if isinstance(v, np.ndarray)
+                    else v
+                    for k, v in train_results.hmc.model_dump().items()
+                }
+            )
             # The MAP results aren't plotted for `all`, so they aren't pooled
             hmcs.append(
                 PosteriorStepResult.model_construct(
@@ -1044,10 +1063,10 @@ class Posterior(ModelStep[PosteriorConfig]):
         results: "PosteriorStepResult",
         model: "TFPosteriorModel",
         data: "LazySNPAEData",
-        input_mask: "npt.NDArray[bool]",
-        input_sn_mask: "npt.NDArray[bool]",
-        input_spec_mask: "npt.NDArray[bool]",
-        input_wl_mask: "npt.NDArray[bool]",
+        input_mask: "npt.NDArray[np.bool_]",
+        input_sn_mask: "npt.NDArray[np.bool_]",
+        input_spec_mask: "npt.NDArray[np.bool_]",
+        input_wl_mask: "npt.NDArray[np.bool_]",
         *,
         figs: "list[Figure] | None" = None,
         axes: "list[Axis] | None" = None,
@@ -1358,15 +1377,19 @@ class Posterior(ModelStep[PosteriorConfig]):
                 elif o.reduce == "median":
                     reduce_samples = np.median(samples, axis=0, keepdims=True)
                 else:
-                    reduce_samples = np.array([
-                        np.array([
-                            max_central(
-                                samples[..., sn, pos], weight=log_prob[..., sn]
-                            )[1]
-                            for pos in range(samples.shape[-1])
-                        ])
-                        for sn in range(samples.shape[-2])
-                    ])[None, ...]
+                    reduce_samples = np.array(
+                        [
+                            np.array(
+                                [
+                                    max_central(
+                                        samples[..., sn, pos], weight=log_prob[..., sn]
+                                    )[1]
+                                    for pos in range(samples.shape[-1])
+                                ]
+                            )
+                            for sn in range(samples.shape[-2])
+                        ]
+                    )[None, ...]
                 pos_position = model.map.unconstrain(
                     model.map.get_position(reduce_samples), full=True
                 )
@@ -1478,10 +1501,10 @@ class Posterior(ModelStep[PosteriorConfig]):
         results: "PosteriorStepResult",
         model: "TFPosteriorModel",
         data: "LazySNPAEData",
-        input_mask: "npt.NDArray[bool]",
-        input_sn_mask: "npt.NDArray[bool]",
-        input_spec_mask: "npt.NDArray[bool]",
-        input_wl_mask: "npt.NDArray[bool]",
+        input_mask: "npt.NDArray[np.bool_]",
+        input_sn_mask: "npt.NDArray[np.bool_]",
+        input_spec_mask: "npt.NDArray[np.bool_]",
+        input_wl_mask: "npt.NDArray[np.bool_]",
         *,
         figs: "list[Figure] | None" = None,
         axes: "list[Axis] | None" = None,
@@ -1826,15 +1849,19 @@ class Posterior(ModelStep[PosteriorConfig]):
                 elif o.reduce == "median":
                     reduce_samples = np.median(samples, axis=0, keepdims=True)
                 else:
-                    reduce_samples = np.array([
-                        np.array([
-                            max_central(
-                                samples[..., sn, pos], weight=log_prob[..., sn]
-                            )[1]
-                            for pos in range(samples.shape[-1])
-                        ])
-                        for sn in range(samples.shape[-2])
-                    ])[None, ...]
+                    reduce_samples = np.array(
+                        [
+                            np.array(
+                                [
+                                    max_central(
+                                        samples[..., sn, pos], weight=log_prob[..., sn]
+                                    )[1]
+                                    for pos in range(samples.shape[-1])
+                                ]
+                            )
+                            for sn in range(samples.shape[-2])
+                        ]
+                    )[None, ...]
                 pos_position = model.map.unconstrain(
                     model.map.get_position(reduce_samples), full=True
                 )
@@ -1858,7 +1885,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                 )
 
                 pos_amplitude = pos_amplitude[0, ...]
-                pos_sigma = pos_sigma[0, ...]
 
                 if not force:
                     pos_log_prob = pos_log_prob.numpy()
@@ -1951,10 +1977,10 @@ class Posterior(ModelStep[PosteriorConfig]):
         model: "TFPosteriorModel",
         results: "PosteriorStepResult",
         data: "LazySNPAEData",
-        input_mask: "npt.NDArray[bool]",
-        input_sn_mask: "npt.NDArray[bool]",
-        input_spec_mask: "npt.NDArray[bool]",
-        input_wl_mask: "npt.NDArray[bool]",
+        input_mask: "npt.NDArray[np.bool_]",
+        input_sn_mask: "npt.NDArray[np.bool_]",
+        input_spec_mask: "npt.NDArray[np.bool_]",
+        input_wl_mask: "npt.NDArray[np.bool_]",
     ) -> None:
         if self.analysis.plot_comparison_array is not None:
             if not isinstance(self.analysis.plot_comparison_array, list):
@@ -2040,7 +2066,6 @@ class Posterior(ModelStep[PosteriorConfig]):
                         n_random_plots = n_plots - np.square(
                             np.floor(np.sqrt(n_plot_types))
                         )
-                n_plot_types = int(n_plot_types)
                 n_random_plots = int(n_random_plots)
                 n_plots = int(n_plots)
 
@@ -2069,26 +2094,28 @@ class Posterior(ModelStep[PosteriorConfig]):
                     delta_m = results.hmc.samples[..., 0]
                     delta_p = results.hmc.samples[..., 1]
 
-                    # delta_m = model.hmc.delta_m.numpy()[..., 0]
                     if o.reduce == "mean":
                         mean_delta_m = np.mean(delta_m, axis=0)
                     elif o.reduce == "median":
                         mean_delta_m = np.median(delta_m, axis=0)
                     else:
-                        mean_delta_m = np.array([
-                            max_central(delta_m[:, sn], weight=log_prob[:, sn])[1]
-                            for sn in range(delta_m.shape[-1])
-                        ])
-                    # delta_p = model.hmc.delta_p.numpy()[..., 0]
+                        mean_delta_m = np.array(
+                            [
+                                max_central(delta_m[:, sn], weight=log_prob[:, sn])[1]
+                                for sn in range(delta_m.shape[-1])
+                            ]
+                        )
                     if o.reduce == "mean":
                         mean_delta_p = np.mean(delta_p, axis=0)
                     if o.reduce == "median":
                         mean_delta_p = np.median(delta_p, axis=0)
                     else:
-                        mean_delta_p = np.array([
-                            max_central(delta_p[:, sn], weight=log_prob[:, sn])[1]
-                            for sn in range(delta_p.shape[-1])
-                        ])
+                        mean_delta_p = np.array(
+                            [
+                                max_central(delta_p[:, sn], weight=log_prob[:, sn])[1]
+                                for sn in range(delta_p.shape[-1])
+                            ]
+                        )
                     names = data.sn_name[..., :1, :]
 
                     if plot_type == "Best":
@@ -2183,10 +2210,10 @@ class Posterior(ModelStep[PosteriorConfig]):
         subset: str,
         seed: int,
         data: "LazySNPAEData",
-        input_mask: "npt.NDArray[bool]",
-        input_sn_mask: "npt.NDArray[bool]",
-        input_spec_mask: "npt.NDArray[bool]",
-        input_wl_mask: "npt.NDArray[bool]",
+        input_mask: "npt.NDArray[np.bool_]",
+        input_sn_mask: "npt.NDArray[np.bool_]",
+        input_spec_mask: "npt.NDArray[np.bool_]",
+        input_wl_mask: "npt.NDArray[np.bool_]",
         map_results,
         map_labels,
         *,
@@ -2276,10 +2303,10 @@ class Posterior(ModelStep[PosteriorConfig]):
         seed: int,
         data: "LazySNPAEData",
         results: PosteriorStepResult,
-        input_mask: "npt.NDArray[bool]",
-        input_sn_mask: "npt.NDArray[bool]",
-        input_spec_mask: "npt.NDArray[bool]",
-        input_wl_mask: "npt.NDArray[bool]",
+        input_mask: "npt.NDArray[np.bool_]",
+        input_sn_mask: "npt.NDArray[np.bool_]",
+        input_spec_mask: "npt.NDArray[np.bool_]",
+        input_wl_mask: "npt.NDArray[np.bool_]",
         hmc_labels,
     ) -> None:
         if self.analysis.plot_hmc is not None:
@@ -2372,15 +2399,20 @@ class Posterior(ModelStep[PosteriorConfig]):
                     elif o.reduce == "median":
                         chains = np.median(samples, axis=0)
                     elif o.reduce == "max_central":
-                        chains = np.array([
-                            np.array([
-                                max_central(
-                                    samples[..., sn, pos], weight=log_prob[:, sn]
-                                )[1]
-                                for pos in range(samples.shape[-1])
-                            ])
-                            for sn in range(samples.shape[-2])
-                        ])
+                        chains = np.array(
+                            [
+                                np.array(
+                                    [
+                                        max_central(
+                                            samples[..., sn, pos],
+                                            weight=log_prob[:, sn],
+                                        )[1]
+                                        for pos in range(samples.shape[-1])
+                                    ]
+                                )
+                                for sn in range(samples.shape[-2])
+                            ]
+                        )
                 elif samples.shape[-2] == 1:
                     chains = samples[..., 0, :]
                     weights = log_prob[..., 0]
@@ -2413,10 +2445,10 @@ class Posterior(ModelStep[PosteriorConfig]):
         seed: int,
         data: "LazySNPAEData",
         model: "TFPosteriorModel",
-        input_mask: "npt.NDArray[bool]",
-        input_sn_mask: "npt.NDArray[bool]",
-        input_spec_mask: "npt.NDArray[bool]",
-        input_wl_mask: "npt.NDArray[bool]",
+        input_mask: "npt.NDArray[np.bool_]",
+        input_sn_mask: "npt.NDArray[np.bool_]",
+        input_spec_mask: "npt.NDArray[np.bool_]",
+        input_wl_mask: "npt.NDArray[np.bool_]",
         *,
         hmcs: "list[PosteriorStepResult] | None" = None,
         force: bool = False,
@@ -2871,8 +2903,6 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
                         variant_labels[ind + i] = f"μ{i + 1}"
                     map_init_results.append(results.map.init_u_latents)
                     map_best_results.append(results.map.best_u_latents)
-                    map_init_results = np.concatenate(map_init_results, axis=-1)
-                    map_best_results = np.concatenate(map_best_results, axis=-1)
 
                     plot_chain_data, plot_labels, plot_weights, plot_opts = (
                         self._plot_hmc(
@@ -2960,10 +2990,10 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
         seed: int,
         data: "LazySNPAEData",
         results: PosteriorStepResult,
-        input_mask: "npt.NDArray[bool]",
-        input_sn_mask: "npt.NDArray[bool]",
-        input_spec_mask: "npt.NDArray[bool]",
-        input_wl_mask: "npt.NDArray[bool]",
+        input_mask: "npt.NDArray[np.bool_]",
+        input_sn_mask: "npt.NDArray[np.bool_]",
+        input_spec_mask: "npt.NDArray[np.bool_]",
+        input_wl_mask: "npt.NDArray[np.bool_]",
         hmc_labels,
     ) -> tuple[dict, dict, dict, dict]:
         v_chain_data = {}
@@ -3052,15 +3082,20 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
                     elif o.reduce == "median":
                         chains = np.median(samples, axis=0)
                     elif o.reduce == "max_central":
-                        chains = np.array([
-                            np.array([
-                                max_central(
-                                    samples[..., sn, pos], weight=log_prob[:, sn]
-                                )[1]
-                                for pos in range(samples.shape[-1])
-                            ])
-                            for sn in range(samples.shape[-2])
-                        ])
+                        chains = np.array(
+                            [
+                                np.array(
+                                    [
+                                        max_central(
+                                            samples[..., sn, pos],
+                                            weight=log_prob[:, sn],
+                                        )[1]
+                                        for pos in range(samples.shape[-1])
+                                    ]
+                                )
+                                for sn in range(samples.shape[-2])
+                            ]
+                        )
                 elif samples.shape[-2] == 1:
                     chains = samples[..., 0, :]
                     weights = log_prob[..., 0]

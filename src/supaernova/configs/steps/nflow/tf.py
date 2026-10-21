@@ -1,6 +1,6 @@
-from typing import Concatenate, cast, override
-from functools import cached_property
 from collections.abc import Callable
+from functools import cached_property
+from typing import Concatenate, cast, override
 
 from pydantic import computed_field
 
@@ -8,8 +8,8 @@ from supaernova._tf import ks, tf
 from supaernova.steps.nflow.tf import (
     loss as snpae_losses,
 )
-from supaernova.utils.validation import ConfigInputObject, validate_object
 from supaernova.typing.backends.tf import Loss, LossFunc
+from supaernova.utils.validation import ConfigInputObject, validate_object
 
 from .nflow import NFlowConfig
 
@@ -24,7 +24,7 @@ def validate_activation(
 
 SchedulerObject = (
     type[ks.optimizers.schedules.LearningRateSchedule]
-    | Callable[[Concatenate[int | tf.Tensor, ...]], tf.Tensor]
+    | Callable[Concatenate[int | tf.Tensor, ...], tf.Tensor]
 )
 
 

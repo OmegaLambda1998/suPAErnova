@@ -1,5 +1,3 @@
-from typing import TYPE_CHECKING
-
 from supaernova._tf import tf
 
 from .utils import pf

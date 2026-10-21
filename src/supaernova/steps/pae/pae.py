@@ -1,36 +1,35 @@
 # Copyright 2025 Patrick Armstrong
-import shutil
-from typing import TYPE_CHECKING, Any, override
-from pathlib import Path
 import importlib
+import shutil
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, override
 
 import numpy as np
 
-from supaernova.utils import pp
 from supaernova.analysis import Plotter
-from supaernova.steps.steps import SUBSET_PREFIX, PREFIX_SUBSET
-from supaernova.steps.models import Model, ModelStep
+from supaernova.analysis.distribution import DistributionPlotter
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.configs.callbacks import callback
 from supaernova.configs.steps.pae import (
-    PAEStage,
+    LazyPAEStageResult,
     PAEConfig,
-    PAEStepConfig,
-    PAEStepResult,
+    PAEStage,
     PAEStageResult,
     PAEStepAnalysis,
-    LazyPAEStageResult,
+    PAEStepConfig,
+    PAEStepResult,
 )
-from supaernova.analysis.distribution import DistributionPlotter
+from supaernova.steps.models import Model, ModelStep
+from supaernova.steps.steps import PREFIX_SUBSET, SUBSET_PREFIX
 
 if TYPE_CHECKING:
-    from typing import ClassVar
     from collections.abc import Callable
+    from typing import ClassVar
 
     from numpy import typing as npt
 
     from supaernova.analysis import Axis, Figure
-    from supaernova.configs.steps.data import LazySNPAEData, DataStepResult
+    from supaernova.configs.steps.data import DataStepResult, LazySNPAEData
 
     from .tf import TFPAEModel
 
@@ -136,36 +135,36 @@ class PAE(ModelStep[PAEConfig]):
 
         # --- Previous Step Variables ---
         self.data: LazySNPAEData
-        self.mask: npt.NDArray[bool]
-        self.sn_mask: npt.NDArray[bool]
-        self.spec_mask: npt.NDArray[bool]
-        self.wl_mask: npt.NDArray[bool]
+        self.mask: npt.NDArray[np.bool_]
+        self.sn_mask: npt.NDArray[np.bool_]
+        self.spec_mask: npt.NDArray[np.bool_]
+        self.wl_mask: npt.NDArray[np.bool_]
 
         self.train_data: LazySNPAEData
-        self.train_mask: npt.NDArray[bool]
-        self.train_sn_mask: npt.NDArray[bool]
-        self.train_spec_mask: npt.NDArray[bool]
-        self.train_wl_mask: npt.NDArray[bool]
+        self.train_mask: npt.NDArray[np.bool_]
+        self.train_sn_mask: npt.NDArray[np.bool_]
+        self.train_spec_mask: npt.NDArray[np.bool_]
+        self.train_wl_mask: npt.NDArray[np.bool_]
 
         self.test_data: LazySNPAEData
-        self.test_mask: npt.NDArray[bool]
-        self.test_sn_mask: npt.NDArray[bool]
-        self.test_spec_mask: npt.NDArray[bool]
-        self.test_wl_mask: npt.NDArray[bool]
+        self.test_mask: npt.NDArray[np.bool_]
+        self.test_sn_mask: npt.NDArray[np.bool_]
+        self.test_spec_mask: npt.NDArray[np.bool_]
+        self.test_wl_mask: npt.NDArray[np.bool_]
 
         self.val_data: LazySNPAEData
-        self.val_mask: npt.NDArray[bool]
-        self.val_sn_mask: npt.NDArray[bool]
-        self.val_spec_mask: npt.NDArray[bool]
-        self.val_wl_mask: npt.NDArray[bool]
+        self.val_mask: npt.NDArray[np.bool_]
+        self.val_sn_mask: npt.NDArray[np.bool_]
+        self.val_spec_mask: npt.NDArray[np.bool_]
+        self.val_wl_mask: npt.NDArray[np.bool_]
 
-        self.colourlaw: npt.NDArray[float] | None
-        self.input_wavelength: npt.NDArray[float]
-        self.input_sigma: npt.NDArray[float]
-        self.input_throughput: npt.NDArray[float]
-        self.input_effective_wavelength: npt.NDArray[float]
-        self.input_spectra_mask: npt.NDArray[float]
-        self.input_phot_mask: npt.NDArray[float]
+        self.colourlaw: npt.NDArray[np.float64] | None
+        self.input_wavelength: npt.NDArray[np.float64]
+        self.input_sigma: npt.NDArray[np.float64]
+        self.input_throughput: npt.NDArray[np.float64]
+        self.input_effective_wavelength: npt.NDArray[np.float64]
+        self.input_spectra_mask: npt.NDArray[np.float64]
+        self.input_phot_mask: npt.NDArray[np.float64]
 
         # --- Bounds ---
         self.min_redshift: float
@@ -249,12 +248,12 @@ class PAE(ModelStep[PAEConfig]):
         self.val_data = self.test_data
         if self.validation_frac > 0:
             ind_split = int(data.sn_dim * self.validation_frac)
-            self.val_data.model_validate({
-                k: v[-ind_split:] for k, v in self.train_data.model_dump().items()
-            })
-            self.train_data.model_validate({
-                k: v[:-ind_split] for k, v in self.train_data.model_dump().items()
-            })
+            self.val_data.model_validate(
+                {k: v[-ind_split:] for k, v in self.train_data.model_dump().items()}
+            )
+            self.train_data.model_validate(
+                {k: v[:-ind_split] for k, v in self.train_data.model_dump().items()}
+            )
 
         n_batches = self.options.n_batches
         self.batch_size = max(int(data.train_frac * data.sn_dim / n_batches), 1)
@@ -333,38 +332,42 @@ class PAE(ModelStep[PAEConfig]):
             delta_av_decay_steps = int(
                 delta_av_decay_steps * self.options.delta_av_epochs
             )
-        self.stage_delta_av = PAEStage.model_validate({
-            "stage": 1,
-            "prev_stage": None,
-            "name": "ΔAᵥ",
-            "fname": "delta_av",
-            "epochs": self.options.delta_av_epochs,
-            "patience": self.options.delta_av_patience,
-            "learning_rate": self.options.delta_av_lr,
-            "learning_rate_decay_steps": delta_av_decay_steps,
-            "learning_rate_decay_rate": self.options.delta_av_lr_decay_rate,
-            "learning_rate_weight_decay_rate": self.options.delta_av_lr_weight_decay_rate,
-            **stage_data,
-        })
+        self.stage_delta_av = PAEStage.model_validate(
+            {
+                "stage": 1,
+                "prev_stage": None,
+                "name": "ΔAᵥ",
+                "fname": "delta_av",
+                "epochs": self.options.delta_av_epochs,
+                "patience": self.options.delta_av_patience,
+                "learning_rate": self.options.delta_av_lr,
+                "learning_rate_decay_steps": delta_av_decay_steps,
+                "learning_rate_decay_rate": self.options.delta_av_lr_decay_rate,
+                "learning_rate_weight_decay_rate": self.options.delta_av_lr_weight_decay_rate,
+                **stage_data,
+            }
+        )
 
         zs_decay_steps = self.options.zs_lr_decay_steps
         if isinstance(zs_decay_steps, float):
             zs_decay_steps = int(zs_decay_steps * self.options.zs_epochs)
         z0 = 2 if self.physical_latents else 1
         self.stage_zs = [
-            PAEStage.model_validate({
-                "stage": z0 + i,
-                "prev_stage": z0 + i - 1,
-                "name": f"z{i + 1}",
-                "fname": f"z{i + 1}",
-                "epochs": self.options.zs_epochs,
-                "patience": self.options.zs_patience,
-                "learning_rate": self.options.zs_lr,
-                "learning_rate_decay_steps": zs_decay_steps,
-                "learning_rate_decay_rate": self.options.zs_lr_decay_rate,
-                "learning_rate_weight_decay_rate": self.options.zs_lr_weight_decay_rate,
-                **stage_data,
-            })
+            PAEStage.model_validate(
+                {
+                    "stage": z0 + i,
+                    "prev_stage": z0 + i - 1,
+                    "name": f"z{i + 1}",
+                    "fname": f"z{i + 1}",
+                    "epochs": self.options.zs_epochs,
+                    "patience": self.options.zs_patience,
+                    "learning_rate": self.options.zs_lr,
+                    "learning_rate_decay_steps": zs_decay_steps,
+                    "learning_rate_decay_rate": self.options.zs_lr_decay_rate,
+                    "learning_rate_weight_decay_rate": self.options.zs_lr_weight_decay_rate,
+                    **stage_data,
+                }
+            )
             for i in range(self.n_z_latents)
         ]
         if not self.seperate_z_latent_training:
@@ -375,53 +378,59 @@ class PAE(ModelStep[PAEConfig]):
         delta_m_decay_steps = self.options.delta_m_lr_decay_steps
         if isinstance(delta_m_decay_steps, float):
             delta_m_decay_steps = int(delta_m_decay_steps * self.options.delta_m_epochs)
-        self.stage_delta_m = PAEStage.model_validate({
-            "stage": z0 + self.n_z_latents,
-            "prev_stage": z0 + self.n_z_latents - 1,
-            "name": "Δℳ",
-            "fname": "delta_m",
-            "epochs": self.options.delta_m_epochs,
-            "patience": self.options.delta_m_patience,
-            "learning_rate": self.options.delta_m_lr,
-            "learning_rate_decay_steps": delta_m_decay_steps,
-            "learning_rate_decay_rate": self.options.delta_m_lr_decay_rate,
-            "learning_rate_weight_decay_rate": self.options.delta_m_lr_weight_decay_rate,
-            **stage_data,
-        })
+        self.stage_delta_m = PAEStage.model_validate(
+            {
+                "stage": z0 + self.n_z_latents,
+                "prev_stage": z0 + self.n_z_latents - 1,
+                "name": "Δℳ",
+                "fname": "delta_m",
+                "epochs": self.options.delta_m_epochs,
+                "patience": self.options.delta_m_patience,
+                "learning_rate": self.options.delta_m_lr,
+                "learning_rate_decay_steps": delta_m_decay_steps,
+                "learning_rate_decay_rate": self.options.delta_m_lr_decay_rate,
+                "learning_rate_weight_decay_rate": self.options.delta_m_lr_weight_decay_rate,
+                **stage_data,
+            }
+        )
 
         delta_p_decay_steps = self.options.delta_p_lr_decay_steps
         if isinstance(delta_p_decay_steps, float):
             delta_p_decay_steps = int(delta_p_decay_steps * self.options.delta_p_epochs)
-        self.stage_delta_p = PAEStage.model_validate({
-            "stage": z0 + self.n_z_latents + 1,
-            "prev_stage": z0 + self.n_z_latents,
-            "name": "Δp",
-            "fname": "delta_p",
-            "epochs": self.options.delta_p_epochs,
-            "patience": self.options.delta_p_patience,
-            "learning_rate": self.options.delta_p_lr,
-            "learning_rate_decay_steps": delta_p_decay_steps,
-            "learning_rate_decay_rate": self.options.delta_p_lr_decay_rate,
-            "learning_rate_weight_decay_rate": self.options.delta_p_lr_weight_decay_rate,
-            **stage_data,
-        })
+        self.stage_delta_p = PAEStage.model_validate(
+            {
+                "stage": z0 + self.n_z_latents + 1,
+                "prev_stage": z0 + self.n_z_latents,
+                "name": "Δp",
+                "fname": "delta_p",
+                "epochs": self.options.delta_p_epochs,
+                "patience": self.options.delta_p_patience,
+                "learning_rate": self.options.delta_p_lr,
+                "learning_rate_decay_steps": delta_p_decay_steps,
+                "learning_rate_decay_rate": self.options.delta_p_lr_decay_rate,
+                "learning_rate_weight_decay_rate": self.options.delta_p_lr_weight_decay_rate,
+                **stage_data,
+            }
+        )
 
         final_decay_steps = self.options.final_lr_decay_steps
         if isinstance(final_decay_steps, float):
             final_decay_steps = int(final_decay_steps * self.options.final_epochs)
-        self.stage_final = PAEStage.model_validate({
-            "stage": self.n_pae_latents,
-            "prev_stage": None,
-            "name": "Final",
-            "fname": "final",
-            "epochs": self.options.final_epochs,
-            "patience": self.options.final_patience,
-            "learning_rate": self.options.final_lr,
-            "learning_rate_decay_steps": final_decay_steps,
-            "learning_rate_decay_rate": self.options.final_lr_decay_rate,
-            "learning_rate_weight_decay_rate": self.options.final_lr_weight_decay_rate,
-            **stage_data,
-        })
+        self.stage_final = PAEStage.model_validate(
+            {
+                "stage": self.n_pae_latents,
+                "prev_stage": None,
+                "name": "Final",
+                "fname": "final",
+                "epochs": self.options.final_epochs,
+                "patience": self.options.final_patience,
+                "learning_rate": self.options.final_lr,
+                "learning_rate_decay_steps": final_decay_steps,
+                "learning_rate_decay_rate": self.options.final_lr_decay_rate,
+                "learning_rate_weight_decay_rate": self.options.final_lr_weight_decay_rate,
+                **stage_data,
+            }
+        )
 
         if self.physical_latents:
             self.run_stages = [
@@ -713,13 +722,13 @@ class PAE(ModelStep[PAEConfig]):
         self,
         dt: str,
         stage: PAEStage,
-        input_mask: "npt.NDArray[bool]",
-        input_sn_mask: "npt.NDArray[bool]",
-        input_spec_mask: "npt.NDArray[bool]",
-        input_wl_mask: "npt.NDArray[bool]",
-        loss: "npt.NDArray[float]",
-        pred_loss: "npt.NDArray[float]",
-        output_amp: "npt.NDArray[float]",
+        input_mask: "npt.NDArray[np.bool_]",
+        input_sn_mask: "npt.NDArray[np.bool_]",
+        input_spec_mask: "npt.NDArray[np.bool_]",
+        input_wl_mask: "npt.NDArray[np.bool_]",
+        loss: "npt.NDArray[np.float64]",
+        pred_loss: "npt.NDArray[np.float64]",
+        output_amp: "npt.NDArray[np.float64]",
         *,
         fig: "list[Figure] | None" = None,
         ax: "list[Axis] | None" = None,
@@ -807,12 +816,12 @@ class PAE(ModelStep[PAEConfig]):
         self,
         dt: str,
         stage: PAEStage,
-        input_mask: "npt.NDArray[bool]",
-        input_sn_mask: "npt.NDArray[bool]",
-        input_spec_mask: "npt.NDArray[bool]",
-        input_wl_mask: "npt.NDArray[bool]",
+        input_mask: "npt.NDArray[np.bool_]",
+        input_sn_mask: "npt.NDArray[np.bool_]",
+        input_spec_mask: "npt.NDArray[np.bool_]",
+        input_wl_mask: "npt.NDArray[np.bool_]",
         labels: dict[int | str, str | dict[int, str]],
-        chains: "Callable[[npt.NDArray[bool]], dict[str, npt.NDArray[float]] | npt.NDArray[float]]",
+        chains: "Callable[[npt.NDArray[np.bool_]], dict[str, npt.NDArray[np.float64]] | npt.NDArray[np.float64]]",
         savepath: str | Path | None = None,
     ) -> None:
         if self.analysis.plot_latents is not None:
@@ -840,7 +849,9 @@ class PAE(ModelStep[PAEConfig]):
                     continue
                 self.log.debug(f"Plotting {o.name}")
                 if o.plot_kwargs is None:
-                    o.plot_kwargs = {"title": f"{PREFIX_SUBSET[dt]}_{self.name}_{stage.name}"}
+                    o.plot_kwargs = {
+                        "title": f"{PREFIX_SUBSET[dt]}_{self.name}_{stage.name}"
+                    }
 
                 data = getattr(self, f"{dt}data")
                 (
@@ -1160,13 +1171,13 @@ class PAEStep(Model[PAEStepConfig, PAE]):
         variant: PAE,
         dt: str,
         stage: PAEStage,
-        input_mask: "npt.NDArray[bool]",
-        input_sn_mask: "npt.NDArray[bool]",
-        input_spec_mask: "npt.NDArray[bool]",
-        input_wl_mask: "npt.NDArray[bool]",
-        loss: "npt.NDArray[float]",
-        pred_loss: "npt.NDArray[float]",
-        output_amp: "npt.NDArray[float]",
+        input_mask: "npt.NDArray[np.bool_]",
+        input_sn_mask: "npt.NDArray[np.bool_]",
+        input_spec_mask: "npt.NDArray[np.bool_]",
+        input_wl_mask: "npt.NDArray[np.bool_]",
+        loss: "npt.NDArray[np.float64]",
+        pred_loss: "npt.NDArray[np.float64]",
+        output_amp: "npt.NDArray[np.float64]",
     ) -> None:
         if variant.analysis.plot_comparison is not None:
             for opts in variant.analysis.plot_comparison:
@@ -1263,7 +1274,9 @@ class PAEStep(Model[PAEStepConfig, PAE]):
 
             for dt in SUBSET_PREFIX.values():
                 for stage in variant.run_stages:
-                    results = variant.results.stages[PREFIX_SUBSET[dt]][str(stage.stage)]
+                    results = variant.results.stages[PREFIX_SUBSET[dt]][
+                        str(stage.stage)
+                    ]
                     input_mask = results.input_mask
                     input_sn_mask = results.input_sn_mask
                     input_spec_mask = results.input_spec_mask

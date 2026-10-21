@@ -1,5 +1,5 @@
-from typing import TYPE_CHECKING, ClassVar, cast, override
 from collections import UserDict
+from typing import TYPE_CHECKING, ClassVar, cast, override
 
 from supaernova.configs.callbacks import callback
 

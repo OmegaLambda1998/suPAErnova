@@ -1,24 +1,24 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, ClassVar, Literal, Annotated
 from pathlib import Path
+from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
-from numpy import typing as npt
 from astropy import cosmology as cosmo
+from numpy import typing as npt
 from pydantic import (
-    Field,
-    PositiveInt,
     AfterValidator,
+    Field,
     NonNegativeInt,
+    PositiveInt,
     field_validator,
     model_validator,
 )
 
-from supaernova.utils import resolve_path
-from supaernova.utils.lazy import LazyNPZ, LazyObj, LazyTuple, LazyPydantic
-from supaernova.configs.steps import StepConfig, StepResult, StepAnalysis
-from supaernova.analysis.spectra import SpectraPlot, ComparisonPlot
+from supaernova.analysis.spectra import ComparisonPlot, SpectraPlot
+from supaernova.configs.steps import StepAnalysis, StepConfig, StepResult
 from supaernova.configs.steps.variants import VariantConfig
+from supaernova.utils import resolve_path
+from supaernova.utils.lazy import LazyNPZ, LazyObj, LazyPydantic, LazyTuple
 
 
 class SNPAEData(StepResult):
@@ -26,35 +26,35 @@ class SNPAEData(StepResult):
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    ind: npt.NDArray[int]
-    nspectra: npt.NDArray[int]
-    sn_name: npt.NDArray[str]
-    dphase: npt.NDArray[float]
-    redshift: npt.NDArray[float]
-    x0: npt.NDArray[float]
-    x1: npt.NDArray[float]
-    c: npt.NDArray[float]
-    mb: npt.NDArray[float]
-    hubble_residual: npt.NDArray[float]
-    luminosity_distance: npt.NDArray[float]
-    spectra_id: npt.NDArray[str]
-    phase: npt.NDArray[float]
-    wl_mask_min: npt.NDArray[float]
-    wl_mask_max: npt.NDArray[float]
-    amplitude: npt.NDArray[float]
-    sigma: npt.NDArray[float]
-    salt_flux: npt.NDArray[float]
-    wavelength: npt.NDArray[float]
-    mask: npt.NDArray[int]
-    laser_mask: npt.NDArray[int]
-    sn_mask: npt.NDArray[int]
-    spec_mask: npt.NDArray[int]
-    spectra_mask: npt.NDArray[int]
-    phot_mask: npt.NDArray[int]
-    wl_mask: npt.NDArray[int]
-    time: npt.NDArray[float]
-    throughput: npt.NDArray[float]
-    effective_wavelength: npt.NDArray[float]
+    ind: npt.NDArray[np.int64]
+    nspectra: npt.NDArray[np.int64]
+    sn_name: npt.NDArray[np.str_]
+    dphase: npt.NDArray[np.float64]
+    redshift: npt.NDArray[np.float64]
+    x0: npt.NDArray[np.float64]
+    x1: npt.NDArray[np.float64]
+    c: npt.NDArray[np.float64]
+    mb: npt.NDArray[np.float64]
+    hubble_residual: npt.NDArray[np.float64]
+    luminosity_distance: npt.NDArray[np.float64]
+    spectra_id: npt.NDArray[np.str_]
+    phase: npt.NDArray[np.float64]
+    wl_mask_min: npt.NDArray[np.float64]
+    wl_mask_max: npt.NDArray[np.float64]
+    amplitude: npt.NDArray[np.float64]
+    sigma: npt.NDArray[np.float64]
+    salt_flux: npt.NDArray[np.float64]
+    wavelength: npt.NDArray[np.float64]
+    mask: npt.NDArray[np.int64]
+    laser_mask: npt.NDArray[np.int64]
+    sn_mask: npt.NDArray[np.int64]
+    spec_mask: npt.NDArray[np.int64]
+    spectra_mask: npt.NDArray[np.int64]
+    phot_mask: npt.NDArray[np.int64]
+    wl_mask: npt.NDArray[np.int64]
+    time: npt.NDArray[np.float64]
+    throughput: npt.NDArray[np.float64]
+    effective_wavelength: npt.NDArray[np.float64]
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---
@@ -169,17 +169,17 @@ class DataConfig(StepConfig):
 
     # === Model Validators ===
     # --- Before ---
-    @classmethod
     @model_validator(mode="before")
+    @classmethod
     def _validate_bounds(cls, data: Any) -> Any:
         if isinstance(data, dict):
             for var in ["redshift", "phase", "wavelength"]:
-                min_bound = data.get(f"min_{var}")
+                min_bound = data.get(f"min_{var}", "-inf")
                 if min_bound == "inf":
                     min_bound = np.inf
                 elif min_bound == "-inf":
                     min_bound = -np.inf
-                max_bound = data.get(f"max_{var}")
+                max_bound = data.get(f"max_{var}", "inf")
                 if max_bound == "inf":
                     max_bound = np.inf
                 elif max_bound == "-inf":

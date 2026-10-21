@@ -1,31 +1,29 @@
+import importlib
 import shutil
 from typing import TYPE_CHECKING, Any, ClassVar, override
-import importlib
 
 import numpy as np
 
 from supaernova.analysis import Plotter
-from supaernova.utils.tf import pp
-from supaernova.steps.steps import SUBSET_PREFIX, PREFIX_SUBSET
-from supaernova.steps.models import Model, ModelStep
+from supaernova.analysis.distribution import DistributionPlotter
 from supaernova.configs.steps.nflow import (
     NFlowConfig,
-    NFlowStepConfig,
-    NFlowStepResult,
     NFlowModelResult,
     NFlowStepAnalysis,
+    NFlowStepConfig,
+    NFlowStepResult,
 )
-from supaernova.analysis.distribution import DistributionPlotter
+from supaernova.steps.models import Model, ModelStep
+from supaernova.steps.steps import PREFIX_SUBSET, SUBSET_PREFIX
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from collections.abc import Callable
 
     from numpy import typing as npt
 
-    from supaernova.steps.pae import PAEModel
+    from supaernova.configs.steps.data import DataStepResult, LazySNPAEData
     from supaernova.configs.steps.pae import PAEStepResult
-    from supaernova.configs.steps.data import LazySNPAEData, DataStepResult
+    from supaernova.steps.pae import PAEModel
 
     from .tf import TFNFlowModel
 
@@ -112,28 +110,28 @@ class NFlow(ModelStep[NFlowConfig]):
         self.pae: PAEModel
 
         self.data: LazySNPAEData
-        self.mask: npt.NDArray[bool]
-        self.sn_mask: npt.NDArray[bool]
-        self.spec_mask: npt.NDArray[bool]
-        self.wl_mask: npt.NDArray[bool]
+        self.mask: npt.NDArray[np.bool_]
+        self.sn_mask: npt.NDArray[np.bool_]
+        self.spec_mask: npt.NDArray[np.bool_]
+        self.wl_mask: npt.NDArray[np.bool_]
 
         self.train_data: LazySNPAEData
-        self.train_mask: npt.NDArray[bool]
-        self.train_sn_mask: npt.NDArray[bool]
-        self.train_spec_mask: npt.NDArray[bool]
-        self.train_wl_mask: npt.NDArray[bool]
+        self.train_mask: npt.NDArray[np.bool_]
+        self.train_sn_mask: npt.NDArray[np.bool_]
+        self.train_spec_mask: npt.NDArray[np.bool_]
+        self.train_wl_mask: npt.NDArray[np.bool_]
 
         self.test_data: LazySNPAEData
-        self.test_mask: npt.NDArray[bool]
-        self.test_sn_mask: npt.NDArray[bool]
-        self.test_spec_mask: npt.NDArray[bool]
-        self.test_wl_mask: npt.NDArray[bool]
+        self.test_mask: npt.NDArray[np.bool_]
+        self.test_sn_mask: npt.NDArray[np.bool_]
+        self.test_spec_mask: npt.NDArray[np.bool_]
+        self.test_wl_mask: npt.NDArray[np.bool_]
 
         self.val_data: LazySNPAEData
-        self.val_mask: npt.NDArray[bool]
-        self.val_sn_mask: npt.NDArray[bool]
-        self.val_spec_mask: npt.NDArray[bool]
-        self.val_wl_mask: npt.NDArray[bool]
+        self.val_mask: npt.NDArray[np.bool_]
+        self.val_sn_mask: npt.NDArray[np.bool_]
+        self.val_spec_mask: npt.NDArray[np.bool_]
+        self.val_wl_mask: npt.NDArray[np.bool_]
 
         # --- Bounds ---
         self.min_redshift: float
@@ -212,12 +210,12 @@ class NFlow(ModelStep[NFlowConfig]):
         self.val_data = self.test_data
         if self.validation_frac > 0:
             ind_split = int(data.sn_dim * self.validation_frac)
-            self.val_data.model_validate({
-                k: v[-ind_split:] for k, v in self.train_data.model_dump().items()
-            })
-            self.train_data.model_validate({
-                k: v[:-ind_split] for k, v in self.train_data.model_dump().items()
-            })
+            self.val_data.model_validate(
+                {k: v[-ind_split:] for k, v in self.train_data.model_dump().items()}
+            )
+            self.train_data.model_validate(
+                {k: v[:-ind_split] for k, v in self.train_data.model_dump().items()}
+            )
 
         n_batches = self.options.n_batches
         self.batch_size = max(int(data.train_frac * data.sn_dim / n_batches), 1)
@@ -367,7 +365,9 @@ class NFlow(ModelStep[NFlowConfig]):
                 "log_prob": -log_prob.numpy(),
             }
 
-            dt_results[PREFIX_SUBSET[dt]] = NFlowModelResult.model_validate(model_results)
+            dt_results[PREFIX_SUBSET[dt]] = NFlowModelResult.model_validate(
+                model_results
+            )
 
         nflow_results["models"] = dt_results
         self.results = NFlowStepResult.model_validate(nflow_results)
@@ -628,7 +628,10 @@ class NFlow(ModelStep[NFlowConfig]):
                         o.name = f"step_{step}_latent_steps"
                     if o.savepath is None:
                         o.savepath = (
-                            self.paths.plots / PREFIX_SUBSET[dt] / str(self.seed) / "steps"
+                            self.paths.plots
+                            / PREFIX_SUBSET[dt]
+                            / str(self.seed)
+                            / "steps"
                         )
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     if (o.savepath / f"{o.name}.{o.ext}").exists():

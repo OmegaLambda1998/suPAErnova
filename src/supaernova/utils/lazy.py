@@ -1,18 +1,23 @@
-from typing import TYPE_CHECKING, Any, cast, override
-from collections.abc import Mapping, Collection
+from collections.abc import (
+    Callable,
+    Collection,
+    Iterable,
+    MutableMapping,
+    MutableSequence,
+    Sequence,
+)
+from typing import TYPE_CHECKING, Any, ClassVar, cast, override
 
 import numpy as np
 from numpy import typing as npt
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from typing import ClassVar
     from pathlib import Path
-    from collections.abc import Callable
 
 
 class LazyObj[O, I]:
-    meta_keys: "ClassVar[set[str]]" = {
+    meta_keys: ClassVar[set[str]] = {
         # `isinstance` falls back to `__class__`, which would otherwise trigger a load
         "__class__",
         "obj",
@@ -51,9 +56,11 @@ class LazyObj[O, I]:
 
 
 class LazyLambda[O, I](LazyObj[O, I]):
-    meta_keys: "ClassVar[set[str]]" = LazyObj.meta_keys.union({
-        "fn",
-    })
+    meta_keys: ClassVar[set[str]] = LazyObj.meta_keys.union(
+        {
+            "fn",
+        }
+    )
 
     def __init__(self, fn: "Callable[[], O]") -> None:
         super().__init__()
@@ -65,78 +72,84 @@ class LazyLambda[O, I](LazyObj[O, I]):
 
 
 class LazyFile[O, I](LazyObj[O, I]):
-    meta_keys: "ClassVar[set[str]]" = LazyObj.meta_keys.union({
-        "path",
-    })
+    meta_keys: ClassVar[set[str]] = LazyObj.meta_keys.union(
+        {
+            "path",
+        }
+    )
 
     def __init__(self, path: "Path") -> None:
         super().__init__()
         self.path: Path = path
 
 
-class LazyCollection[C: Collection, L: LazyFile](
-    LazyObj[type[C][L], type[C][L]], Collection
-):
-    meta_keys: "ClassVar[set[str]]" = LazyObj.meta_keys.union({
-        "iter",
-        "elem",
-        "paths",
-    })
-    iter: type[C]
+class LazySequence[C: Sequence, L: LazyFile](LazyObj[C, C]):
+    meta_keys: ClassVar[set[str]] = LazyObj.meta_keys.union(
+        {
+            "iter",
+            "elem",
+            "paths",
+        }
+    )
+    iter: Callable[[Iterable[L]], C]
     elem: type[L]
 
     def __init__(self, paths: "Collection[Path]") -> None:
         super().__init__()
         self.paths: Collection[Path] = paths
-        self._obj: C[L] = self.iter(self.elem(p) for p in self.paths)
+        self._obj = self.iter(self.elem(p) for p in self.paths)
 
     def __getitem__(self, key: int):
+        assert self._obj is not None
         return self._obj[key]
 
-    def __setitem__(self, key: int, val: L) -> None:
-        self._obj[key] = val
-
     def __len__(self) -> int:
+        assert self._obj is not None
         return self._obj.__len__()
 
-    def __contains__(self) -> bool:
-        return self._obj.__contains__()
+    def __contains__(self, x) -> bool:
+        assert self._obj is not None
+        return self._obj.__contains__(x)
 
     def __iter__(self):
+        assert self._obj is not None
         return self._obj.__iter__()
-
-    def __next__(self):
-        return self._obj.__next__()
 
     def _lazy_load(self) -> None:
         super()._lazy_load()
+        assert self._obj is not None
         for elem in self._obj:
             elem.load()
 
     def clear(self) -> None:
+        assert self._obj is not None
         for elem in self._obj:
             elem.clear()
 
 
-class LazyList[L: LazyFile](LazyCollection[list, L]):
+class LazyMutableSequence[C: MutableSequence, L: LazyFile](LazySequence[C, L]):
+    def __setitem__(self, key: int, val: L) -> None:
+        assert self._obj is not None
+        self._obj[key] = val
+
+
+class LazyList[L: LazyFile](LazyMutableSequence[list, L]):
     iter = list
 
 
-class LazySet[L: LazyFile](LazyCollection[set, L]):
-    iter = set
-
-
-class LazyTuple[L: LazyFile](LazyCollection[tuple, L]):
+class LazyTuple[L: LazyFile](LazySequence[tuple, L]):
     iter = tuple
 
 
-class LazyDict[K: Any, V: Any](LazyFile[Mapping[K, V], Mapping[K, V]]):
+class LazyDict[K: Any, V: Any](LazyFile[MutableMapping[K, V], MutableMapping[K, V]]):
     def __getitem__(self, key: K) -> V:
         self.load()
+        assert self.obj is not None
         return self.obj[key]
 
     def __setitem__(self, key: K, val: V) -> None:
         self.load()
+        assert self.obj is not None
         self.obj[key] = val
 
 
@@ -149,21 +162,24 @@ class LazyNPZ(LazyDict[str, npt.NDArray]):
 
 
 class LazyPydantic[O: BaseModel, L: LazyFile[Mapping[str, Any], Any]](LazyFile[O, L]):
-    meta_keys: "ClassVar[set[str]]" = LazyFile.meta_keys.union({
-        "inner",
-        "model",
-        "model_validate",
-        "model_dump",
-    })
+    meta_keys: "ClassVar[set[str]]" = LazyFile.meta_keys.union(
+        {
+            "inner",
+            "model",
+            "model_validate",
+            "model_dump",
+        }
+    )
     inner: type[L]
     model: type[O]
 
     def __init__(self, path: "Path") -> None:
         super().__init__(path)
-        self._obj: L = self.inner(self.path)
+        self._obj = self.inner(self.path)
 
     def _lazy_load(self) -> None:
         super()._lazy_load()
+        assert self._obj is not None
         self._obj.load()
         self.obj = self.model.model_validate(self._obj.obj)
 
@@ -173,8 +189,10 @@ class LazyPydantic[O: BaseModel, L: LazyFile[Mapping[str, Any], Any]](LazyFile[O
 
     def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         self.load()
+        assert self.obj is not None
         return self.obj.model_dump(*args, **kwargs)
 
     def clear(self) -> None:
         super().clear()
+        assert self._obj is not None
         self._obj.clear()

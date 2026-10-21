@@ -1,6 +1,5 @@
 # Copyright 2025 Patrick Armstrong
 
-from supaernova.steps.pae.tf.photometry import photometry
 from typing import (
     TYPE_CHECKING,
     cast,
@@ -9,29 +8,28 @@ from typing import (
 
 from tqdm.keras import TqdmCallback
 
-from supaernova._tf import HUGE, JIT_COMPILE, ks, tf, tfp, clear_session
-from supaernova.utils import max_central
-from supaernova.utils.tf import db, pp
+from supaernova._tf import HUGE, JIT_COMPILE, clear_session, ks, tf, tfp
+from supaernova.steps.pae.tf.photometry import photometry
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from logging import Logger
+    from pathlib import Path
     from typing import (
         Any,
         Literal,
     )
-    from logging import Logger
-    from pathlib import Path
-    from collections.abc import Callable
 
     from numpy import typing as npt
 
-    from supaernova.steps.pae import PAE
     from supaernova.configs.steps.pae import PAEStage
+    from supaernova.configs.steps.pae.tf import TFPAEConfig
+    from supaernova.steps.pae import PAE
     from supaernova.typing.backends.tf import (
+        LearningRateSchedule,
         Loss,
         TensorLike,
-        LearningRateSchedule,
     )
-    from supaernova.configs.steps.pae.tf import TFPAEConfig
 
     type StageNum = int
 
@@ -224,10 +222,12 @@ class TFPAEEncoder(ks.layers.Layer):
 
         # === Run Encoder ===
         # Create initial input layer
-        x = ks.layers.concatenate([
-            input_amp,
-            input_phase,
-        ])
+        x = ks.layers.concatenate(
+            [
+                input_amp,
+                input_phase,
+            ]
+        )
 
         # Encode from input layers to intermediate dimensions
         for i, encode_layer in enumerate(self.encode_layers):
@@ -472,10 +472,12 @@ class TFPAEDecoder(ks.layers.Layer):
         input_phase += delta_p_latent
 
         # Create initial input layer
-        x = ks.layers.concatenate([
-            zs_latent,
-            input_phase,
-        ])
+        x = ks.layers.concatenate(
+            [
+                zs_latent,
+                input_phase,
+            ]
+        )
 
         # Decode from input (latent) dimensions to spec_dim dimensions
         x = self.decode_spec_layer(x, training=training)
@@ -629,11 +631,13 @@ class TFPAEModel(ks.Model):
         self.loss_delta_av_penalty: float = self.options.loss_delta_av_penalty
         self.loss_delta_m_penalty: float = self.options.loss_delta_m_penalty
         self.loss_delta_p_penalty: float = self.options.loss_delta_p_penalty
-        self.loss_physical_penalty: float = sum((
-            self.loss_delta_av_penalty,
-            self.loss_delta_m_penalty,
-            self.loss_delta_p_penalty,
-        ))  # Only calculate physical latent penalties if at least one penalty scaling is > 0
+        self.loss_physical_penalty: float = sum(
+            (
+                self.loss_delta_av_penalty,
+                self.loss_delta_m_penalty,
+                self.loss_delta_p_penalty,
+            )
+        )  # Only calculate physical latent penalties if at least one penalty scaling is > 0
 
         self.loss_covariance_penalty: float = self.options.loss_covariance_penalty
         self.loss_decorrelate_all: bool = self.options.loss_decorrelate_all
@@ -1052,10 +1056,12 @@ class TFPAEModel(ks.Model):
                     decorrelate_latents.append(decorrelate_delta_av)
                 decorrelate_latents.append(decorrelate_z_latents)
                 if self.physical_latents:
-                    decorrelate_latents.extend((
-                        decorrelate_delta_m,
-                        decorrelate_delta_p,
-                    ))
+                    decorrelate_latents.extend(
+                        (
+                            decorrelate_delta_m,
+                            decorrelate_delta_p,
+                        )
+                    )
 
                 decorrelate = tf.concat(decorrelate_latents, axis=0)
                 decorrelate *= tf.transpose(decorrelate)
@@ -1265,19 +1271,11 @@ class TFPAEModel(ks.Model):
         mask_spec = tf.logical_and(
             tf.math.reduce_all(valid_wl_mask, axis=-1, keepdims=True), spec_mask
         )
-        n_unmasked_spec = tf.math.count_nonzero(
-            mask_spec[..., 0], axis=-1, keepdims=True, dtype=tf.float32
-        )
-        n_unmasked_spec = tf.math.maximum(n_unmasked_spec, 1)
         mask_sn = tf.logical_and(
             tf.math.reduce_any(mask_spec, axis=-2, keepdims=True), sn_mask
         )[..., 0]
         n_unmasked_sn = tf.math.count_nonzero(mask_sn[:, 0], dtype=tf.float32)
 
-        # latents_mean = tf.nn.weighted_moments(
-        #     encoded, [0], n_unmasked_spec * tf.cast(mask_sn, tf.float32)
-        # )[0]
-        # latents_mean = tfp.stats.percentile(encoded, 50.0, axis=0)
         latents_mean = (
             tf.reduce_sum(tf.where(mask_sn, encoded, tf.zeros_like(encoded)), axis=0)
             / n_unmasked_sn
@@ -1341,26 +1339,16 @@ class TFPAEModel(ks.Model):
         patience = self.stage.patience
         if isinstance(patience, float):
             patience = int(self.stage.epochs * patience)
-        callbacks.extend([
-            ks.callbacks.EarlyStopping(
-                monitor="val_loss",
-                patience=patience,
-                mode="min",
-                start_from_epoch=patience,
-            ),
-            # ks.callbacks.EarlyStopping(
-            #     monitor="val_loss_pred",
-            #     patience=2 * patience,
-            #     mode="min",
-            #     start_from_epoch=patience,
-            # ),
-            # ks.callbacks.EarlyStopping(
-            #     monitor="val_loss_cov",
-            #     patience=2 * patience,
-            #     mode="min",
-            #     start_from_epoch=patience,
-            # ),
-        ])
+        callbacks.extend(
+            [
+                ks.callbacks.EarlyStopping(
+                    monitor="val_loss",
+                    patience=patience,
+                    mode="min",
+                    start_from_epoch=patience,
+                ),
+            ]
+        )
 
         # --- Backup & Restore ---
         # Backup checkpoints each epoch and restore if training got cancelled midway through
@@ -1799,40 +1787,6 @@ class TFPAEModel(ks.Model):
             n_unmasked_spectra_per_sn = tf.math.count_nonzero(
                 unmasked_spectra, axis=-1, keepdims=True
             )
-
-            # Determine how many spectra to mask for each SN
-            #   by multiplying the number of unmasked SN by the mask_fraction
-            n_spectra_to_mask_per_sn = tf.cast(
-                self.mask_fraction * tf.cast(n_unmasked_spectra_per_sn, tf.float32),
-                tf.int32,
-            )
-            spec_inds = tf.repeat(
-                tf.expand_dims(tf.range(unmasked_spectra.shape[-1]), axis=0),
-                repeats=unmasked_spectra.shape[0],
-                axis=0,
-            )
-
-            unshuffled_mask = spec_inds >= n_spectra_to_mask_per_sn
-
-            n_total = tf.shape(unmasked_spectra)[-1]
-
-            # def shuffle_and_pad(n_unmasked: tf.Tensor) -> tf.Tensor:
-            #     shuffled = tf.random.shuffle(tf.range(n_unmasked))
-            #     padding = tf.range(n_unmasked, n_total)
-            #     return tf.concat([shuffled, padding], axis=0)
-            #
-            # shuffled_inds = tf.map_fn(
-            #     shuffle_and_pad,
-            #     n_unmasked_spectra_per_sn[:, 0],
-            #     parallel_iterations=NPROC,
-            #     fn_output_signature=tf.TensorSpec(shape=(None,), dtype=tf.int32),
-            # )
-            #
-            # shuffled_mask = tf.expand_dims(
-            #     tf.gather(unshuffled_mask, shuffled_inds, axis=1, batch_dims=1),
-            #     axis=-1,
-            # )
-            # mask &= shuffled_mask
 
             batch = tf.shape(unmasked_spectra)[0]
             n_total = tf.shape(unmasked_spectra)[-1]

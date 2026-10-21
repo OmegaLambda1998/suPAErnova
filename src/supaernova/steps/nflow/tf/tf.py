@@ -1,24 +1,24 @@
 # Copyright 2025 Patrick Armstrong
 from typing import TYPE_CHECKING, cast, override
 
+import numpy as np
 from tqdm.keras import TqdmCallback
 
-from supaernova._tf import ks, tf, tfb, tfd, tfp, clear_session, JIT_COMPILE
-from supaernova.utils.tf import db, pp
+from supaernova._tf import JIT_COMPILE, clear_session, ks, tf, tfb, tfd, tfp
 
 if TYPE_CHECKING:
-    from typing import Any
+    from collections.abc import Callable
     from logging import Logger
     from pathlib import Path
-    from collections.abc import Callable
+    from typing import Any
 
     from numpy import typing as npt
 
-    from supaernova.steps.pae import TFPAEModel
-    from supaernova.steps.nflow import NFlow
     from supaernova.configs.steps.data import LazySNPAEData
-    from supaernova.typing.backends.tf import Loss, LearningRateSchedule
     from supaernova.configs.steps.nflow.tf import TFNFlowConfig
+    from supaernova.steps.nflow import NFlow
+    from supaernova.steps.pae import TFPAEModel
+    from supaernova.typing.backends.tf import LearningRateSchedule, Loss
 
 NFLOWMODELSTEP: "NFlow"
 
@@ -53,10 +53,10 @@ class TFNFlowModel(ks.Model):
         self.latents: tf.Tensor
         self.cov_latents: tf.Tensor
         self.data: LazySNPAEData = config.data
-        self.data_mask: npt.NDArray[bool] = config.mask
-        self.sn_mask: npt.NDArray[bool] = config.sn_mask
-        self.spec_mask: npt.NDArray[bool] = config.spec_mask
-        self.wl_mask: npt.NDArray[bool] = config.wl_mask
+        self.data_mask: npt.NDArray[np.bool_] = config.mask
+        self.sn_mask: npt.NDArray[np.bool_] = config.sn_mask
+        self.spec_mask: npt.NDArray[np.bool_] = config.spec_mask
+        self.wl_mask: npt.NDArray[np.bool_] = config.wl_mask
         input_mask = self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask
         mask_spec = tf.math.reduce_any(input_mask, axis=-1)
         mask_sn = tf.math.reduce_any(mask_spec, axis=-1, keepdims=True)
@@ -65,10 +65,10 @@ class TFNFlowModel(ks.Model):
         self.train_latents: tf.Tensor
         self.train_cov_latents: tf.Tensor
         self.train_data: LazySNPAEData = config.train_data
-        self.train_data_mask: npt.NDArray[bool] = config.train_mask
-        self.train_sn_mask: npt.NDArray[bool] = config.train_sn_mask
-        self.train_spec_mask: npt.NDArray[bool] = config.train_spec_mask
-        self.train_wl_mask: npt.NDArray[bool] = config.train_wl_mask
+        self.train_data_mask: npt.NDArray[np.bool_] = config.train_mask
+        self.train_sn_mask: npt.NDArray[np.bool_] = config.train_sn_mask
+        self.train_spec_mask: npt.NDArray[np.bool_] = config.train_spec_mask
+        self.train_wl_mask: npt.NDArray[np.bool_] = config.train_wl_mask
         input_train_mask = (
             self.train_data_mask
             & self.train_sn_mask
@@ -82,10 +82,10 @@ class TFNFlowModel(ks.Model):
         self.test_latents: tf.Tensor
         self.test_cov_latents: tf.Tensor
         self.test_data: LazySNPAEData = config.test_data
-        self.test_data_mask: npt.NDArray[bool] = config.test_mask
-        self.test_sn_mask: npt.NDArray[bool] = config.test_sn_mask
-        self.test_spec_mask: npt.NDArray[bool] = config.test_spec_mask
-        self.test_wl_mask: npt.NDArray[bool] = config.test_wl_mask
+        self.test_data_mask: npt.NDArray[np.bool_] = config.test_mask
+        self.test_sn_mask: npt.NDArray[np.bool_] = config.test_sn_mask
+        self.test_spec_mask: npt.NDArray[np.bool_] = config.test_spec_mask
+        self.test_wl_mask: npt.NDArray[np.bool_] = config.test_wl_mask
         input_test_mask = (
             self.test_data_mask
             & self.test_sn_mask
@@ -99,10 +99,10 @@ class TFNFlowModel(ks.Model):
         self.val_latents: tf.Tensor
         self.val_cov_latents: tf.Tensor
         self.val_data: LazySNPAEData = config.val_data
-        self.val_data_mask: npt.NDArray[bool] = config.val_mask
-        self.val_sn_mask: npt.NDArray[bool] = config.val_sn_mask
-        self.val_spec_mask: npt.NDArray[bool] = config.val_spec_mask
-        self.val_wl_mask: npt.NDArray[bool] = config.val_wl_mask
+        self.val_data_mask: npt.NDArray[np.bool_] = config.val_mask
+        self.val_sn_mask: npt.NDArray[np.bool_] = config.val_sn_mask
+        self.val_spec_mask: npt.NDArray[np.bool_] = config.val_spec_mask
+        self.val_wl_mask: npt.NDArray[np.bool_] = config.val_wl_mask
         input_val_mask = (
             self.val_data_mask
             & self.val_sn_mask
@@ -275,13 +275,9 @@ class TFNFlowModel(ks.Model):
         mask = inputs[-1]
 
         latents = inputs[0]
-        # pp(latents, "latents")
         latents = tf.boolean_mask(latents, mask)
-        # pp(latents, "latents")
         phys_latents = inputs[1]
-        # pp(phys_latents, "phys_latents")
         phys_latents = tf.boolean_mask(phys_latents, mask)
-        # pp(phys_latents, "phys_latents")
 
         if training and self.latent_offset_scale > 0:
             latents_std = tf.math.reduce_std(latents, axis=0)
@@ -307,13 +303,8 @@ class TFNFlowModel(ks.Model):
             ) / tf.reduce_sum(cov_mask)
         else:
             loss_cov = tf.convert_to_tensor(0, dtype=latents.dtype)
-        pp(loss_cov, "loss_cov")
         cov_loss = loss_cov * self.loss_covariance_penalty
-        pp(cov_loss, "cov_loss")
         log_prob = self.flow.log_prob(latents)
-        # pp(cov_loss, "cov_loss")
-        # pp(log_prob, "log_prob")
-        # pp(log_prob - cov_loss, "loss")
         # === Calculate Log Probability ===
         return log_prob - cov_loss
 
@@ -445,8 +436,6 @@ class TFNFlowModel(ks.Model):
             validation_freq=1,
             shuffle=True,
         )
-        clear_session()
-        return None
 
     def _get_latents(self) -> None:
         for dt in ["train_", "test_", "val_", ""]:

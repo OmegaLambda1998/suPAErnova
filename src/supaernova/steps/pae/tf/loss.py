@@ -1,7 +1,6 @@
 from typing import TYPE_CHECKING
 
 from supaernova._tf import tf
-from supaernova.utils.tf import db, pp
 
 if TYPE_CHECKING:
     from supaernova._tf import ks

@@ -1,5 +1,5 @@
-from typing import Any, Literal, ClassVar, get_args
 from collections.abc import Callable
+from typing import Any, ClassVar, Literal, get_args
 
 from pydantic import model_validator
 

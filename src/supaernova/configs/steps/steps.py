@@ -1,15 +1,15 @@
 # Copyright 2025 Patrick Armstrong
 from copy import deepcopy
-from typing import ClassVar, cast
 from pathlib import Path
+from typing import Any, ClassVar, cast
 
 from pydantic import ConfigDict, PositiveInt
 
-from supaernova.utils import resolve_path
-from supaernova.typing import T
 from supaernova.configs.base import BaseConfig
-from supaernova.configs.paths import PathConfig
 from supaernova.configs.callbacks import CallbackConfig
+from supaernova.configs.paths import PathConfig
+from supaernova.typing import T
+from supaernova.utils import resolve_path
 
 
 class StepResult(BaseConfig):
@@ -49,7 +49,9 @@ class StepAnalysis(BaseConfig):
 
 class StepConfig(CallbackConfig):
     # === Class Variables ===
-    model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        arbitrary_types_allowed=True, extra="allow"
+    )
     steps: ClassVar[dict[str, type["StepConfig"]]] = {}
     proxies: ClassVar[dict[str, list[type["StepConfig"]]]] = {}
     required_steps: ClassVar[list[str]] = []
@@ -80,7 +82,7 @@ class StepConfig(CallbackConfig):
     # --- Before ---
     # --- After ---
     # === Instance Methods ===
-    def __init__(self, **input_config: T) -> None:
+    def __init__(self, **input_config: Any) -> None:
         input_config = deepcopy(input_config)
         paths = input_config.get("paths")
         if paths is None:
@@ -88,25 +90,25 @@ class StepConfig(CallbackConfig):
         paths = cast("PathConfig", paths)
 
         paths.results = resolve_path(
-            paths.results / input_config.get("name", self.__class__.__name__),
+            paths.results / str(input_config.get("name", self.__class__.__name__)),
             relative_path=paths.base,
         )
 
         paths.plots = resolve_path(
-            paths.plots / input_config.get("name", self.__class__.__name__),
+            paths.plots / str(input_config.get("name", self.__class__.__name__)),
             relative_path=paths.base,
             mkdir=True,
         )
 
         paths.log = resolve_path(
-            paths.log / input_config.get("name", self.__class__.__name__),
+            paths.log / str(input_config.get("name", self.__class__.__name__)),
             relative_path=paths.base,
             mkdir=True,
         )
 
         if input_config.get("external"):
             external_path = resolve_path(
-                Path(input_config["external"]), relative_path=paths.base
+                Path(str(input_config["external"])), relative_path=paths.base
             )
             input_config["external"] = external_path
             if not external_path.exists():

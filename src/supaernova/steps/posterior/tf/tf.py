@@ -1,54 +1,52 @@
 # Copyright 2025 Patrick Armstrong
-from supaernova.steps.pae.tf.photometry import (
-    photometry,
-    photometry_amplitude_setup,
-    photometry_sigma_setup,
-)
-import os
-import json
-import types
-import shutil
 import contextlib
+import json
+import shutil
+import types
 from typing import TYPE_CHECKING, override
 
-from tqdm import tqdm
 import numpy as np
+from tqdm import tqdm
 
 from supaernova._tf import (
     HUGE,
+    JIT_COMPILE,
     NPROC,
+    clear_session,
     ks,
     tf,
     tfb,
     tfd,
     tfp,
-    clear_session,
-    JIT_COMPILE,
 )
-from supaernova.utils.tf import db, pp
+from supaernova.steps.pae.tf.photometry import (
+    photometry,
+    photometry_amplitude_setup,
+    photometry_sigma_setup,
+)
 
 from .hmc import PosteriorHMCValue
 from .map import PosteriorMap
 
 if TYPE_CHECKING:
-    from typing import Any, Literal
+    from collections.abc import Iterator, Sequence
     from logging import Logger
     from pathlib import Path
-    from collections.abc import Iterator, Sequence
+    from typing import Any, Literal
 
     from numpy import typing as npt
-    from tensorflow_probability.python.optimizer.lbfgs import LBfgsOptimizerResults
     from tensorflow_probability.python.mcmc.dual_averaging_step_size_adaptation import (
         DualAveragingStepSizeAdaptationResults,
     )
+    from tensorflow_probability.python.optimizer.lbfgs import LBfgsOptimizerResults
 
-    from supaernova.steps.pae.tf import TFPAEModel
-    from supaernova.steps.nflow.tf import TFNFlowModel
-    from supaernova.steps.posterior import Posterior
     from supaernova.configs.steps.data import LazySNPAEData
-    from supaernova.typing.backends.tf import Loss, TensorLike
     from supaernova.configs.steps.posterior import PosteriorMAPStage
     from supaernova.configs.steps.posterior.tf import TFPosteriorConfig
+    from supaernova.steps.nflow.tf import TFNFlowModel
+    from supaernova.steps.pae.tf import TFPAEModel
+    from supaernova.steps.posterior import Posterior
+    from supaernova.typing.backends.tf import Loss, TensorLike
 
 POSTERIORMODELSTEP: "Posterior"
 
@@ -99,16 +97,16 @@ class TFPosteriorModel(ks.Model):
         self.profile: bool = self.options.profile
 
         self.data: LazySNPAEData = getattr(config, f"{self.subset}_data")
-        self.data_time: npt.NDArray[float] = self.data.time
-        self.data_amplitude: npt.NDArray[float] = self.data.amplitude
-        self.data_sigma: npt.NDArray[float] = self.data.sigma
-        self.data_wavelength: npt.NDArray[float] = self.data.wavelength
-        self.data_throughput: npt.NDArray[float] = self.data.throughput
-        self.data_effective_wavelength: npt.NDArray[float] = (
+        self.data_time: npt.NDArray[np.float64] = self.data.time
+        self.data_amplitude: npt.NDArray[np.float64] = self.data.amplitude
+        self.data_sigma: npt.NDArray[np.float64] = self.data.sigma
+        self.data_wavelength: npt.NDArray[np.float64] = self.data.wavelength
+        self.data_throughput: npt.NDArray[np.float64] = self.data.throughput
+        self.data_effective_wavelength: npt.NDArray[np.float64] = (
             self.data.effective_wavelength
         )
-        self.data_spectra_mask: npt.NDArray[float] = self.data.spectra_mask
-        self.data_phot_mask: npt.NDArray[float] = self.data.phot_mask
+        self.data_spectra_mask: npt.NDArray[np.float64] = self.data.spectra_mask
+        self.data_phot_mask: npt.NDArray[np.float64] = self.data.phot_mask
         self.data.clear()
 
         self.cached_amp: tuple[tf.Tensor, tf.Tensor] = photometry_amplitude_setup(
@@ -125,10 +123,12 @@ class TFPosteriorModel(ks.Model):
             self.cached_amp,
         )
 
-        self.data_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_mask")
-        self.sn_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_sn_mask")
-        self.spec_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_spec_mask")
-        self.wl_mask: npt.NDArray[bool] = getattr(config, f"{self.subset}_wl_mask")
+        self.data_mask: npt.NDArray[np.bool_] = getattr(config, f"{self.subset}_mask")
+        self.sn_mask: npt.NDArray[np.bool_] = getattr(config, f"{self.subset}_sn_mask")
+        self.spec_mask: npt.NDArray[np.bool_] = getattr(
+            config, f"{self.subset}_spec_mask"
+        )
+        self.wl_mask: npt.NDArray[np.bool_] = getattr(config, f"{self.subset}_wl_mask")
 
         self.data_time[~self.spec_mask] = -HUGE
         self.data_amplitude[~self.data_mask] = -HUGE
@@ -1115,19 +1115,21 @@ class TFPosteriorModel(ks.Model):
                     ).numpy()
                 )
 
-                progress.set_postfix({
-                    "evals_tot": self.map.num_evaluations.value().numpy(),
-                    "evals_prev": self.map.num_chain_evaluations.value().numpy(),
-                    "improved": tf.reduce_sum(
-                        tf.ones_like(self.map.improved, dtype=tf.int32)
-                        * tf.cast(self.map.improved, tf.int32)
-                    ).numpy(),
-                    "log_prob": (
-                        f"{min_log_prob:.3E}",
-                        f"{mean_log_prob:.3E}",
-                        f"{max_log_prob:.3E}",
-                    ),
-                })
+                progress.set_postfix(
+                    {
+                        "evals_tot": self.map.num_evaluations.value().numpy(),
+                        "evals_prev": self.map.num_chain_evaluations.value().numpy(),
+                        "improved": tf.reduce_sum(
+                            tf.ones_like(self.map.improved, dtype=tf.int32)
+                            * tf.cast(self.map.improved, tf.int32)
+                        ).numpy(),
+                        "log_prob": (
+                            f"{min_log_prob:.3E}",
+                            f"{mean_log_prob:.3E}",
+                            f"{max_log_prob:.3E}",
+                        ),
+                    }
+                )
                 progress.update()
 
                 if summary_writer is not None:
@@ -1839,10 +1841,12 @@ class TFPosteriorModel(ks.Model):
 
         if self.sample_progress is not None:
             self.sample_progress.update(n)
-            self.sample_progress.set_postfix({
-                "log_prob": f"{float(series['samples/samples/mean_log_prob'][-1]):.3E}",
-                "accept": f"{float(series['hmc/accept_rate'][-1]):.2%}",
-            })
+            self.sample_progress.set_postfix(
+                {
+                    "log_prob": f"{float(series['samples/samples/mean_log_prob'][-1]):.3E}",
+                    "accept": f"{float(series['hmc/accept_rate'][-1]):.2%}",
+                }
+            )
 
     @tf.function(jit_compile=JIT_COMPILE)
     def _sample_chain_chunk(
@@ -2610,22 +2614,30 @@ class TFPosteriorModel(ks.Model):
             )
             zs = self._scatter_sn(zs, axis=-2, indices=valid_indices, fill=float("nan"))
 
-        log_prior = log_prior.numpy().reshape((
-            log_prior.shape[0] * log_prior.shape[1],
-            *log_prior.shape[2:],
-        ))
-        log_like = log_like.numpy().reshape((
-            log_like.shape[0] * log_like.shape[1],
-            *log_like.shape[2:],
-        ))
-        log_prob = log_prob.numpy().reshape((
-            log_prob.shape[0] * log_prob.shape[1],
-            *log_prob.shape[2:],
-        ))
-        zs = zs.numpy().reshape((
-            zs.shape[0] * zs.shape[1],
-            *zs.shape[2:],
-        ))
+        log_prior = log_prior.numpy().reshape(
+            (
+                log_prior.shape[0] * log_prior.shape[1],
+                *log_prior.shape[2:],
+            )
+        )
+        log_like = log_like.numpy().reshape(
+            (
+                log_like.shape[0] * log_like.shape[1],
+                *log_like.shape[2:],
+            )
+        )
+        log_prob = log_prob.numpy().reshape(
+            (
+                log_prob.shape[0] * log_prob.shape[1],
+                *log_prob.shape[2:],
+            )
+        )
+        zs = zs.numpy().reshape(
+            (
+                zs.shape[0] * zs.shape[1],
+                *zs.shape[2:],
+            )
+        )
 
         vars(self)["hmc"] = PosteriorHMCValue(
             tf.Variable(samples),

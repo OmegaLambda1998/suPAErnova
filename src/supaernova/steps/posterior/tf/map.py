@@ -4,16 +4,15 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 
 from supaernova._tf import tf, tfb, tfd
-from supaernova.utils.tf import db, pp
 
 if TYPE_CHECKING:
     from numpy import typing as npt
 
-    from supaernova.steps.pae.tf import TFPAEModel
-    from supaernova.steps.nflow.tf import TFNFlowModel
-    from supaernova.steps.posterior import TFPosteriorModel
     from supaernova.configs.steps.data import LazySNPAEData
     from supaernova.configs.steps.posterior import PosteriorMAPStage
+    from supaernova.steps.nflow.tf import TFNFlowModel
+    from supaernova.steps.pae.tf import TFPAEModel
+    from supaernova.steps.posterior import TFPosteriorModel
 
 
 class MultivariateGeneralisedNormalDiag(tfd.Distribution):
@@ -112,14 +111,14 @@ class PosteriorMap(tf.Module):
         self.n_chains = 1
         self.random_initial_positions: bool = config.options.random_initial_positions
         self.data: LazySNPAEData = config.data
-        self.data_time: npt.NDArray[float] = config.data.time
-        self.data_amplitude: npt.NDArray[float] = config.data.amplitude
-        self.data_sigma: npt.NDArray[float] = config.data.sigma
+        self.data_time: npt.NDArray[np.float64] = config.data.time
+        self.data_amplitude: npt.NDArray[np.float64] = config.data.amplitude
+        self.data_sigma: npt.NDArray[np.float64] = config.data.sigma
 
-        self.data_mask: npt.NDArray[bool] = config.data_mask
-        self.sn_mask: npt.NDArray[bool] = config.sn_mask
-        self.spec_mask: npt.NDArray[bool] = config.spec_mask
-        self.wl_mask: npt.NDArray[bool] = config.wl_mask
+        self.data_mask: npt.NDArray[np.bool_] = config.data_mask
+        self.sn_mask: npt.NDArray[np.bool_] = config.sn_mask
+        self.spec_mask: npt.NDArray[np.bool_] = config.spec_mask
+        self.wl_mask: npt.NDArray[np.bool_] = config.wl_mask
 
         # The encoder mean-pools over every unmasked row, so rows which are neither
         # a spectrum nor photometry (e.g. epochs dropped by a sim's `spec_cadence`,
@@ -129,7 +128,7 @@ class PosteriorMap(tf.Module):
         observed_mask = spectra_mask | np.asarray(config.data_phot_mask, dtype=bool)
         encoder_mask = np.asarray(self.data_mask, dtype=bool) & spectra_mask
         has_spectra = np.any(encoder_mask, axis=(-2, -1), keepdims=True)
-        self.encoder_mask: npt.NDArray[bool] = np.where(
+        self.encoder_mask: npt.NDArray[np.bool_] = np.where(
             has_spectra,
             encoder_mask,
             np.asarray(self.data_mask, dtype=bool) & observed_mask,
@@ -266,11 +265,6 @@ class PosteriorMap(tf.Module):
         self.delta_p_mean: float = config.options.delta_p_mean
         self.delta_p_std: float = config.options.delta_p_std
 
-        # self.delta_p_min = phase_to_time(self.delta_p_min)
-        # self.delta_p_max = phase_to_time(self.delta_p_max)
-        # self.delta_p_start = phase_to_time(self.delta_p_start)
-        # self.delta_p_end = phase_to_time(self.delta_p_end)
-        # self.delta_p_mean = phase_to_time(self.delta_p_mean)
         self.delta_p_std = phase_to_time(self.delta_p_std + min_phase)
 
         self.delta_p_prior: tfd.Distribution = tfd.Normal(
@@ -401,11 +395,13 @@ class PosteriorMap(tf.Module):
             if stage.init_latents == "u_random":
                 u_latents = self.u_latents_prior.sample((self.n_chains, self.sn_dim))
             elif stage.init_latents == "u_constant":
-                u_latents = self.u_latents_mean * tf.ones((
-                    self.n_chains,
-                    self.sn_dim,
-                    self.n_u_latents,
-                ))
+                u_latents = self.u_latents_mean * tf.ones(
+                    (
+                        self.n_chains,
+                        self.sn_dim,
+                        self.n_u_latents,
+                    )
+                )
             # We need to generate u_delta_av
             if self.nflow.physical_latents:
                 if stage.init_u_delta_av == "current":
@@ -413,17 +409,21 @@ class PosteriorMap(tf.Module):
                 elif stage.init_u_delta_av == "best":
                     u_delta_av = self.u_delta_av.best
                 elif stage.init_u_delta_av == "random":
-                    u_delta_av = self.u_delta_av_prior.sample((
-                        self.n_chains,
-                        self.sn_dim,
-                        1,
-                    ))
+                    u_delta_av = self.u_delta_av_prior.sample(
+                        (
+                            self.n_chains,
+                            self.sn_dim,
+                            1,
+                        )
+                    )
                 elif stage.init_u_delta_av == "constant":
-                    u_delta_av = self.u_delta_av_mean * tf.ones((
-                        self.n_chains,
-                        self.sn_dim,
-                        1,
-                    ))
+                    u_delta_av = self.u_delta_av_mean * tf.ones(
+                        (
+                            self.n_chains,
+                            self.sn_dim,
+                            1,
+                        )
+                    )
                 elif stage.init_u_delta_av == "scale":
                     u_delta_av_slope = (
                         self.u_delta_av_end - self.u_delta_av_start
@@ -479,16 +479,20 @@ class PosteriorMap(tf.Module):
             else:
                 # First generate u_latents, then transform to z_latents, finally modify the result somehow.
                 if stage.init_latents == "z_random":
-                    u_latents = self.u_latents_prior.sample((
-                        self.n_chains,
-                        self.sn_dim,
-                    ))
+                    u_latents = self.u_latents_prior.sample(
+                        (
+                            self.n_chains,
+                            self.sn_dim,
+                        )
+                    )
                 elif stage.init_latents == "z_constant":
-                    u_latents = self.u_latents_mean * tf.ones((
-                        self.n_chains,
-                        self.sn_dim,
-                        self.n_u_latents,
-                    ))
+                    u_latents = self.u_latents_mean * tf.ones(
+                        (
+                            self.n_chains,
+                            self.sn_dim,
+                            self.n_u_latents,
+                        )
+                    )
                 # We need to generate u_delta_av
                 if self.nflow.physical_latents:
                     if stage.init_u_delta_av == "current":
@@ -510,20 +514,24 @@ class PosteriorMap(tf.Module):
                         stage.init_u_delta_av == "data"
                         and stage.init_latents == "z_random"
                     ):
-                        u_delta_av = self.u_delta_av_prior.sample((
-                            self.n_chains,
-                            self.sn_dim,
-                            1,
-                        ))
+                        u_delta_av = self.u_delta_av_prior.sample(
+                            (
+                                self.n_chains,
+                                self.sn_dim,
+                                1,
+                            )
+                        )
                     elif stage.init_u_delta_av == "constant" or (
                         stage.init_u_delta_av == "data"
                         and stage.init_latents == "z_constant"
                     ):
-                        u_delta_av = self.u_delta_av_mean * tf.ones((
-                            self.n_chains,
-                            self.sn_dim,
-                            1,
-                        ))
+                        u_delta_av = self.u_delta_av_mean * tf.ones(
+                            (
+                                self.n_chains,
+                                self.sn_dim,
+                                1,
+                            )
+                        )
                     us = tf.concat([u_delta_av, u_latents], axis=-1)
                 else:
                     us = u_latents
@@ -545,17 +553,21 @@ class PosteriorMap(tf.Module):
                             tf.ones((self.n_chains, self.sn_dim, 1)) * delta_av_scale
                         )
                     elif stage.init_delta_av == "random":
-                        delta_av = self.delta_av_prior.sample((
-                            self.n_chains,
-                            self.sn_dim,
-                            1,
-                        ))
+                        delta_av = self.delta_av_prior.sample(
+                            (
+                                self.n_chains,
+                                self.sn_dim,
+                                1,
+                            )
+                        )
                     elif stage.init_delta_av == "constant":
-                        delta_av = self.delta_av_mean * tf.ones((
-                            self.n_chains,
-                            self.sn_dim,
-                            1,
-                        ))
+                        delta_av = self.delta_av_mean * tf.ones(
+                            (
+                                self.n_chains,
+                                self.sn_dim,
+                                1,
+                            )
+                        )
                     elif stage.init_delta_av == "data":
                         delta_av = zs[..., 0:1]
                     z_latents = zs[..., 1:]
@@ -622,11 +634,13 @@ class PosteriorMap(tf.Module):
             elif stage.init_delta_av == "random":
                 delta_av = self.delta_av_prior.sample((self.n_chains, self.sn_dim, 1))
             elif stage.init_delta_av == "constant":
-                delta_av = self.delta_av_mean * tf.ones((
-                    self.n_chains,
-                    self.sn_dim,
-                    1,
-                ))
+                delta_av = self.delta_av_mean * tf.ones(
+                    (
+                        self.n_chains,
+                        self.sn_dim,
+                        1,
+                    )
+                )
 
         # --- delta_m ---
         if stage.init_delta_m == "random":
@@ -770,14 +784,6 @@ class PosteriorMap(tf.Module):
             u_delta_av = position[..., i : i + 1]
             i += 1
         u_latents = position[..., :, i:]
-
-        # delta_m = tf.clip_by_value(delta_m, self.delta_m_min, self.delta_m_max)
-        # delta_p = tf.clip_by_value(delta_p, self.delta_p_min, self.delta_p_max)
-        # bias = tf.clip_by_value(bias, self.bias_min, self.bias_max)
-        # u_delta_av = tf.clip_by_value(
-        #     u_delta_av, self.u_delta_av_min, self.u_delta_av_max
-        # )
-        # u_latents = tf.clip_by_value(u_latents, self.u_latents_min, self.u_latents_max)
 
         return tf.concat((delta_m, delta_p, bias, u_delta_av, u_latents), axis=-1)
 

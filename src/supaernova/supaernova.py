@@ -36,7 +36,7 @@ def prepare_config(
     result_path: Path | None = None,
     plot_path: Path | None = None,
     log_path: Path | None = None,
-) -> "RunConfig":
+) -> RunConfig:
     config = InputConfig._extend_config(config, base_path=base_path)
 
     # Setup global config

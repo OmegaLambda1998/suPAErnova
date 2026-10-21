@@ -1,5 +1,5 @@
-from typing import TYPE_CHECKING, Protocol
 from collections.abc import Iterable
+from typing import Protocol
 
 from numpy import typing as npt
 

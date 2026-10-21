@@ -1,10 +1,13 @@
-import numpy as np
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 if TYPE_CHECKING:
-    from supaernova.configs.steps.data import SNPAEData, LazySNPAEData
-    from numpy import typing as npt
     from collections.abc import Callable
+
+    from numpy import typing as npt
+
+    from supaernova.configs.steps.data import LazySNPAEData, SNPAEData
 
 
 def SNR(

@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Any, ClassVar, get_args, override
 
-from supaernova.configs.steps.models import BACKENDS, ModelConfig, BackendConfig
+from supaernova.configs.steps.models import BACKENDS, BackendConfig, ModelConfig
 
 from .steps import Step
 from .variants import Variant

@@ -1,37 +1,38 @@
-from supaernova.steps.pae.tf.photometry import photometry as tf_photometry
-from supaernova.utils.photometry import Filter
-from supaernova.utils import pp, resolve_path
-from supaernova.analysis.spectra import SpectraPlotter
-from supaernova.analysis import Plotter
-from supaernova.configs.callbacks import callback
 from typing import TYPE_CHECKING, Any, ClassVar, override
-import numpy as np
 
-from supaernova.steps import Step
-from supaernova.steps.data import DataStep, Data
-from supaernova.steps.variants import Variant
-from supaernova.configs.steps.sim import (
-    SimConfig,
-    SimStepConfig,
-    SimStepResult,
-    SimStepAnalysis,
-)
+import numpy as np
+from tqdm import tqdm
+
+from supaernova.analysis import Plotter
+from supaernova.analysis.spectra import SpectraPlotter
+from supaernova.configs.callbacks import callback
 from supaernova.configs.steps.data import (
+    DataStepResult,
     LazySNPAEData,
     LazySNPAEDataTuple,
-    DataStepResult,
 )
-from tqdm import tqdm
+from supaernova.configs.steps.sim import (
+    SimConfig,
+    SimStepAnalysis,
+    SimStepConfig,
+    SimStepResult,
+)
+from supaernova.steps import Step
+from supaernova.steps.data import DataStep
+from supaernova.steps.pae.tf.photometry import photometry as tf_photometry
+from supaernova.steps.variants import Variant
+from supaernova.utils import resolve_path
+from supaernova.utils.photometry import Filter
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from numpy import typing as npt
 
-    from supaernova.steps.pae import PAEModel
-    from supaernova.steps.nflow import NFlowModel
-    from supaernova.configs.steps.pae import PAEStepResult
     from supaernova.configs.steps.nflow import NFlowStepResult
+    from supaernova.configs.steps.pae import PAEStepResult
+    from supaernova.steps.nflow import NFlowModel
+    from supaernova.steps.pae import PAEModel
 
 
 class Sim(Step[SimConfig]):
@@ -88,7 +89,7 @@ class Sim(Step[SimConfig]):
         self.train_frac: float
         self.test_frac: float
         self.n_kfolds: int
-        self.colourlaw: npt.NDArray[float] | None
+        self.colourlaw: npt.NDArray[np.float64] | None
 
         self.min_redshift: float
         self.max_redshift: float

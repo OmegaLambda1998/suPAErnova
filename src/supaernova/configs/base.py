@@ -1,5 +1,5 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, Never
+from typing import Any, ClassVar, Never, cast
 
 from pydantic import (
     BaseModel,
@@ -7,12 +7,14 @@ from pydantic import (
     model_validator,
 )
 
-from supaernova.typing import T, Config
+from supaernova.typing import Config, T
 
 
 class BaseConfig(BaseModel):
     # === Class Variables ===
-    model_config: ConfigDict = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        arbitrary_types_allowed=True, extra="forbid"
+    )
 
     # === Class Methods ===
     @classmethod
@@ -21,7 +23,7 @@ class BaseConfig(BaseModel):
         for k, v in input_config.items():
             val = v
             if isinstance(v, dict):
-                val = cls._normalise_config(v)
+                val = cast(T, cls._normalise_config(v))
             rtn[k.lower()] = val
         return rtn
 
@@ -61,10 +63,12 @@ class BaseConfig(BaseModel):
 
     # === Instance Methods ===
     def __init__(self, **input_config: T) -> None:
-        config = self._normalise_config({
-            **self._default_config(**input_config),
-            **input_config,
-        })
+        config = self._normalise_config(
+            {
+                **self._default_config(**input_config),
+                **input_config,
+            }
+        )
         super().__init__(**config)
 
     def get(self, key: str, value: T | None = None) -> T | None:

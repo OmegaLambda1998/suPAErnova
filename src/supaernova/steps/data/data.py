@@ -1,32 +1,32 @@
-from typing import TYPE_CHECKING, Literal, ClassVar, cast, override
-from pathlib import Path
 import tomllib
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar, Literal, override
 
 import numpy as np
 import pandas as pd
-from astropy import cosmology as cosmo
 import sncosmo
+from astropy import cosmology as cosmo
 
-from supaernova.steps import Step
-from supaernova.utils import pp, resolve_path, SNR
-from supaernova.utils.photometry import Filter
-from supaernova.steps.pae.tf.photometry import photometry
-from supaernova.steps.variants import Variant
-from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.analysis.analysis import Plotter
+from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.configs.callbacks import callback
 from supaernova.configs.steps.data import (
     DataConfig,
-    LazySNPAEData,
+    DataStepAnalysis,
     DataStepConfig,
     DataStepResult,
-    DataStepAnalysis,
+    LazySNPAEData,
     LazySNPAEDataTuple,
 )
+from supaernova.steps import Step
+from supaernova.steps.pae.tf.photometry import photometry
+from supaernova.steps.variants import Variant
+from supaernova.utils import resolve_path
+from supaernova.utils.photometry import Filter
 
 if TYPE_CHECKING:
-    from typing import Any
     from collections.abc import Iterable, Sequence
+    from typing import Any
 
     from numpy import typing as npt
 
@@ -79,7 +79,7 @@ class Data(Step[DataConfig]):
             "test_data",
         }
 
-        self.colourlaw: npt.NDArray[float] | None
+        self.colourlaw: npt.NDArray[np.float64] | None
         self.cosmological_model: cosmo.FLRW
         self.salt_model: sncosmo.SALT2Source | sncosmo.SALT3Source
         self.filters: dict[str, Filter]
@@ -108,10 +108,10 @@ class Data(Step[DataConfig]):
         self.load_attributes: set[str] = self.save_attributes
 
         self.sne: SNeDataFrame
-        self.wavelength: npt.NDArray[float]
+        self.wavelength: npt.NDArray[np.float64]
 
         # Data Dimensions
-        self.nspectra_per_sn: npt.NDArray[int]  # Created in self.get_dims
+        self.nspectra_per_sn: npt.NDArray[np.int64]  # Created in self.get_dims
         self.sn_dim: int  # Created in self.get_dims
         self.spec_dim: int  # Created in self.get_dims
         self.wl_dim: int  # Created in self.get_dims
@@ -618,14 +618,14 @@ class Data(Step[DataConfig]):
         self.log.debug("Calculating SALT fluxes")
 
         def get_salt_flux(
-            wavelength: "npt.NDArray[float]",
+            wavelength: "npt.NDArray[np.float64]",
             tobs: float = 0.0,
             z: float = 0.0,
             x0: float = 1.0,
             x1: float = 0.0,
             c: float = 0.0,
             zref: float = 0.05,
-        ) -> "npt.NDArray[float]":
+        ) -> "npt.NDArray[np.float64]":
             self.salt_model.set(x0=x0, x1=x1, c=c)
             return (
                 self.salt_model.flux(phase=tobs, wave=wavelength)
@@ -669,10 +669,12 @@ class Data(Step[DataConfig]):
         # Since all spectra share the same wavelength grid
         # Just get the wavelength grid of the first spectrum
         self.wavelength = self.sne["spectra"][
-            np.argmax([
-                max([len(data["wave"]) for data in spectra.data])
-                for spectra in self.sne["spectra"]
-            ])
+            np.argmax(
+                [
+                    max([len(data["wave"]) for data in spectra.data])
+                    for spectra in self.sne["spectra"]
+                ]
+            )
         ]["data"][0]["wave"].to_numpy()
         # self.wavelength = self.sne["spectra"][0]["data"][0]["wave"].to_numpy()
         self.wl_dim = len(self.wavelength)
@@ -705,11 +707,13 @@ class Data(Step[DataConfig]):
                 flux[wl_ind] = np.interp(target_wavelength, raw["wave"], raw["flux"])
                 sigma[wl_ind] = np.interp(target_wavelength, raw["wave"], raw["sigma"])
 
-                spectra_table.at[idx, "data"] = pd.DataFrame({
-                    "wave": self.wavelength,
-                    "flux": flux,
-                    "sigma": sigma,
-                })
+                spectra_table.at[idx, "data"] = pd.DataFrame(
+                    {
+                        "wave": self.wavelength,
+                        "flux": flux,
+                        "sigma": sigma,
+                    }
+                )
 
     def prepare_data_arrays(self) -> None:
         self.log.debug("Preparing data arrays")
@@ -855,13 +859,13 @@ class Data(Step[DataConfig]):
             # else to the back of the ranking so a masked-out row can never win.
             valid_mask = (sn_mask & spec_mask)[..., 0]
 
-            def rank(order: "npt.NDArray[float]") -> "npt.NDArray[int]":
+            def rank(order: "npt.NDArray[np.float64]") -> "npt.NDArray[np.int64]":
                 return np.argsort(np.argsort(order, axis=-1), axis=-1)
 
             # Each SN's valid spectra in phase order, for `spec_every` / `phot_every`
             time_rank = rank(np.where(valid_mask, data["phase"][..., 0], np.inf))
 
-            def slot(every: int | None, offset: int) -> "npt.NDArray[bool]":
+            def slot(every: int | None, offset: int) -> "npt.NDArray[np.bool_]":
                 if every is None:
                     return valid_mask
                 return valid_mask & (time_rank % every == offset)
@@ -870,7 +874,9 @@ class Data(Step[DataConfig]):
             phot_slot = slot(self.options.phot_every, self.options.phot_offset)
 
             # Rank each slot's spectra by |phase|, closest to peak first, same as sim.py
-            def peak_rank(slot_mask: "npt.NDArray[bool]") -> "npt.NDArray[int]":
+            def peak_rank(
+                slot_mask: "npt.NDArray[np.bool_]",
+            ) -> "npt.NDArray[np.int64]":
                 return rank(np.where(slot_mask, np.abs(data["phase"][..., 0]), np.inf))
 
             data["spectra_mask"] = (
@@ -1108,17 +1114,25 @@ class Data(Step[DataConfig]):
             )[0]
 
             n_axes = 3
-            self.train_data[kfold].model_validate({
-                key: val[inds_train, :, :] if val.ndim == n_axes else val[inds_train, :]
-                for key, val in self.data.model_dump().items()
-                if isinstance(val, np.ndarray)
-            })
+            self.train_data[kfold].model_validate(
+                {
+                    key: val[inds_train, :, :]
+                    if val.ndim == n_axes
+                    else val[inds_train, :]
+                    for key, val in self.data.model_dump().items()
+                    if isinstance(val, np.ndarray)
+                }
+            )
 
-            self.test_data[kfold].model_validate({
-                key: val[inds_test, :, :] if val.ndim == n_axes else val[inds_test, :]
-                for key, val in self.data.model_dump().items()
-                if isinstance(val, np.ndarray)
-            })
+            self.test_data[kfold].model_validate(
+                {
+                    key: val[inds_test, :, :]
+                    if val.ndim == n_axes
+                    else val[inds_test, :]
+                    for key, val in self.data.model_dump().items()
+                    if isinstance(val, np.ndarray)
+                }
+            )
 
         n_train_sn = self.train_data[0].amplitude.shape[0]
         n_test_sn = self.test_data[0].amplitude.shape[0]

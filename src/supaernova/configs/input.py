@@ -1,13 +1,13 @@
 # Copyright 2025 Patrick Armstrong
 from logging import Logger
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import toml
 from pydantic import DirectoryPath, FilePath
 
 from supaernova.logging import setup_logging
-from supaernova.typing import Config
+from supaernova.typing import Cfg
 from supaernova.utils import deepmerge, resolve_path
 
 from .base import BaseConfig
@@ -19,7 +19,7 @@ class InputConfig(BaseConfig):
     # === Class Variables ===
     # === Class Methods ===
     @classmethod
-    def _default_config(cls, **input_config: T) -> Config[T]:
+    def _default_config(cls, **input_config: Any) -> Cfg:
         paths = input_config.get("paths")
         if paths is None:
             cls._raise(f'Input Config: {input_config} missing "paths"')
@@ -41,14 +41,14 @@ class InputConfig(BaseConfig):
     @classmethod
     def _extend_config(
         cls,
-        input_config: Config[T],
+        input_config: Cfg,
         base_path: Path | None = None,
         key: str | None = None,
-    ) -> Config[T]:
-        base_path = base_path or input_config.get("paths", {}).get("base")
+    ) -> Cfg:
+        base_path = base_path or cast(Path, input_config.get("paths", {}).get("base"))
         if "extends" in input_config and input_config["extends"] is not None:
             extends_path = resolve_path(
-                input_config["extends"], relative_path=base_path
+                str(input_config["extends"]), relative_path=base_path
             )
             if not extends_path.exists():
                 err = f"Extension Path: {extends_path} does not exist."
@@ -73,9 +73,9 @@ class InputConfig(BaseConfig):
             input_config["extends"] = extends_path
         if (
             input_config.get("external")
-            and not Path(input_config["external"]).is_absolute()
+            and not Path(str(input_config["external"])).is_absolute()
         ):
-            input_config["external"] = base_path / input_config["external"]
+            input_config["external"] = base_path / str(input_config["external"])
         for k, v in input_config.items():
             if isinstance(v, dict):
                 input_config[k] = cls._extend_config(
@@ -103,7 +103,7 @@ class InputConfig(BaseConfig):
     # --- After ---
 
     # === Instance Methods ===
-    def __init__(self, **input_config: T) -> None:
+    def __init__(self, **input_config: Any) -> None:
         config = self._extend_config(input_config)
         super().__init__(**config)
         self.save()

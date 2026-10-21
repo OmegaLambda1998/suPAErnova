@@ -1,5 +1,5 @@
-from typing import Any, Literal, TypeVar, Protocol, ParamSpec
 from collections.abc import Callable
+from typing import Any, Literal, ParamSpec, Protocol, TypeVar
 
 from pydantic import BaseModel, model_validator
 
@@ -85,7 +85,9 @@ class CallbackConfig(InputConfig):
             for cb in callbacks_spec:
                 callbacks = cb.callback
                 if isinstance(callbacks, str):
-                    fn_callbacks = {}
+                    fn_callbacks: dict[
+                        Literal["pre", "post"], Callable[[Any], None]
+                    ] = {}
                     callbacks_path = resolve_path(
                         callbacks, relative_path=self.paths.base
                     )

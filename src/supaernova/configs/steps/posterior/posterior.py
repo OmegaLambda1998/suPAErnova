@@ -1,30 +1,30 @@
 # Copyright 2025 Patrick Armstrong
 
-from typing import Any, Literal, ClassVar, Annotated
-from pathlib import Path
 import importlib
 from collections.abc import Callable
+from pathlib import Path
+from typing import Annotated, Any, ClassVar, Literal
 
 import numpy as np
 from numpy import typing as npt
 from pydantic import (
     Field,
-    PositiveInt,
-    PositiveFloat,
-    NonNegativeInt,
     NonNegativeFloat,
+    NonNegativeInt,
+    PositiveFloat,
+    PositiveInt,
     model_validator,
 )
 
-from supaernova.configs.base import BaseConfig
-from supaernova.configs.steps import StepResult, StepAnalysis
-from supaernova.analysis.spectra import SpectraPlot, ComparisonPlot, ComparisonArrayPlot
-from supaernova.configs.steps.pae import PAEStepConfig
-from supaernova.configs.steps.data import DataStepConfig
 from supaernova.analysis.dispersion import DispersionPlot
-from supaernova.configs.steps.nflow import NFlowStepConfig
-from supaernova.configs.steps.models import ModelConfig, BackendConfig
 from supaernova.analysis.distribution import DistributionPlot
+from supaernova.analysis.spectra import ComparisonArrayPlot, ComparisonPlot, SpectraPlot
+from supaernova.configs.base import BaseConfig
+from supaernova.configs.steps import StepAnalysis, StepResult
+from supaernova.configs.steps.data import DataStepConfig
+from supaernova.configs.steps.models import BackendConfig, ModelConfig
+from supaernova.configs.steps.nflow import NFlowStepConfig
+from supaernova.configs.steps.pae import PAEStepConfig
 
 type InitPreset = Literal["initial", "current", "best", "legacy"]
 type InitULatents = Literal["u_random", "u_constant"]
@@ -81,24 +81,24 @@ class PosteriorStepMAPResult(StepResult):
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    chain_min: npt.NDArray[int]
-    converged: npt.NDArray[bool]
+    chain_min: npt.NDArray[np.int64]
+    converged: npt.NDArray[np.bool_]
     num_evaluations: int
-    negative_log_prob: npt.NDArray[float]
-    negative_log_like: npt.NDArray[float]
-    negative_log_prior: npt.NDArray[float]
-    init_u_delta_av: npt.NDArray[float]
-    init_u_latents: npt.NDArray[float]
-    init_delta_av: npt.NDArray[float]
-    init_delta_m: npt.NDArray[float]
-    init_delta_p: npt.NDArray[float]
-    init_z_latents: npt.NDArray[float]
-    best_u_delta_av: npt.NDArray[float]
-    best_u_latents: npt.NDArray[float]
-    best_delta_av: npt.NDArray[float]
-    best_delta_m: npt.NDArray[float]
-    best_delta_p: npt.NDArray[float]
-    best_z_latents: npt.NDArray[float]
+    negative_log_prob: npt.NDArray[np.float64]
+    negative_log_like: npt.NDArray[np.float64]
+    negative_log_prior: npt.NDArray[np.float64]
+    init_u_delta_av: npt.NDArray[np.float64]
+    init_u_latents: npt.NDArray[np.float64]
+    init_delta_av: npt.NDArray[np.float64]
+    init_delta_m: npt.NDArray[np.float64]
+    init_delta_p: npt.NDArray[np.float64]
+    init_z_latents: npt.NDArray[np.float64]
+    best_u_delta_av: npt.NDArray[np.float64]
+    best_u_latents: npt.NDArray[np.float64]
+    best_delta_av: npt.NDArray[np.float64]
+    best_delta_m: npt.NDArray[np.float64]
+    best_delta_p: npt.NDArray[np.float64]
+    best_z_latents: npt.NDArray[np.float64]
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---
@@ -115,19 +115,17 @@ class PosteriorStepHMCResult(StepResult):
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    samples: npt.NDArray[float]
-    r_hat: npt.NDArray[float]
-    # step_sizes_final: npt.NDArray[float]
-    # is_accepted: npt.NDArray[float]
-    u_delta_av: npt.NDArray[float]
-    u_latents: npt.NDArray[float]
-    delta_av: npt.NDArray[float]
-    z_latents: npt.NDArray[float]
-    delta_m: npt.NDArray[float]
-    delta_p: npt.NDArray[float]
-    log_prior: npt.NDArray[float]
-    log_like: npt.NDArray[float]
-    log_prob: npt.NDArray[float]
+    samples: npt.NDArray[np.float64]
+    r_hat: npt.NDArray[np.float64]
+    u_delta_av: npt.NDArray[np.float64]
+    u_latents: npt.NDArray[np.float64]
+    delta_av: npt.NDArray[np.float64]
+    z_latents: npt.NDArray[np.float64]
+    delta_m: npt.NDArray[np.float64]
+    delta_p: npt.NDArray[np.float64]
+    log_prior: npt.NDArray[np.float64]
+    log_like: npt.NDArray[np.float64]
+    log_prob: npt.NDArray[np.float64]
     # --- Optional ---
     # === Model Validators ===
     # --- Before ---
@@ -144,9 +142,9 @@ class PosteriorStepResult(StepResult):
     # === Class Methods ===
     # === Field Variables ===
     # --- Required ---
-    ind: npt.NDArray[int]
-    sn_name: npt.NDArray[str]
-    spectra_id: npt.NDArray[str]
+    ind: npt.NDArray[np.int64]
+    sn_name: npt.NDArray[np.str_]
+    spectra_id: npt.NDArray[np.str_]
     map: PosteriorStepMAPResult
     hmc: PosteriorStepHMCResult
     # --- Optional ---
@@ -343,8 +341,8 @@ class PosteriorConfig(BackendConfig):
 
     # === Model Validators ===
     # --- Before ---
-    @classmethod
     @model_validator(mode="before")
+    @classmethod
     def _validate_bounds(cls, data: Any) -> Any:
         if isinstance(data, dict):
             for var in ["redshift", "phase", "wavelength"]:

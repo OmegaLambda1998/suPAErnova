@@ -1,23 +1,23 @@
 # Copyright 2025 Patrick Armstrong
-from time import time
 from functools import cached_property
+from time import time
 
 from pydantic import computed_field, model_validator
 
+from supaernova.configs.steps.variants import VariantConfig
 from supaernova.steps import Step
-from supaernova.steps.pae import PAEStep
 from supaernova.steps.data import DataStep
 from supaernova.steps.nflow import NFlowStep
-from supaernova.steps.sim import SimStep
+from supaernova.steps.pae import PAEStep
 from supaernova.steps.posterior import PosteriorStep
+from supaernova.steps.sim import SimStep
 
 from .input import InputConfig
-from .steps import StepConfig
-from .steps.pae import PAEStepConfig
 from .steps.data import DataStepConfig
 from .steps.nflow import NFlowStepConfig
-from .steps.sim import SimStepConfig
+from .steps.pae import PAEStepConfig
 from .steps.posterior import PosteriorStepConfig
+from .steps.sim import SimStepConfig
 
 
 class RunConfig(InputConfig):
@@ -35,7 +35,7 @@ class RunConfig(InputConfig):
 
     @computed_field
     @cached_property
-    def step_configs(self) -> list[StepConfig]:
+    def step_configs(self) -> list[VariantConfig]:
         return [
             step_config
             for step_config in [

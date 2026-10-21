@@ -1,16 +1,16 @@
-from typing import TYPE_CHECKING
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import chainconsumer as cc
 import numpy as np
 import pandas as pd
-import chainconsumer as cc
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from numpy import typing as npt
 
-    from supaernova.typing import T, Config
+    from supaernova.typing import Config
 
 
 def pp(expression: object) -> None:

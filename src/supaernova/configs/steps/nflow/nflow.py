@@ -1,35 +1,35 @@
 # Copyright 2025 Patrick Armstrong
-from typing import Any, ClassVar, Annotated
 import importlib
 from collections.abc import Callable
+from typing import Annotated, Any, ClassVar
 
 import numpy as np
 from numpy import typing as npt
 from pydantic import (
     Field,
-    PositiveInt,
-    PositiveFloat,
-    NonNegativeInt,
     NonNegativeFloat,
+    NonNegativeInt,
+    PositiveFloat,
+    PositiveInt,
     model_validator,
 )
 
-from supaernova.configs.steps import StepResult, StepAnalysis
-from supaernova.configs.steps.pae import PAEStepConfig
-from supaernova.configs.steps.data import DataStepConfig
-from supaernova.configs.steps.models import ModelConfig, BackendConfig
 from supaernova.analysis.distribution import DistributionPlot
+from supaernova.configs.steps import StepAnalysis, StepResult
+from supaernova.configs.steps.data import DataStepConfig
+from supaernova.configs.steps.models import BackendConfig, ModelConfig
+from supaernova.configs.steps.pae import PAEStepConfig
 
 
 class NFlowModelResult(StepResult):
-    ind: "npt.NDArray[int]"
-    sn_name: "npt.NDArray[str]"
-    spectra_id: "npt.NDArray[str]"
-    z_latents: "npt.NDArray[float]"
-    z_cov_latents: "npt.NDArray[float]"
-    u_latents: "npt.NDArray[float]"
-    u_to_z_latents: "npt.NDArray[float]"
-    log_prob: "npt.NDArray[float]"
+    ind: npt.NDArray[np.int64]
+    sn_name: npt.NDArray[np.str_]
+    spectra_id: npt.NDArray[np.str_]
+    z_latents: npt.NDArray[np.float64]
+    z_cov_latents: npt.NDArray[np.float64]
+    u_latents: npt.NDArray[np.float64]
+    u_to_z_latents: npt.NDArray[np.float64]
+    log_prob: npt.NDArray[np.float64]
 
 
 class NFlowStepResult(StepResult):
