@@ -18,6 +18,12 @@ if TYPE_CHECKING:
     from supaernova.configs.steps import StepConfig, StepResult, StepAnalysis
     from supaernova.configs.globals import GlobalConfig
 
+# Data subsets results are computed for, mapped to the prefix of the matching
+# step attributes (``train_data``, ``test_mask``, ...). ``all`` is the full,
+# unprefixed dataset (``data``, ``mask``, ...): the train and test subsets combined.
+SUBSET_PREFIX: dict[str, str] = {"train": "train_", "test": "test_", "all": ""}
+PREFIX_SUBSET: dict[str, str] = {v: k for k, v in SUBSET_PREFIX.items()}
+
 
 class Step[C: StepConfig]:
     # === Class Variables ===

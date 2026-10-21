@@ -6,6 +6,7 @@ import numpy as np
 
 from supaernova.analysis import Plotter
 from supaernova.utils.tf import pp
+from supaernova.steps.steps import SUBSET_PREFIX, PREFIX_SUBSET
 from supaernova.steps.models import Model, ModelStep
 from supaernova.configs.steps.nflow import (
     NFlowConfig,
@@ -338,7 +339,7 @@ class NFlow(ModelStep[NFlowConfig]):
         nflow_results["model"] = self.model
 
         dt_results: dict[str, NFlowStepResult] = {}
-        for dt in ["train_", "test_"]:
+        for dt in SUBSET_PREFIX.values():
             data = getattr(self, f"{dt}data")
             input_ind = data.ind
             input_sn_name = data.sn_name
@@ -366,14 +367,14 @@ class NFlow(ModelStep[NFlowConfig]):
                 "log_prob": -log_prob.numpy(),
             }
 
-            dt_results[dt[:-1]] = NFlowModelResult.model_validate(model_results)
+            dt_results[PREFIX_SUBSET[dt]] = NFlowModelResult.model_validate(model_results)
 
         nflow_results["models"] = dt_results
         self.results = NFlowStepResult.model_validate(nflow_results)
 
     @override
     def _was_analysed(self, *args: "Any", **kwargs: "Any") -> bool:
-        for dt in ["train_", "test_"]:
+        for dt in SUBSET_PREFIX.values():
             if self.analysis.plot_u_latents is not None:
                 if not isinstance(self.analysis.plot_u_latents, list):
                     self.analysis.plot_u_latents = [self.analysis.plot_u_latents]
@@ -381,7 +382,7 @@ class NFlow(ModelStep[NFlowConfig]):
                     name = "u_latents" if opts.name is None else opts.name
                     savepath = (
                         self.paths.plots
-                        / dt[:-1]
+                        / PREFIX_SUBSET[dt]
                         / str(self.options.seed)
                         / f"{name}.{opts.ext}"
                         if opts.savepath is None
@@ -400,7 +401,7 @@ class NFlow(ModelStep[NFlowConfig]):
                     name = "z_latents" if opts.name is None else opts.name
                     savepath = (
                         self.paths.plots
-                        / dt[:-1]
+                        / PREFIX_SUBSET[dt]
                         / str(self.seed)
                         / f"{name}.{opts.ext}"
                         if opts.savepath is None
@@ -419,7 +420,7 @@ class NFlow(ModelStep[NFlowConfig]):
                     name = "latents" if opts.name is None else opts.name
                     savepath = (
                         self.paths.plots
-                        / dt[:-1]
+                        / PREFIX_SUBSET[dt]
                         / str(self.seed)
                         / f"{name}.{opts.ext}"
                         if opts.savepath is None
@@ -446,7 +447,7 @@ class NFlow(ModelStep[NFlowConfig]):
                         )
                         savepath = (
                             self.paths.plots
-                            / dt[:-1]
+                            / PREFIX_SUBSET[dt]
                             / str(self.seed)
                             / "steps"
                             / f"{name}.{opts.ext}"
@@ -477,13 +478,13 @@ class NFlow(ModelStep[NFlowConfig]):
                 if o.name is None:
                     o.name = "u_latents"
                 if o.savepath is None:
-                    o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
+                    o.savepath = self.paths.plots / PREFIX_SUBSET[dt] / str(self.seed)
                 o.savepath.mkdir(parents=True, exist_ok=True)
                 if (o.savepath / f"{o.name}.{o.ext}").exists():
                     continue
                 self.log.debug(f"Plotting {o.name}")
                 if o.plot_kwargs is None:
-                    o.plot_kwargs = {"title": f"{dt}{self.name}"}
+                    o.plot_kwargs = {"title": f"{PREFIX_SUBSET[dt]}_{self.name}"}
                 DistributionPlotter.plot_corner(
                     {
                         "gaussian": gaussian,
@@ -523,13 +524,13 @@ class NFlow(ModelStep[NFlowConfig]):
                 if o.name is None:
                     o.name = "z_latents"
                 if o.savepath is None:
-                    o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
+                    o.savepath = self.paths.plots / PREFIX_SUBSET[dt] / str(self.seed)
                 o.savepath.mkdir(parents=True, exist_ok=True)
                 if (o.savepath / f"{o.name}.{o.ext}").exists():
                     continue
                 self.log.debug(f"Plotting {o.name}")
                 if o.plot_kwargs is None:
-                    o.plot_kwargs = {"title": f"{dt}{self.name}"}
+                    o.plot_kwargs = {"title": f"{PREFIX_SUBSET[dt]}_{self.name}"}
                 DistributionPlotter.plot_corner(
                     {
                         "z_latents": np.concatenate((z, z_cov), axis=-1),
@@ -565,13 +566,13 @@ class NFlow(ModelStep[NFlowConfig]):
                 if o.name is None:
                     o.name = "latents"
                 if o.savepath is None:
-                    o.savepath = self.paths.plots / dt[:-1] / str(self.seed)
+                    o.savepath = self.paths.plots / PREFIX_SUBSET[dt] / str(self.seed)
                 o.savepath.mkdir(parents=True, exist_ok=True)
                 if (o.savepath / f"{o.name}.{o.ext}").exists():
                     continue
                 self.log.debug(f"Plotting {o.name}")
                 if o.plot_kwargs is None:
-                    o.plot_kwargs = {"title": f"{dt}{self.name}"}
+                    o.plot_kwargs = {"title": f"{PREFIX_SUBSET[dt]}_{self.name}"}
                 DistributionPlotter.plot_corner(
                     {
                         "u_latents": np.concatenate((z_to_u, z_cov), axis=-1),
@@ -627,14 +628,14 @@ class NFlow(ModelStep[NFlowConfig]):
                         o.name = f"step_{step}_latent_steps"
                     if o.savepath is None:
                         o.savepath = (
-                            self.paths.plots / dt[:-1] / str(self.seed) / "steps"
+                            self.paths.plots / PREFIX_SUBSET[dt] / str(self.seed) / "steps"
                         )
                     o.savepath.mkdir(parents=True, exist_ok=True)
                     if (o.savepath / f"{o.name}.{o.ext}").exists():
                         continue
                     self.log.debug(f"Plotting {o.name}")
                     if o.plot_kwargs is None:
-                        o.plot_kwargs = {"title": f"{dt}{self.name}"}
+                        o.plot_kwargs = {"title": f"{PREFIX_SUBSET[dt]}_{self.name}"}
 
                     DistributionPlotter.plot_corner(
                         {
@@ -694,8 +695,8 @@ class NFlow(ModelStep[NFlowConfig]):
             labels[ind] = "Δp"
             ind += 1
 
-        for dt in ["train_", "test_"]:
-            results = self.results.models[dt[:-1]]
+        for dt in SUBSET_PREFIX.values():
+            results = self.results.models[PREFIX_SUBSET[dt]]
 
             mask = getattr(self.model, f"{dt}mask")[:, 0].numpy().astype(bool)
 

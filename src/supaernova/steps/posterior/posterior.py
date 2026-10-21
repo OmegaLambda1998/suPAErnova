@@ -2,6 +2,7 @@ import json
 import shutil
 from typing import TYPE_CHECKING, Any, Literal, ClassVar, override
 import importlib
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -11,7 +12,7 @@ from supaernova.analysis import Plotter
 from supaernova.steps.models import Model, ModelStep
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.configs.callbacks import callback
-from supaernova.configs.steps.data import DataStepResult
+from supaernova.configs.steps.data import SNPAEData, DataStepResult
 from supaernova.analysis.dispersion import DispersionPlotter
 from supaernova.analysis.distribution import DistributionPlotter
 from supaernova.configs.steps.posterior import (
@@ -20,6 +21,7 @@ from supaernova.configs.steps.posterior import (
     PosteriorStepConfig,
     PosteriorStepResult,
     PosteriorStepAnalysis,
+    PosteriorStepHMCResult,
 )
 
 if TYPE_CHECKING:
@@ -36,6 +38,13 @@ if TYPE_CHECKING:
     from .tf import TFPosteriorModel
 
     PosteriorModel = TFPosteriorModel
+
+
+class PooledSNPAEData(SNPAEData):
+    """In-memory ``SNPAEData`` that, like ``LazySNPAEData``, can be cleared."""
+
+    def clear(self) -> None:
+        pass
 
 
 class Posterior(ModelStep[PosteriorConfig]):
@@ -923,7 +932,110 @@ class Posterior(ModelStep[PosteriorConfig]):
                                 f"{self.name} is missing analyses as {savepath} does not exist"
                             )
                             return False
+        if self.pools_all_subset and self.analysis.plot_dispersion is not None:
+            if not isinstance(self.analysis.plot_dispersion, list):
+                self.analysis.plot_dispersion = [self.analysis.plot_dispersion]
+            for opts in self.analysis.plot_dispersion:
+                if opts.subset != "all":
+                    continue
+                name = f"dispersion_{opts.reduce}" if opts.name is None else opts.name
+                for seed in self.seeds:
+                    savepath = (
+                        self.paths.plots
+                        / str(self.seeds[0])
+                        / "all"
+                        / str(seed)
+                        / f"{name}.{opts.ext}"
+                        if opts.savepath is None
+                        else opts.savepath
+                    )
+                    if not savepath.exists():
+                        self.log.debug(
+                            f"{self.name} is missing analyses as {savepath} does not exist"
+                        )
+                        return False
         return not self.analysis.force
+
+    @property
+    def pools_all_subset(self) -> bool:
+        """Whether ``all`` subset plots can be drawn by pooling the train and test fits."""
+        return {"train", "test"} <= set(self.subsets)
+
+    def pool_all_subset(
+        self, seed: int
+    ) -> "tuple[PooledSNPAEData, SimpleNamespace, list[PosteriorStepResult]]":
+        """Pool the train and test fits into an ``all`` subset, without refitting.
+
+        Only what ``_plot_dispersion`` reads is pooled: the data, the model's masks
+        and phase range, and every seed's HMC results. Train SNe come first, then test.
+
+        Args:
+            seed: The seed whose model supplies the data and masks.
+
+        Returns:
+            The pooled data, a stand-in for the model, and the pooled HMC results.
+        """
+        train = self.models["train"][str(seed)]
+        test = self.models["test"][str(seed)]
+
+        train_data = train.data.model_dump()
+        test_data = test.data.model_dump()
+        data = PooledSNPAEData.model_validate({
+            k: np.concatenate((v, test_data[k]), axis=0)
+            if isinstance(v, np.ndarray)
+            else v
+            for k, v in train_data.items()
+        })
+        train.data.clear()
+        test.data.clear()
+
+        model = SimpleNamespace(
+            data=data,
+            data_mask=np.concatenate((train.data_mask, test.data_mask), axis=0),
+            sn_mask=np.concatenate((train.sn_mask, test.sn_mask), axis=0),
+            spec_mask=np.concatenate((train.spec_mask, test.spec_mask), axis=0),
+            wl_mask=np.concatenate((train.wl_mask, test.wl_mask), axis=0),
+            data_spectra_mask=np.concatenate(
+                (train.data_spectra_mask, test.data_spectra_mask), axis=0
+            ),
+            data_phot_mask=np.concatenate(
+                (train.data_phot_mask, test.data_phot_mask), axis=0
+            ),
+            min_phase=train.min_phase,
+            max_phase=train.max_phase,
+            u_latent_bounds=(
+                min(train.u_latent_bounds[0], test.u_latent_bounds[0]),
+                max(train.u_latent_bounds[-1], test.u_latent_bounds[-1]),
+            ),
+        )
+
+        hmcs = []
+        for s in self.seeds:
+            train_results = self.results["train"][str(s)]
+            test_results = self.results["test"][str(s)]
+            # HMC arrays are [samples, sn, ...], except r_hat which is [sn, ...]
+            hmc = PosteriorStepHMCResult.model_validate({
+                k: np.concatenate(
+                    (v, getattr(test_results.hmc, k)), axis=0 if k == "r_hat" else 1
+                )
+                if isinstance(v, np.ndarray)
+                else v
+                for k, v in train_results.hmc.model_dump().items()
+            })
+            # The MAP results aren't plotted for `all`, so they aren't pooled
+            hmcs.append(
+                PosteriorStepResult.model_construct(
+                    ind=np.concatenate((train_results.ind, test_results.ind)),
+                    sn_name=np.concatenate(
+                        (train_results.sn_name, test_results.sn_name)
+                    ),
+                    spectra_id=np.concatenate(
+                        (train_results.spectra_id, test_results.spectra_id)
+                    ),
+                    hmc=hmc,
+                )
+            )
+        return data, model, hmcs
 
     def _plot_comparison(
         self,
@@ -2306,6 +2418,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         input_spec_mask: "npt.NDArray[bool]",
         input_wl_mask: "npt.NDArray[bool]",
         *,
+        hmcs: "list[PosteriorStepResult] | None" = None,
         force: bool = False,
     ) -> None:
         if self.analysis.plot_dispersion is not None:
@@ -2358,7 +2471,7 @@ class Posterior(ModelStep[PosteriorConfig]):
 
                 stats = DispersionPlotter.plot_dispersion(
                     data,
-                    list(self.results[subset].values()),
+                    list(self.results[subset].values()) if hmcs is None else hmcs,
                     model,
                     o,
                     twins=twins,
@@ -2526,6 +2639,26 @@ class Posterior(ModelStep[PosteriorConfig]):
                         input_sn_mask.copy(),
                         input_spec_mask.copy(),
                         input_wl_mask.copy(),
+                    )
+                except Exception as e:
+                    self.log.warning(e)
+
+        # === All ===
+        # Plot the train and test fits pooled together, rather than fitting `all` anew
+        if self.pools_all_subset:
+            for seed in self.seeds:
+                try:
+                    data, model, hmcs = self.pool_all_subset(seed)
+                    self._plot_dispersion(
+                        "all",
+                        seed,
+                        data,
+                        model,
+                        model.data_mask.copy(),
+                        model.sn_mask.copy(),
+                        model.spec_mask.copy(),
+                        model.wl_mask.copy(),
+                        hmcs=hmcs,
                     )
                 except Exception as e:
                     self.log.warning(e)

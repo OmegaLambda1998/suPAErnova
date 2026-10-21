@@ -8,6 +8,7 @@ import numpy as np
 
 from supaernova.utils import pp
 from supaernova.analysis import Plotter
+from supaernova.steps.steps import SUBSET_PREFIX, PREFIX_SUBSET
 from supaernova.steps.models import Model, ModelStep
 from supaernova.analysis.spectra import SpectraPlotter
 from supaernova.configs.callbacks import callback
@@ -609,13 +610,13 @@ class PAE(ModelStep[PAEConfig]):
             return _wrapped
 
         dt_results: dict[str, dict[str, LazyPAEStageResult]] = {}
-        for dt in ["train_", "test_"]:
+        for dt in SUBSET_PREFIX.values():
             model_results: dict[str, LazyPAEStageResult] = {}
             for stage in self.run_stages:
                 model_results[str(stage.stage)] = LazyPAEStageResult(
                     _stage_results(dt, stage)
                 )
-            dt_results[dt[:-1]] = model_results
+            dt_results[PREFIX_SUBSET[dt]] = model_results
 
         pae_results["stages"] = dt_results
 
@@ -626,7 +627,7 @@ class PAE(ModelStep[PAEConfig]):
 
     @override
     def _was_analysed(self, *args: "Any", **kwargs: "Any") -> bool:
-        for dt in ["train_", "test_"]:
+        for dt in SUBSET_PREFIX.values():
             for stage in self.stage_nums:
                 if self.analysis.plot_comparison is not None:
                     if not isinstance(self.analysis.plot_comparison, list):
@@ -635,7 +636,7 @@ class PAE(ModelStep[PAEConfig]):
                         name = "comparison" if opts.name is None else opts.name
                         savepath = (
                             self.paths.plots
-                            / dt[:-1]
+                            / PREFIX_SUBSET[dt]
                             / str(self.options.seed)
                             / str(stage)
                             / f"{name}.{opts.ext}"
@@ -655,7 +656,7 @@ class PAE(ModelStep[PAEConfig]):
                         name = "latents" if opts.name is None else opts.name
                         savepath = (
                             self.paths.plots
-                            / dt[:-1]
+                            / PREFIX_SUBSET[dt]
                             / str(self.options.seed)
                             / str(stage)
                             / f"{name}.{opts.ext}"
@@ -675,7 +676,7 @@ class PAE(ModelStep[PAEConfig]):
                     name = "comparison" if opts.name is None else opts.name
                     savepath = (
                         self.paths.plots
-                        / dt[:-1]
+                        / PREFIX_SUBSET[dt]
                         / str(self.options.seed)
                         / f"{name}.{opts.ext}"
                         if opts.savepath is None
@@ -694,7 +695,7 @@ class PAE(ModelStep[PAEConfig]):
                     name = "latents" if opts.name is None else opts.name
                     savepath = (
                         self.paths.plots
-                        / dt[:-1]
+                        / PREFIX_SUBSET[dt]
                         / str(self.options.seed)
                         / f"{name}.{opts.ext}"
                         if opts.savepath is None
@@ -740,7 +741,7 @@ class PAE(ModelStep[PAEConfig]):
                     o.savepath = (
                         (
                             self.paths.plots
-                            / dt[:-1]
+                            / PREFIX_SUBSET[dt]
                             / str(self.model.seed)
                             / str(stage.stage)
                         )
@@ -755,8 +756,8 @@ class PAE(ModelStep[PAEConfig]):
                     self.log.debug(f"Plotting {o.name}")
                 if o.plot_kwargs is None:
                     o.plot_kwargs = {
-                        "label": f"{dt}{self.name}_{stage.name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})",
-                        "title": f"{dt}{self.name}_{stage.name} {o.name}",
+                        "label": f"{PREFIX_SUBSET[dt]}_{self.name}_{stage.name}\n(loss: {loss:.2E})\n(pred_loss: {pred_loss:.2E})",
+                        "title": f"{PREFIX_SUBSET[dt]}_{self.name}_{stage.name} {o.name}",
                     }
 
                 data = getattr(self, f"{dt}data")
@@ -827,7 +828,7 @@ class PAE(ModelStep[PAEConfig]):
                     o.savepath = (
                         (
                             self.paths.plots
-                            / dt[:-1]
+                            / PREFIX_SUBSET[dt]
                             / str(self.model.seed)
                             / str(stage.stage)
                         )
@@ -839,7 +840,7 @@ class PAE(ModelStep[PAEConfig]):
                     continue
                 self.log.debug(f"Plotting {o.name}")
                 if o.plot_kwargs is None:
-                    o.plot_kwargs = {"title": f"{dt}{self.name}_{stage.name}"}
+                    o.plot_kwargs = {"title": f"{PREFIX_SUBSET[dt]}_{self.name}_{stage.name}"}
 
                 data = getattr(self, f"{dt}data")
                 (
@@ -905,9 +906,9 @@ class PAE(ModelStep[PAEConfig]):
             labels[ind] = f"z{i + 1}"
             ind += 1
 
-        for dt in ["train_", "test_"]:
+        for dt in SUBSET_PREFIX.values():
             for stage in self.run_stages:
-                results = self.results.stages[dt[:-1]][str(stage.stage)]
+                results = self.results.stages[PREFIX_SUBSET[dt]][str(stage.stage)]
                 input_mask = results.input_mask
                 input_sn_mask = results.input_sn_mask
                 input_spec_mask = results.input_spec_mask
@@ -947,7 +948,7 @@ class PAE(ModelStep[PAEConfig]):
                 )
 
             stage = self.run_stages[0]
-            results = self.results.stages[dt[:-1]][str(stage.stage)]
+            results = self.results.stages[PREFIX_SUBSET[dt]][str(stage.stage)]
             input_mask = results.input_mask
             input_sn_mask = results.input_sn_mask
             input_spec_mask = results.input_spec_mask
@@ -957,7 +958,7 @@ class PAE(ModelStep[PAEConfig]):
             output_amp = results.output_amp
             latents = results.latents
             results.clear()
-            savepath = self.paths.plots / dt[:-1] / str(self.model.seed)
+            savepath = self.paths.plots / PREFIX_SUBSET[dt] / str(self.model.seed)
 
             if self.analysis.plot_latents is not None:
                 dt_labels = {
@@ -967,7 +968,7 @@ class PAE(ModelStep[PAEConfig]):
 
                 def dt_chains(mask_sn):
                     return {
-                        stage.name: self.results.stages[dt[:-1]][
+                        stage.name: self.results.stages[PREFIX_SUBSET[dt]][
                             str(stage.stage)
                         ].latents[mask_sn]
                         for stage in self.run_stages
@@ -1005,7 +1006,7 @@ class PAE(ModelStep[PAEConfig]):
                 )
 
                 for stage in self.run_stages[1:]:
-                    results = self.results.stages[dt[:-1]][str(stage.stage)]
+                    results = self.results.stages[PREFIX_SUBSET[dt]][str(stage.stage)]
                     input_mask = results.input_mask
                     input_sn_mask = results.input_sn_mask
                     input_spec_mask = results.input_spec_mask
@@ -1177,7 +1178,7 @@ class PAEStep(Model[PAEStepConfig, PAE]):
                     "title": f"{self.name} {stage.name} {o.name}",
                 }
 
-                name = f"{dt[:-1]}/{stage.stage}/{o.name}.{o.ext}"
+                name = f"{PREFIX_SUBSET[dt]}/{stage.stage}/{o.name}.{o.ext}"
                 self.plots[name] = self.plots.get(
                     name, {"fig": None, "ax": None, "base": True}
                 )
@@ -1260,9 +1261,9 @@ class PAEStep(Model[PAEStepConfig, PAE]):
                 labels[ind] = f"z{i + 1}"
                 ind += 1
 
-            for dt in ["train_", "test_"]:
+            for dt in SUBSET_PREFIX.values():
                 for stage in variant.run_stages:
-                    results = variant.results.stages[dt[:-1]][str(stage.stage)]
+                    results = variant.results.stages[PREFIX_SUBSET[dt]][str(stage.stage)]
                     input_mask = results.input_mask
                     input_sn_mask = results.input_sn_mask
                     input_spec_mask = results.input_spec_mask
