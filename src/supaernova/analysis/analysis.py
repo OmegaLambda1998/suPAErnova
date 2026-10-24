@@ -325,7 +325,19 @@ class Plotter:
             if "truth" in chain_opts:
                 c.add_truth(Truth(location=chain_opts["truth"]))
 
-        fig = c.plotter.plot(*plot_args, *args, **plot_kwargs, **kwargs)
+        # ChainConsumer can fail after creating its figure (e.g. a constant
+        # parameter), so close anything it opened before re-raising
+        open_figs = set(plt.get_fignums())
+        try:
+            new_fig = c.plotter.plot(*plot_args, *args, **plot_kwargs, **kwargs)
+        except Exception:
+            for num in set(plt.get_fignums()) - open_figs:
+                plt.close(num)
+            raise
+        # ChainConsumer always draws a new figure, so close any figure passed in
+        if fig is not None and fig is not new_fig:
+            plt.close(fig)
+        fig = new_fig
         ax = fig.gca()
         return fig, ax
 

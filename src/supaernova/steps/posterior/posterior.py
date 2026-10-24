@@ -2476,7 +2476,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 twins = None
                 if o.twins is not None:
                     twins_path = self.data_dir / o.twins
-                    twins = pd.read_csv(twins_path, header=0)
+                    twins = pd.read_csv(twins_path, comment="#")
 
                 legacy_keys = {
                     ("names", 0),
@@ -2816,8 +2816,6 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
     def __init__(self, config: "PosteriorStepConfig") -> None:
         super().__init__(config)
 
-        self.plots: dict[str, dict[str, Any]] = {}
-
     @override
     def _model(
         self,
@@ -2936,7 +2934,6 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
     @callback
     def analyse(self, *args: "Any", **kwargs: "Any") -> None:
         self.r_hat = {}
-        self.plots = {}
         self.plot_labels = {}
         self.plot_chain_data = {}
         self.plot_weights = {}
@@ -2949,34 +2946,25 @@ class PosteriorStep(Model[PosteriorStepConfig, Posterior]):
         if len(self.variants) > 1 and (
             not all(variant.analysis.skip for variant in self.variants.values())
         ):
+            # Save and close each figure as soon as it's drawn so at most one is open
             for name in self.plot_labels:
+                savepath = self.paths.plots / name
+                if savepath.exists():
+                    continue
+                savepath.parent.mkdir(parents=True, exist_ok=True)
                 o = self.plot_opts[name].model_copy(deep=True)
                 o.labels = self.plot_labels[name]
-                self.plots[name] = self.plots.get(name, {"fig": None, "ax": None})
-                fig = self.plots[name]["fig"]
-                ax = self.plots[name]["ax"]
                 fig, ax = DistributionPlotter.plot_corner(
                     self.plot_chain_data[name],
                     o,
                     statistics="cumulative" if o.reduce == "median" else o.reduce,
                     log_posterior=self.plot_weights.get(name),
                     plot_point=self.plot_weights.get(name) is not None,
-                    fig=fig,
-                    ax=ax,
                     marker_style="P",
                     marker_size=100,
                     save=False,
                     force=True,
                 )
-                self.plots[name]["fig"] = fig
-                self.plots[name]["ax"] = ax
-            for name, opts in self.plots.items():
-                savepath = self.paths.plots / name
-                savepath.parent.mkdir(parents=True, exist_ok=True)
-                if savepath.exists():
-                    continue
-                fig = opts["fig"]
-                ax = opts["ax"]
                 if fig is None:
                     continue
                 self.log.debug(f"plotting {name}")

@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 class DispersionPlot(SpectraPlot):
     subset: Literal["train", "test", "all"]
     legacy: tuple[Path, ...] | None = None
+    # Twins catalogue (e.g. twins/boone21_sn.csv) relative to the data dir; needs
+    # snf_name, mask_twins, mask_salt, hr_rbtl_twins, hr_rbtl_err, hr_pec_vel_err
     twins: str | None = None
     reduce: Literal["mean", "median", "max_central"] = "max_central"
 
@@ -82,7 +84,7 @@ class DispersionPlotter(Plotter):
         if twins is not None:
             sort = np.argsort(pae_names)
 
-            twins_names = twins.name
+            twins_names = twins.snf_name
             twins_intersection = set(pae_names) & set(twins_names)
             if len(twins_intersection) == 0:
                 twins = None
@@ -338,6 +340,7 @@ class DispersionPlotter(Plotter):
 
         savepath = (config.savepath or Path()) / f"{config.name}.{config.ext}"
         if savepath.exists() and not force:
+            Plotter.close(fig, None)
             return None
 
         # Determine which spectra to keep
@@ -552,13 +555,13 @@ class DispersionPlotter(Plotter):
         if twins is not None:
             pae_twins_mask = np.zeros_like(pae_mask, dtype=bool)
             pae_salt_mask = np.zeros_like(pae_mask, dtype=bool)
-            twins_names = twins.name
+            twins_names = twins.snf_name
             pae_intersection = set(pae_names) & set(twins_names)
             for name in pae_intersection:
                 ind = np.argwhere(pae_names == name)[0]
-                df = twins[twins.name == name]
-                pae_twins_mask[ind] = df.mask_twins
-                pae_salt_mask[ind] = df.mask_salt
+                df = twins[twins.snf_name == name]
+                pae_twins_mask[ind] = df.mask_twins.astype(bool)
+                pae_salt_mask[ind] = df.mask_salt.astype(bool)
             print(
                 "SNPAE",
                 pae_names[np.logical_not(pae_twins_mask & snpae_mask) & snpae_mask],
@@ -755,6 +758,7 @@ class DispersionPlotter(Plotter):
         )
 
         if residual_step == 0:
+            Plotter.close(fig, None)
             return None
 
         residual_bins = np.arange(
@@ -812,7 +816,7 @@ class DispersionPlotter(Plotter):
         if twins is not None:
             sort = np.argsort(pae_names)
 
-            twins_names = twins.name
+            twins_names = twins.snf_name
             twins_intersection = set(pae_names) & set(twins_names)
             if len(twins_intersection) == 0:
                 twins = None
@@ -839,14 +843,15 @@ class DispersionPlotter(Plotter):
 
             pae_twins = pae_twins[twins_order]
 
-            twins_names = twins.name.to_numpy()[twins_mask][twins_order]
+            twins_names = twins.snf_name.to_numpy()[twins_mask][twins_order]
 
-            twins_amplitudes = twins.dm_residuals_twins.to_numpy()[twins_mask][
+            twins_amplitudes = twins.hr_rbtl_twins.to_numpy()[twins_mask][
                 ..., twins_order
             ][None, ...]
-            twins_amplitude_stds = twins.rbtl_dm_err.to_numpy()[twins_mask][
-                ..., twins_order
-            ][None, ...]
+            # Total error: measurement plus peculiar velocity
+            twins_amplitude_stds = np.hypot(
+                twins.hr_rbtl_err.to_numpy(), twins.hr_pec_vel_err.to_numpy()
+            )[twins_mask][..., twins_order][None, ...]
 
             twins_weights = 1 / (twins_amplitude_stds * twins_amplitude_stds)
             twins_weighted_sum = twins_weights.sum(axis=0)
