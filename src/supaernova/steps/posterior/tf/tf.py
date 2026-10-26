@@ -355,6 +355,23 @@ class TFPosteriorModel(ks.Model):
             & ((input_spectra_mask & (input_sigma > 0)) | input_phot_mask)
         )
 
+        # The decoder zeroes masked pixels, so a filter overlapping one gives a
+        # truncated model band flux, while the data's was integrated over the
+        # whole filter. Drop those photometric points rather than fit them biased.
+        # (n_sn, n_spec, n_filters)
+        filter_overlaps_mask = tf.math.reduce_any(
+            (input_throughput[..., :-1] > 0)
+            & tf.logical_not(input_mask & input_wl_mask)[..., None],
+            axis=-2,
+        )
+        # (n_sn, n_spec, n_wl)
+        biased_phot = input_phot_mask & tf.math.reduce_any(
+            (input_effective_wavelength[..., :-1] > 0)
+            & filter_overlaps_mask[..., None, :],
+            axis=-1,
+        )
+        posterior_mask &= tf.logical_not(biased_phot)
+
         mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
 
         # Determine which sn to keep
@@ -449,17 +466,19 @@ class TFPosteriorModel(ks.Model):
         )
         # `synth_scale * sigma_recon` is a coherent, wavelength-correlated SED-shape
         # error, not independent per-pixel noise, so it must not be averaged down
-        # across a passband. Pass it to `photometry` as `sigma_correlated`, separate
-        # from the independent measurement error `input_sigma`; they recombine in
-        # quadrature after the band integration. For pure-spectrum rows the result
-        # is identical to `sqrt((synth_scale * sigma_recon)**2 + input_sigma**2)`.
+        # across a passband. Pass it to `photometry` as `sigma_correlated` and add the
+        # measurement error `input_sigma` in quadrature afterwards. `input_sigma` must
+        # not go through `photometry`: photometric rows already hold their band
+        # uncertainty at the effective-wavelength bin, and integrating it again shrinks
+        # it ~50x. For pure-spectrum rows the result is still
+        # `sqrt((synth_scale * sigma_recon)**2 + input_sigma**2)`.
         (
             synth_amp,
             synth_sigma,
         ) = photometry(
             tf.repeat(input_wavelength[None, ...], synth_amp.shape[0], axis=0),
             synth_amp,
-            input_sigma,
+            tf.zeros_like(input_sigma),
             tf.repeat(input_throughput[None, ...], synth_amp.shape[0], axis=0),
             tf.repeat(
                 input_effective_wavelength[None, ...], synth_amp.shape[0], axis=0
@@ -470,6 +489,7 @@ class TFPosteriorModel(ks.Model):
             self.cached_sigma,
             sigma_correlated=synth_scale * sigma_recon,
         )
+        synth_sigma = tf.sqrt(tf.square(synth_sigma) + tf.square(input_sigma))
 
         # Set missing values to 0 for all times
         synth_amp = tf.where(posterior_mask, synth_amp, tf.zeros_like(synth_amp))
