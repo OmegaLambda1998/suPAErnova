@@ -4,7 +4,13 @@ from pathlib import Path
 
 import numpy as np
 
-from supaernova.utils import pp, max_central, jackknife_resample, SNR
+from supaernova.utils import (
+    pp,
+    max_central,
+    jackknife_resample,
+    bootstrap_resample,
+    SNR,
+)
 
 from .spectra import SpectraPlot, SpectraPlotter
 from .analysis import Plotter, scale_lightness
@@ -636,18 +642,23 @@ class DispersionPlotter(Plotter):
                 print("rms")
                 pp(rms_)
 
+            # Error = bootstrap sample error combined with the per-SN errors
+            # propagated through the RMS. The jackknife is only used to rank
+            # SNe by influence above, as it is unstable for the NMAD's median.
             w_rms = np.std(y)
             w_rms_std = np.sqrt(
                 np.sum(((y - np.mean(y)) * pull_yerr) ** 2, axis=0)
             ) / np.sqrt(np.sum((y - np.mean(y)) ** 2, axis=0))
-            w_rms_std = np.sqrt(np.std(w_rms_jackknife) ** 2 + w_rms_std**2) / np.sqrt(
-                n
+            w_rms_std = np.sqrt(
+                np.std(bootstrap_resample(y, np.std)) ** 2 + w_rms_std**2 / n
             )
 
             k = 1.4826
-            w_nmad_jackknife = k * jackknife_resample(
-                y, lambda a: np.median(np.abs(a - np.median(a, axis=0)))
-            )
+
+            def nmad_fn(a: "npt.NDArray[Any]") -> float:
+                return k * np.median(np.abs(a - np.median(a, axis=0)))
+
+            w_nmad_jackknife = jackknife_resample(y, nmad_fn)
             n = len(w_nmad_jackknife)
             if tmp:
                 nmad_sort = np.argsort(w_nmad_jackknife)
@@ -666,8 +677,8 @@ class DispersionPlotter(Plotter):
             w_nmad = k * np.median(d, axis=0)
             w_nmad_std = k * np.take_along_axis(pull_yerr, idx[None], axis=0)[0]
             w_nmad_std = np.sqrt(
-                np.std(w_nmad_jackknife) ** 2 + w_nmad_std**2
-            ) / np.sqrt(n)
+                np.std(bootstrap_resample(y, nmad_fn)) ** 2 + w_nmad_std**2 / n
+            )
 
             fig, s_ax, ebar = Plotter.errorbar(
                 x,
