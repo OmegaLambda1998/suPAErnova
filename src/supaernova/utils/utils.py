@@ -66,6 +66,25 @@ def jackknife_resample(
     return jackknife_values
 
 
+def bootstrap_resample(
+    arr: "npt.NDArray",
+    func: "Callable",
+    n_samples: int = 1000,
+    seed: int = 12345,
+) -> "npt.NDArray":
+    """Evaluate `func` on `n_samples` resamples of `arr` drawn with replacement.
+
+    Unlike the jackknife, the spread of these values is a stable error estimate
+    for non-smooth statistics such as the median or NMAD.
+
+    Returns:
+        `func` of each bootstrap resample, shape (n_samples,).
+    """
+    rng = np.random.default_rng(seed)
+    inds = rng.integers(0, len(arr), size=(n_samples, len(arr)))
+    return np.array([func(arr[ind]) for ind in inds])
+
+
 def max_central(
     data: "npt.NDArray", *, weight: "npt.NDArray | None" = None
 ) -> tuple[float, float, float]:
