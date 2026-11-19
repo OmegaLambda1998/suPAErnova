@@ -56,7 +56,7 @@ tf.config.optimizer.set_experimental_options(
         "implementation_selector": True,
         "auto_mixed_precision": False,
         "disable_meta_optimizer": False,
-        "min_graph_nodes": False,
+        "min_graph_nodes": 0,
         "auto_parallel": False,
     }
 )
