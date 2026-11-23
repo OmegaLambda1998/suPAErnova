@@ -259,7 +259,9 @@ class Sim(Step[SimConfig]):
         wl = data["wavelength"]
         filter_z = 0 if self.options.rest_frame_filters else self.redshift
         for i, f in enumerate(self.filters):
-            tp = np.interp(wl, f.wavelength / (1 + filter_z), f.throughput)
+            tp = np.interp(
+                wl, f.wavelength / (1 + filter_z), f.throughput, left=0.0, right=0.0
+            )
             throughput[..., i] = tp
 
             ef = (

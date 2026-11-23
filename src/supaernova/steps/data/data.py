@@ -959,6 +959,10 @@ class Data(Step[DataConfig]):
             laser_mask = laser_mask | laser_mask_min | laser_mask_max
             laser_width -= 1
 
+        # Laser lines are a spectroscopic artefact. A photometric row is zero except at
+        # its effective wavelength, so the neighbour test would flag every bright point.
+        laser_mask &= data["spectra_mask"].astype(bool)
+
         data["laser_mask"] = laser_mask
         data["mask"] &= ~laser_mask
 
@@ -996,7 +1000,7 @@ class Data(Step[DataConfig]):
         wl = data["wavelength"]
         filter_names = list(self.filters.keys())
         for i, f in enumerate(self.filters.values()):
-            tp = np.interp(wl, f.wavelength, f.throughput)
+            tp = np.interp(wl, f.wavelength, f.throughput, left=0.0, right=0.0)
             throughput[..., i] = tp
 
             ef = (
