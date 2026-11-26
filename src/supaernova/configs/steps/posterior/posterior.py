@@ -227,6 +227,12 @@ class PosteriorConfig(BackendConfig):
     weighted_error: bool = True
     measurement_error: bool = True
     reconstruction_error: Literal["train", "test", "combined", "match"] = "combined"
+    # Fraction f of the model-error variance (σ_recon · |model|)² that is fully
+    # coherent across wavelength within an epoch; the rest is independent per pixel.
+    # Spectra use the covariance directly and photometry its exact projection through
+    # each filter, so every variant shares one assumption. The correct value has not
+    # been established: investigate it before trusting photometric ΔM widths.
+    recon_correlation: float = Field(default=0.0, ge=0.0, le=1.0)
     bounded_u_latents: bool = False
     generalised_u_latents: float = 1
     # --- Optional ---

@@ -16,7 +16,6 @@ from supaernova._tf import (
     ks,
     tf,
     tfb,
-    tfd,
     tfp,
 )
 from supaernova.steps.pae.tf.photometry import (
@@ -24,8 +23,10 @@ from supaernova.steps.pae.tf.photometry import (
     photometry_amplitude_setup,
     photometry_sigma_setup,
 )
+from supaernova.utils.observations import epoch_bands
 
 from .hmc import PosteriorHMCValue
+from .likelihood import epoch_log_likelihood
 from .map import PosteriorMap
 
 if TYPE_CHECKING:
@@ -107,6 +108,7 @@ class TFPosteriorModel(ks.Model):
         )
         self.data_spectra_mask: npt.NDArray[np.float64] = self.data.spectra_mask
         self.data_phot_mask: npt.NDArray[np.float64] = self.data.phot_mask
+        self.data_epoch: npt.NDArray[np.int64] | None = self.data.epoch
         self.data.clear()
 
         self.cached_amp: tuple[tf.Tensor, tf.Tensor] = photometry_amplitude_setup(
@@ -129,6 +131,35 @@ class TFPosteriorModel(ks.Model):
             config, f"{self.subset}_spec_mask"
         )
         self.wl_mask: npt.NDArray[np.bool_] = getattr(config, f"{self.subset}_wl_mask")
+
+        # Every epoch's band data, on the row that also holds its spectrum (if any)
+        self.n_filters: int = self.data_throughput.shape[-1] - 1
+        bands = epoch_bands(
+            amplitude=self.data_amplitude,
+            sigma=self.data_sigma,
+            datum_mask=self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask,
+            spectra_mask=self.data_spectra_mask,
+            phot_mask=self.data_phot_mask,
+            wavelength=self.data_wavelength,
+            throughput=self.data_throughput,
+            effective_wavelength=self.data_effective_wavelength,
+            epoch=self.data_epoch,
+        )
+        self.band_active = tf.constant(bands["band_active"], dtype=tf.bool)
+        self.band_flux = tf.constant(bands["band_flux"], dtype=tf.float32)
+        self.band_variance = tf.constant(
+            np.square(bands["band_sigma"]), dtype=tf.float32
+        )
+        self.band_weights = tf.constant(bands["band_weights"], dtype=tf.float32)
+        # Whether any row holds both spectrum pixels and bands (an epoch observed
+        # both ways), which needs the full joint covariance
+        spec_rows = np.asarray(self.data_spectra_mask, dtype=bool)[..., 0] & np.any(
+            self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask, axis=-1
+        )
+        self.joint_rows: bool = bool(
+            np.any(spec_rows & np.any(bands["band_active"], axis=-1))
+        )
+        self.recon_correlation: float = self.options.recon_correlation
 
         self.data_time[~self.spec_mask] = -HUGE
         self.data_amplitude[~self.data_mask] = -HUGE
@@ -284,10 +315,10 @@ class TFPosteriorModel(ks.Model):
         wl_mask: tf.Tensor | None = None,
         testing: bool | None = None,
         additional_outputs: bool = False,
+        model_outputs: bool = True,
     ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         training = False if training is None else training
         testing = False if testing is None else testing
-        eps = ks.backend.epsilon()
 
         # === Inputs ===
         if input_phase is None:
@@ -344,35 +375,23 @@ class TFPosteriorModel(ks.Model):
             else sn_mask
         )
 
-        posterior_mask = (
+        # === Data ===
+        # Every row holds one epoch's data: its spectrum pixels (spectrum rows) and
+        # all of its bands (photometry rows, or the spectrum row of an epoch that has
+        # both, see `epoch_bands`).
+        row_mask = input_sn_mask & input_spec_mask
+        # A spectral pixel with σ ≤ 0 would be noiseless, pinning the fit
+        spec_pixels = (
             input_mask
-            & input_sn_mask
-            & input_spec_mask
+            & row_mask
             & input_wl_mask
-            # A spectral pixel with σ ≤ 0 is noiseless, so would pin the fit and add
-            # an unbounded -log σ to the likelihood. Photometric rows only carry σ
-            # at their effective-wavelength bin, so are left to `photometry`.
-            & ((input_spectra_mask & (input_sigma > 0)) | input_phot_mask)
+            & input_spectra_mask
+            & (input_sigma > 0)
         )
-
-        # The decoder zeroes masked pixels, so a filter overlapping one gives a
-        # truncated model band flux, while the data's was integrated over the
-        # whole filter. Drop those photometric points rather than fit them biased.
-        # (n_sn, n_spec, n_filters)
-        filter_overlaps_mask = tf.math.reduce_any(
-            (input_throughput[..., :-1] > 0)
-            & tf.logical_not(input_mask & input_wl_mask)[..., None],
-            axis=-2,
-        )
-        # (n_sn, n_spec, n_wl)
-        biased_phot = input_phot_mask & tf.math.reduce_any(
-            (input_effective_wavelength[..., :-1] > 0)
-            & filter_overlaps_mask[..., None, :],
-            axis=-1,
-        )
-        posterior_mask &= tf.logical_not(biased_phot)
-
-        mask_spec = tf.math.reduce_any(posterior_mask, axis=-1)
+        band_active = self.band_active & row_mask if self.n_filters > 0 else None
+        mask_spec = tf.math.reduce_any(spec_pixels, axis=-1)
+        if band_active is not None:
+            mask_spec |= tf.math.reduce_any(band_active, axis=-1)
 
         # Determine which sn to keep
         mask_sn = tf.math.reduce_any(mask_spec, axis=-1)
@@ -422,11 +441,16 @@ class TFPosteriorModel(ks.Model):
             tf.expand_dims(input_phase, axis=0), repeats=zs.shape[0], axis=0
         )
 
-        # Create synthetic spectra from z-latents
+        # Create synthetic spectra from z-latents. Rows with bands need the model
+        # across each whole filter, not just at their data pixels.
+        eval_mask = input_mask
+        if band_active is not None:
+            has_bands = tf.math.reduce_any(band_active, axis=-1, keepdims=True)
+            eval_mask = input_mask | (has_bands & input_wl_mask)
         decoder_inputs = tf.concat((phase, zs), axis=-1)
         synth_amp = self.pae.decoder(
             decoder_inputs,
-            mask=input_mask,
+            mask=eval_mask,
             sn_mask=input_sn_mask,
             spec_mask=input_spec_mask,
             wl_mask=input_wl_mask,
@@ -457,76 +481,32 @@ class TFPosteriorModel(ks.Model):
         else:
             sigma_recon = self.sigma_recon
 
-        synth_scale = (
-            tf.math.maximum(
-                tf.sqrt(synth_amp * synth_amp + input_sigma * input_sigma), eps
-            )
-            if self.fractional_error
-            else 1
+        # Per-pixel model-error amplitude e = σ_recon · scale, with the scale the
+        # model amplitude itself (identical for spectra and photometry, data and sims)
+        scale = tf.abs(synth_amp) if self.fractional_error else tf.ones_like(synth_amp)
+        model_error = sigma_recon * scale
+
+        # Sanitise masked entries so they can't leak inf / nan into gradients
+        spec_flux = tf.where(spec_pixels, input_amp, tf.zeros_like(input_amp))
+        spec_variance = tf.where(
+            spec_pixels, input_sigma * input_sigma, tf.ones_like(input_sigma)
         )
-        # `synth_scale * sigma_recon` is a coherent, wavelength-correlated SED-shape
-        # error, not independent per-pixel noise, so it must not be averaged down
-        # across a passband. Pass it to `photometry` as `sigma_correlated` and add the
-        # measurement error `input_sigma` in quadrature afterwards. `input_sigma` must
-        # not go through `photometry`: photometric rows already hold their band
-        # uncertainty at the effective-wavelength bin, and integrating it again shrinks
-        # it ~50x. For pure-spectrum rows the result is still
-        # `sqrt((synth_scale * sigma_recon)**2 + input_sigma**2)`.
-        (
-            synth_amp,
-            synth_sigma,
-        ) = photometry(
-            tf.repeat(input_wavelength[None, ...], synth_amp.shape[0], axis=0),
-            synth_amp,
-            tf.zeros_like(input_sigma),
-            tf.repeat(input_throughput[None, ...], synth_amp.shape[0], axis=0),
-            tf.repeat(
-                input_effective_wavelength[None, ...], synth_amp.shape[0], axis=0
-            ),
-            tf.repeat(input_spectra_mask[None, ...], synth_amp.shape[0], axis=0),
-            tf.repeat(input_phot_mask[None, ...], synth_amp.shape[0], axis=0),
-            self.cached_amp,
-            self.cached_sigma,
-            sigma_correlated=synth_scale * sigma_recon,
-        )
-        synth_sigma = tf.sqrt(tf.square(synth_sigma) + tf.square(input_sigma))
-
-        # Set missing values to 0 for all times
-        synth_amp = tf.where(posterior_mask, synth_amp, tf.zeros_like(synth_amp))
-
-        # Set missing values to 1 for all times
-        synth_sigma = tf.where(posterior_mask, synth_sigma, tf.ones_like(synth_sigma))
-        sigma_mask = synth_sigma > 0
-        synth_sigma = tf.where(sigma_mask, synth_sigma, tf.ones_like(synth_sigma))
-
-        likelihood = tfd.Normal(loc=synth_amp, scale=synth_sigma)
-
-        # Set missing values to 0 for all times
-        synth_sigma = tf.where(sigma_mask, synth_sigma, tf.zeros_like(synth_sigma))
-        amp = tf.where(posterior_mask, input_amp, tf.zeros_like(input_amp))
-        log_likelihood_wl = likelihood.log_prob(amp)
-        log_likelihood_wl = tf.where(sigma_mask, log_likelihood_wl, 0)
-
-        log_likelihood_spec_num = tf.reduce_sum(
-            tf.where(
-                posterior_mask,
-                log_likelihood_wl,
-                tf.zeros_like(log_likelihood_wl),
-            ),
-            axis=-1,
-        )
-        log_likelihood_spec_sum = tf.math.maximum(
-            tf.math.count_nonzero(
-                posterior_mask,
-                axis=-1,
-                dtype=log_likelihood_wl.dtype,
-            ),
-            1,
+        log_likelihood_spec, n_data = epoch_log_likelihood(
+            model=synth_amp,
+            model_error=model_error,
+            correlation=self.recon_correlation,
+            spec_pixels=spec_pixels,
+            spec_flux=spec_flux,
+            spec_variance=spec_variance,
+            band_active=band_active,
+            band_flux=self.band_flux if band_active is not None else None,
+            band_variance=self.band_variance if band_active is not None else None,
+            band_weights=self.band_weights if band_active is not None else None,
+            joint=self.joint_rows,
         )
 
-        log_likelihood_spec = log_likelihood_spec_num  # / log_likelihood_spec_sum
         if self.log_likelihood_spec_sum:
-            log_likelihood_spec /= log_likelihood_spec_sum
+            log_likelihood_spec /= tf.math.maximum(n_data, 1)
 
         log_likelihood_num = tf.reduce_sum(
             tf.where(
@@ -574,7 +554,29 @@ class TFPosteriorModel(ks.Model):
         )
 
         if additional_outputs:
-            return log_probability, log_likelihood, log_prior, synth_amp, synth_sigma
+            if not model_outputs:
+                return log_probability, log_likelihood, log_prior, None, None
+            # Model amplitude and diagonal uncertainty in the data's own layout (bands
+            # at their effective-wavelength bins), for plotting
+            f = self.recon_correlation
+            n_walkers = synth_amp.shape[0]
+            synth_phot, synth_sigma = photometry(
+                tf.repeat(input_wavelength[None, ...], n_walkers, axis=0),
+                synth_amp,
+                np.sqrt(1 - f) * model_error,
+                tf.repeat(input_throughput[None, ...], n_walkers, axis=0),
+                tf.repeat(input_effective_wavelength[None, ...], n_walkers, axis=0),
+                tf.repeat(input_spectra_mask[None, ...], n_walkers, axis=0),
+                tf.repeat(input_phot_mask[None, ...], n_walkers, axis=0),
+                self.cached_amp,
+                self.cached_sigma,
+                sigma_correlated=np.sqrt(f) * model_error,
+            )
+            synth_sigma = tf.sqrt(tf.square(synth_sigma) + tf.square(input_sigma))
+            data_mask = input_mask & row_mask & input_wl_mask
+            synth_phot = tf.where(data_mask, synth_phot, tf.zeros_like(synth_phot))
+            synth_sigma = tf.where(data_mask, synth_sigma, tf.zeros_like(synth_sigma))
+            return log_probability, log_likelihood, log_prior, synth_phot, synth_sigma
         return log_probability
 
     @override
@@ -592,6 +594,7 @@ class TFPosteriorModel(ks.Model):
         wl_mask: "TensorLike | None" = None,
         testing: bool | None = None,
         additional_outputs: bool = False,
+        model_outputs: bool = True,
     ) -> tf.Tensor | tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         training = False if training is None else training
         testing = False if testing is None else testing
@@ -622,6 +625,7 @@ class TFPosteriorModel(ks.Model):
             wl_mask=wl_mask,
             testing=testing,
             additional_outputs=additional_outputs,
+            model_outputs=model_outputs,
         )
 
     def setup_map(self) -> None:
@@ -635,11 +639,19 @@ class TFPosteriorModel(ks.Model):
             Boolean tensor of shape `(sn_dim, spec_dim)`, True where a
             spec/phot row has at least one unmasked wl point.
         """
-        # Matches `posterior_mask` in `call`
-        mask = (self.data_mask & self.sn_mask & self.spec_mask & self.wl_mask) & (
-            (self.data_spectra_mask & (self.data_sigma > 0)) | self.data_phot_mask
+        # Matches `mask_spec` in `call`
+        row_mask = self.sn_mask & self.spec_mask
+        spec_pixels = (
+            self.data_mask
+            & row_mask
+            & self.wl_mask
+            & tf.cast(self.data_spectra_mask, tf.bool)
+            & (self.data_sigma > 0)
         )
-        return tf.math.reduce_any(mask, axis=-1)
+        mask = tf.math.reduce_any(spec_pixels, axis=-1)
+        if self.n_filters > 0:
+            mask |= tf.math.reduce_any(self.band_active & row_mask, axis=-1)
+        return mask
 
     def get_mask_sn(self) -> tf.Tensor:
         """Compute the per-SN mask.
@@ -685,6 +697,10 @@ class TFPosteriorModel(ks.Model):
                 "spec_mask",
                 "wl_mask",
                 "sigma_recon",
+                "band_active",
+                "band_flux",
+                "band_variance",
+                "band_weights",
             )
             originals = {attr: getattr(self, attr) for attr in sn_attrs}
             original_cached_amp = self.cached_amp
@@ -810,6 +826,10 @@ class TFPosteriorModel(ks.Model):
                 "spec_mask",
                 "wl_mask",
                 "sigma_recon",
+                "band_active",
+                "band_flux",
+                "band_variance",
+                "band_weights",
             )
             originals = {attr: getattr(self, attr) for attr in spec_attrs}
             original_cached_amp = self.cached_amp
@@ -1701,6 +1721,8 @@ class TFPosteriorModel(ks.Model):
             spec_mask=self.spec_mask,
             wl_mask=self.wl_mask,
             additional_outputs=additional_outputs,
+            # Callers only use the log terms
+            model_outputs=False,
         )
 
     def unnormalized_posterior_log_prob(

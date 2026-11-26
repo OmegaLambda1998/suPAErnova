@@ -453,45 +453,11 @@ class Posterior(ModelStep[PosteriorConfig]):
             self.step_sizes[subset] = step_sizes
 
             # --- Reconstruction Error ---
-            stage = self.pae.stage
             stage_subset = self.reconstruction_error
             if stage_subset == "match":
                 stage_subset = subset
-            if stage_subset == "combined":
-                stage_subset = ""
-            else:
-                stage_subset += "_"
-
-            subset_data = getattr(stage, f"{stage_subset}data")
-            phase = subset_data.phase
-            amplitude = subset_data.amplitude
-            sigma = subset_data.sigma
-            wavelength = subset_data.wavelength
-            throughput = subset_data.throughput
-            effective_wavelength = subset_data.effective_wavelength
-            spectra_mask = subset_data.spectra_mask
-            phot_mask = subset_data.phot_mask
-            mask = getattr(stage, f"{stage_subset}mask")
-            sn_mask = getattr(stage, f"{stage_subset}sn_mask")
-            spec_mask = getattr(stage, f"{stage_subset}spec_mask")
-            wl_mask = getattr(stage, f"{stage_subset}wl_mask")
-
-            recon_error, _, recon_error_centers = pae.model.recon_error(
-                (
-                    phase,
-                    amplitude,
-                    sigma,
-                    mask,
-                    sn_mask,
-                    spec_mask,
-                    wl_mask,
-                    wavelength,
-                    sigma,
-                    throughput,
-                    effective_wavelength,
-                    spectra_mask,
-                    phot_mask,
-                ),
+            recon_error, recon_error_centers = pae.model.stage_recon_error(
+                stage_subset,
                 pae.min_phase,
                 pae.max_phase,
                 fractional_error=self.fractional_error,

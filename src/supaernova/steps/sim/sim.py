@@ -19,9 +19,15 @@ from supaernova.configs.steps.sim import (
 )
 from supaernova.steps import Step
 from supaernova.steps.data import DataStep
-from supaernova.steps.pae.tf.photometry import photometry as tf_photometry
 from supaernova.steps.variants import Variant
 from supaernova.utils import resolve_path
+from supaernova.utils.observations import (
+    band_weights,
+    build_rows,
+    effective_indices,
+    gather_rows,
+    integrate_bands,
+)
 from supaernova.utils.photometry import Filter
 
 if TYPE_CHECKING:
@@ -142,7 +148,12 @@ class Sim(Step[SimConfig]):
     ) -> None:
         self.nflow = nflow.model
         self.pae = pae.model
+        self.pae_min_phase: float = pae.min_phase
+        self.pae_max_phase: float = pae.max_phase
         self.real_data = data
+        # Simulated uncertainties get the same calibration as the real data's
+        self.sigma_scale: float = data.sigma_scale
+        self.sigma_floor: float = data.sigma_floor
 
         if (
             self.options.sample_delta_m or self.options.sample_delta_p
@@ -213,6 +224,95 @@ class Sim(Step[SimConfig]):
         mask[offset::step] = True
         return mask
 
+    def observe_bands(self, data: dict[str, "Any"]) -> None:
+        """Integrate each epoch's noise-free model through `filters`.
+
+        Sets the filters on the master grid (`self.filter_throughput`,
+        `self.effective_index`) and, in `data`, each epoch's `band_amplitude`,
+        default `band_sigma` (the pixel noise model propagated through the filter)
+        and which bands can be observed (`band_obs`: on each filter's
+        `phot_cadence`, with the filter entirely inside the valid wavelength
+        range). Epochs are observed in those bands if `phot_mask` is set.
+        """
+        wl = data["wavelength"][0, 0]
+        n_f = len(self.filters)
+        filter_z = 0 if self.options.rest_frame_filters else self.redshift
+        throughput = np.zeros((len(wl), n_f))
+        for i, f in enumerate(self.filters):
+            throughput[:, i] = np.interp(
+                wl, f.wavelength / (1 + filter_z), f.throughput, left=0.0, right=0.0
+            )
+        eff_idx = effective_indices(
+            wl, [f.effective_wavelength / (1 + filter_z) for f in self.filters]
+        )
+        band_flux, band_sigma, band_ok = integrate_bands(
+            data["model_amplitude"],
+            data["sigma"],
+            data["mask"],
+            band_weights(wl, throughput),
+        )
+        band_obs = band_ok.copy()
+
+        phot_cadence = {
+            k.lower(): v for k, v in (self.options.phot_cadence or {}).items()
+        }
+        phot_offset = {k.lower(): v for k, v in self.options.phot_offset.items()}
+        for i, f in enumerate(self.filters):
+            name = f.name.lower()
+            if name in phot_cadence:
+                keep = self.cadence_mask(phot_cadence[name], phot_offset.get(name, 0))
+                band_obs[:, ~keep, i] = False
+
+        # Per-filter, not per-SN, so kept off `data` (hooks may replicate SNe)
+        self.filter_throughput = throughput
+        self.effective_index = eff_idx
+        data["band_amplitude"] = band_flux
+        data["band_sigma"] = band_sigma
+        data["band_obs"] = band_obs
+
+    def recon_error_draw(
+        self, model: "npt.NDArray[np.float64]", time: "npt.NDArray[np.float64]"
+    ) -> "npt.NDArray[np.float64]":
+        """Draw the model error the posterior assumes, one realisation per epoch.
+
+        ε ~ N(0, (1 - f) diag(e²) + f e eᵀ) with e = σ_recon(t, λ) · |model|
+        (or σ_recon alone without `fractional_error`).
+
+        Returns:
+            ε, with the shape of `model` (zeros if `inject_recon_error` is off).
+        """
+        if not self.options.inject_recon_error:
+            return np.zeros_like(model)
+        recon_error, centers = self.pae.stage_recon_error(
+            self.options.reconstruction_error,
+            self.pae_min_phase,
+            self.pae_max_phase,
+            fractional_error=self.options.fractional_error,
+            weighted_error=self.options.weighted_error,
+            measurement_error=self.options.measurement_error,
+        )
+        recon_error = np.asarray(recon_error, dtype=np.float64)
+        centers = np.asarray(centers, dtype=np.float64)
+        t = np.where(np.isfinite(time[..., 0]), time[..., 0], centers[0])
+        sigma_recon = np.stack(
+            [
+                np.interp(t, centers, recon_error[k])
+                for k in range(recon_error.shape[0])
+            ],
+            axis=-1,
+        )
+        scale = np.abs(model) if self.options.fractional_error else 1.0
+        e = sigma_recon * scale
+        f = self.options.recon_correlation
+        independent = self.rng.normal(size=e.shape)
+        coherent = self.rng.normal(size=(*e.shape[:2], 1))
+        eps = np.sqrt(1 - f) * e * independent + np.sqrt(f) * e * coherent
+        self.log.debug(
+            f"Injected model error: median |ε / model| = "
+            f"{np.median(np.abs(eps[model > 0] / model[model > 0])):.3g}"
+        )
+        return np.where(np.isfinite(time), eps, 0.0)
+
     def sample_physical_latents(self) -> "npt.NDArray[np.float64]":
         """Draw each simulated SN's ΔM and Δp.
 
@@ -242,75 +342,99 @@ class Sim(Step[SimConfig]):
 
     @callback
     def photometry(self) -> None:
-        """Integrate the simulated spectra in `self.spectra` through `self.filters`.
+        """Observe the simulated epochs in `self.spectra` and build the data rows.
 
-        Runs before spectra and photometry are combined into `amplitude` / `sigma`,
-        so a `callbacks.photometry` `pre` hook can modify the spectra alone (e.g.
-        instrumental resolution) by editing `self.spectra` in place.
+        Before this stage, `self.spectra` holds each epoch's noise-free model
+        (including any injected model error): `amplitude` (what a spectrograph
+        sees), `band_amplitude` (each filter's band flux of the unconvolved model),
+        and the raw 1σ uncertainties `sigma` (per pixel) and `band_sigma` (per band,
+        by default the propagated pixel noise). A `callbacks.photometry` `pre` hook
+        can edit any of these (e.g. instrumental resolution, a prism or imaging noise
+        model) and the selection masks.
+
+        This stage then draws independent measurement noise for spectra and bands,
+        and lays them out with the shared `build_rows`, which calibrates every
+        uncertainty with the real data step's `sigma_scale` / `sigma_floor`.
         """
         data = self.spectra
-        n_filters = len(self.filters) + 1
-        throughput = np.repeat(
-            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
+        n_f = len(self.filters)
+        pixel_valid = data["mask"] & (data["sigma"] > 0)
+        spec_flux = data["amplitude"] + self.rng.normal(
+            np.zeros_like(data["amplitude"]), np.where(pixel_valid, data["sigma"], 0.0)
         )
-        effective_wavelength = np.repeat(
-            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
+        band_obs = data["band_obs"] & data["phot_mask"][..., :1].astype(bool)
+        band_flux = data["band_amplitude"] + self.rng.normal(
+            np.zeros_like(data["band_amplitude"]),
+            np.where(band_obs, data["band_sigma"], 0.0),
         )
-        wl = data["wavelength"]
-        filter_z = 0 if self.options.rest_frame_filters else self.redshift
-        for i, f in enumerate(self.filters):
-            tp = np.interp(
-                wl, f.wavelength / (1 + filter_z), f.throughput, left=0.0, right=0.0
-            )
-            throughput[..., i] = tp
+        band_obs &= data["band_sigma"] > 0
 
-            ef = (
-                np.abs(wl - f.effective_wavelength / (1 + filter_z))
-                == np.min(np.abs(wl - f.effective_wavelength / (1 + filter_z)))
-            ).astype(tp.dtype)
-            effective_wavelength[..., i] = ef
-
-        # Drop photometry off each filter's cadence by removing its effective
-        # wavelength bin, rather than its throughput: `photometry()` gives a
-        # zero-throughput filter sigma=1 at its effective wavelength.
-        phot_cadence = {
-            k.lower(): v for k, v in (self.options.phot_cadence or {}).items()
-        }
-        phot_offset = {k.lower(): v for k, v in self.options.phot_offset.items()}
-        for i, f in enumerate(self.filters):
-            name = f.name.lower()
-            if name in phot_cadence:
-                keep = self.cadence_mask(phot_cadence[name], phot_offset.get(name, 0))
-                effective_wavelength[:, ~keep, :, i] = 0
-
-        data["throughput"] = throughput
-        data["effective_wavelength"] = effective_wavelength
-
-        # Mask out epochs with neither a spectrum nor any photometry (e.g. dropped by
-        # `spec_cadence` / `phot_cadence` / `n_spectra` / `n_phot`); otherwise they
-        # stay in `mask` with amplitude = sigma = 0.
-        has_phot = np.any(
-            effective_wavelength[..., : len(self.filters)], axis=(-2, -1)
-        )[..., None]
-        observed = data["spectra_mask"].astype(bool) | (
-            data["phot_mask"].astype(bool) & has_phot
+        rows = build_rows(
+            wavelength=data["wavelength"][0, 0],
+            throughput=self.filter_throughput,
+            effective_index=self.effective_index,
+            spec_obs=data["spectra_mask"][..., 0].astype(bool),
+            spec_flux=spec_flux,
+            spec_sigma=data["sigma"],
+            spec_valid=pixel_valid,
+            band_obs=band_obs if n_f > 0 else np.zeros((*band_obs.shape[:2], 0), bool),
+            band_flux=band_flux,
+            band_sigma=data["band_sigma"],
+            sigma_scale=self.sigma_scale,
+            sigma_floor=self.sigma_floor,
+            # Simulated bands get their own noise, like real imaging, so an epoch may
+            # be observed both ways
+            allow_shared_epochs=True,
         )
-        data["mask"] &= observed
+        row_epoch = rows["row_epoch"]
+        n_rows = row_epoch.shape[1]
 
-        amp, sigma = tf_photometry(
-            data["wavelength"],
-            data["amplitude"],
-            data["sigma"],
-            data["throughput"],
-            data["effective_wavelength"],
-            data["spectra_mask"],
-            data["phot_mask"],
+        out = {}
+        for k in (
+            "ind",
+            "sn_name",
+            "dphase",
+            "redshift",
+            "x0",
+            "x1",
+            "c",
+            "mb",
+            "hubble_residual",
+            "luminosity_distance",
+            "sn_mask",
+        ):
+            v = np.asarray(data[k])
+            out[k] = v if v.shape[1] == 1 else np.repeat(v[:, :1], n_rows, axis=1)
+        out["nspectra"] = np.repeat(
+            (row_epoch >= 0).sum(axis=-1)[:, None, None], n_rows, axis=1
         )
-        amp = amp.numpy()
-        sigma = sigma.numpy()
-        amp[~data["mask"]] = 0
-        data["amplitude"] = amp
-        data["sigma"] = sigma
+        out["wavelength"] = np.repeat(data["wavelength"][:, :1], n_rows, axis=1)
+        for k, fill in {
+            "spectra_id": -1,
+            "phase": -np.inf,
+            "time": -np.inf,
+            "wl_mask_min": np.inf,
+            "wl_mask_max": -np.inf,
+            "spec_mask": False,
+            "wl_mask": False,
+        }.items():
+            out[k] = gather_rows(data[k], row_epoch, fill)
+        out["salt_flux"] = gather_rows(data["salt_flux"], row_epoch, -np.inf)
+        out["laser_mask"] = np.zeros_like(rows["mask"], dtype=bool)
+        for k in (
+            "amplitude",
+            "sigma",
+            "mask",
+            "spectra_mask",
+            "phot_mask",
+            "throughput",
+            "effective_wavelength",
+            "epoch",
+        ):
+            out[k] = rows[k]
+        out["mask"] &= out["sn_mask"] & out["spec_mask"]
+        self.spec_dim = n_rows
+        self.data.model_validate(out)
 
     @override
     def _has_run(self, *args: "Any", **kwargs: "Any") -> bool:
@@ -322,7 +446,10 @@ class Sim(Step[SimConfig]):
         real_data = self.real_data.data
         self.get_dims()
 
-        synth_wl = self.real_data.data.wavelength[:1, ...].repeat(self.sn_dim, axis=0)
+        synth_wl = np.tile(
+            np.asarray(self.real_data.data.wavelength)[0, 0],
+            (self.sn_dim, self.spec_dim, 1),
+        )
         us = self.rng.normal(
             np.zeros((self.sn_dim, self.nflow.n_flow_latents)),
             np.ones((self.sn_dim, self.nflow.n_flow_latents)),
@@ -408,7 +535,11 @@ class Sim(Step[SimConfig]):
         ).numpy()
 
         data_mask = (
-            real_data.mask & real_data.sn_mask & real_data.spec_mask & real_data.wl_mask
+            real_data.mask
+            & real_data.sn_mask
+            & real_data.spec_mask
+            & real_data.wl_mask
+            & real_data.spectra_mask.astype(bool)
         )
 
         # Per (time, wavelength) bin, fit the real data's noise as
@@ -451,8 +582,12 @@ class Sim(Step[SimConfig]):
         wavelengths = synth_wl[0, 0, :]
         wstep = (wavelengths[-1] - wavelengths[0]) / len(wavelengths)
 
+        # The raw (uncalibrated) σ of real *spectral* pixels: photometry rows hold
+        # band, not pixel, uncertainties
         real_amp2 = np.square(real_data.amplitude.astype(np.float64))
-        real_sigma2 = np.square(real_data.sigma.astype(np.float64))
+        real_sigma2 = np.square(
+            (real_data.sigma.astype(np.float64) - self.sigma_floor) / self.sigma_scale
+        )
         valid = (
             data_mask.astype(bool) & np.isfinite(real_amp2) & np.isfinite(real_sigma2)
         )
@@ -532,7 +667,8 @@ class Sim(Step[SimConfig]):
             np.isfinite(synth_sigma), synth_sigma, np.zeros_like(synth_sigma)
         )
 
-        synth_amp += self.rng.normal(np.zeros_like(synth_amp), synth_sigma)
+        # Noise-free model, plus the model error the posterior assumes
+        model_amp = synth_amp + self.recon_error_draw(synth_amp, synth_time)
 
         synth_redshift = np.clip(
             self.rng.normal(
@@ -572,9 +708,10 @@ class Sim(Step[SimConfig]):
                 1,
             )
         )
-        data["amplitude"] = synth_amp
+        data["amplitude"] = model_amp.copy()
+        data["model_amplitude"] = model_amp
         data["sigma"] = synth_sigma
-        data["salt_flux"] = synth_amp
+        data["salt_flux"] = synth_amp.copy()
         data["wavelength"] = synth_wl
         data["wl_mask"] = (
             synth_wl_mask
@@ -599,11 +736,11 @@ class Sim(Step[SimConfig]):
         )
         data["time"] = synth_time
 
+        self.observe_bands(data)
+
         # Exposed to `callbacks.photometry` hooks via `self.spectra`
         self.spectra = data
         self.photometry()
-
-        self.data.model_validate(data)
 
         if not hasattr(self, "splits"):
             self.splits = {
@@ -701,7 +838,7 @@ class Sim(Step[SimConfig]):
             self.log.debug(f"Saving data arrays to {self.out_data}")
             np.savez_compressed(
                 self.out_data,
-                **self.data.model_dump(exclude={"name"}),
+                **self.data.model_dump(exclude={"name"}, exclude_none=True),
             )
 
         self.data.clear()
@@ -716,7 +853,7 @@ class Sim(Step[SimConfig]):
                 self.log.debug(f"Saving #{i} training data array to {out_train}")
                 np.savez_compressed(
                     out_train,
-                    **train_data.model_dump(exclude={"name"}),
+                    **train_data.model_dump(exclude={"name"}, exclude_none=True),
                 )
                 train_data.clear()
 
@@ -726,7 +863,7 @@ class Sim(Step[SimConfig]):
                 self.log.debug(f"Saving #{i} testing data array to {out_test}")
                 np.savez_compressed(
                     out_test,
-                    **test_data.model_dump(exclude={"name"}),
+                    **test_data.model_dump(exclude={"name"}, exclude_none=True),
                 )
                 test_data.clear()
 
@@ -754,8 +891,12 @@ class Sim(Step[SimConfig]):
         results["max_wavelength"] = self.max_wavelength
         results["train_frac"] = self.train_frac
         results["sn_dim"] = self.sn_dim
-        results["spec_dim"] = self.spec_dim
+        # Rows of the built data, which differ from the number of simulated epochs
+        results["spec_dim"] = int(self.data.mask.shape[1])
         results["wl_dim"] = self.wl_dim
+        # Simulated σ were calibrated like the real data's
+        results["sigma_scale"] = self.sigma_scale
+        results["sigma_floor"] = self.sigma_floor
         self.results = SimStepResult.model_validate(results)
 
     @override
@@ -938,7 +1079,9 @@ class Sim(Step[SimConfig]):
 
     def get_dims(self):
         self.sn_dim = self.n_sn
-        self.spec_dim = self.real_data.spec_dim
+        # One slot per simulated epoch
+        cadence_time = self.cadence / (self.max_phase - self.min_phase)
+        self.spec_dim = max(len(np.arange(0, 1, cadence_time)), 1)
         self.wl_dim = self.real_data.wl_dim
 
 

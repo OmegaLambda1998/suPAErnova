@@ -8,7 +8,9 @@ from numpy import typing as npt
 from pydantic import (
     AfterValidator,
     Field,
+    NonNegativeFloat,
     NonNegativeInt,
+    PositiveFloat,
     PositiveInt,
     field_validator,
     model_validator,
@@ -56,6 +58,10 @@ class SNPAEData(StepResult):
     throughput: npt.NDArray[np.float64]
     effective_wavelength: npt.NDArray[np.float64]
     # --- Optional ---
+    # Per-SN epoch id of each row (-1 for padding). A spectrum row and a photometry
+    # row of the same epoch share an id. Missing from data made before epochs
+    # existed, in which case every row is its own epoch.
+    epoch: npt.NDArray[np.int64] | None = None
     # === Model Validators ===
     # --- Before ---
     # --- After ---
@@ -102,6 +108,10 @@ class DataStepResult(StepResult):
     wl_dim: int
 
     # --- Optional ---
+    # Measurement-uncertainty calibration applied to every datum:
+    #   sigma = sigma_scale * sigma_raw + sigma_floor
+    sigma_scale: float = 1.0
+    sigma_floor: float = 0.0
     # === Model Validators ===
     # --- Before ---
     # --- After ---
@@ -157,6 +167,11 @@ class DataConfig(StepConfig):
     spec_offset: NonNegativeInt = 0
     phot_every: PositiveInt | None = None
     phot_offset: NonNegativeInt = 0
+    # Measurement-uncertainty calibration, applied identically to every datum
+    # (spectral pixels, synthetic bands, file photometry) and, through the sim's
+    # data step, to simulated data: sigma = sigma_scale * sigma_raw + sigma_floor.
+    sigma_scale: PositiveFloat = 1.0
+    sigma_floor: NonNegativeFloat = 0.0
     analysis: DataStepAnalysis | None = None
     cosmological_model: str = "WMAP7"
     salt_model: str | Path = "salt2"

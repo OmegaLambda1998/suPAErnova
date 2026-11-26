@@ -19,9 +19,15 @@ from supaernova.configs.steps.data import (
     LazySNPAEDataTuple,
 )
 from supaernova.steps import Step
-from supaernova.steps.pae.tf.photometry import photometry
 from supaernova.steps.variants import Variant
 from supaernova.utils import resolve_path
+from supaernova.utils.observations import (
+    band_weights,
+    build_rows,
+    effective_indices,
+    gather_rows,
+    integrate_bands,
+)
 from supaernova.utils.photometry import Filter
 
 if TYPE_CHECKING:
@@ -241,7 +247,7 @@ class Data(Step[DataConfig]):
             self.log.debug(f"Saving data arrays to {self.out_data}")
             np.savez_compressed(
                 self.out_data,
-                **self.data.model_dump(exclude={"name"}),
+                **self.data.model_dump(exclude={"name"}, exclude_none=True),
             )
 
         self.data.clear()
@@ -252,7 +258,7 @@ class Data(Step[DataConfig]):
                 self.log.debug(f"Saving #{i} training data array to {out_train}")
                 np.savez_compressed(
                     out_train,
-                    **train_data.model_dump(exclude={"name"}),
+                    **train_data.model_dump(exclude={"name"}, exclude_none=True),
                 )
                 train_data.clear()
 
@@ -262,7 +268,7 @@ class Data(Step[DataConfig]):
                 self.log.debug(f"Saving #{i} testing data array to {out_test}")
                 np.savez_compressed(
                     out_test,
-                    **test_data.model_dump(exclude={"name"}),
+                    **test_data.model_dump(exclude={"name"}, exclude_none=True),
                 )
                 test_data.clear()
 
@@ -295,8 +301,11 @@ class Data(Step[DataConfig]):
         results["max_wavelength"] = self.max_wavelength
         results["train_frac"] = self.train_frac
         results["sn_dim"] = self.sn_dim
-        results["spec_dim"] = self.spec_dim
+        # Rows of the built data, which differ from the raw observation count
+        results["spec_dim"] = int(self.data.mask.shape[1])
         results["wl_dim"] = self.wl_dim
+        results["sigma_scale"] = self.options.sigma_scale
+        results["sigma_floor"] = self.options.sigma_floor
         self.results = DataStepResult.model_validate(results)
         self.data.clear()
         self.train_data.clear()
@@ -885,20 +894,15 @@ class Data(Step[DataConfig]):
             data["phot_mask"] = (
                 (peak_rank(phot_slot) < self.n_phot) & phot_slot
             ).astype(spec_mask.dtype)[..., None]
-
-            # Mask out spectra selected as neither a spectrum nor photometry (e.g.
-            # dropped by `n_spectra` / `*_every`), otherwise they stay in `mask`
-            # with amplitude = sigma = 0. Photometry needs at least one filter.
-            observed = data["spectra_mask"].astype(bool)
-            if len(self.filters) > 0:
-                observed |= data["phot_mask"].astype(bool)
-            data["mask"] &= observed
         else:
             # Rows with a `filt` value are photometric observations in that filter,
             # rows without one are genuine spectra
             is_phot = ~pd.isna(data["filt"][..., 0])
             data["phot_mask"] = is_phot.astype(spec_mask.dtype)[..., None]
             data["spectra_mask"] = (~is_phot).astype(spec_mask.dtype)[..., None]
+        # Rows read from photometry files hold a single number at one bin, rather
+        # than a spectrum
+        is_file_phot = ~pd.isna(data["filt"][..., 0])
 
         self.log.debug(f"Valid Phases ({self.min_phase} <= p <= {self.max_phase}):")
         self.get_unmasked_dims(data["mask"])
@@ -959,9 +963,11 @@ class Data(Step[DataConfig]):
             laser_mask = laser_mask | laser_mask_min | laser_mask_max
             laser_width -= 1
 
-        # Laser lines are a spectroscopic artefact. A photometric row is zero except at
-        # its effective wavelength, so the neighbour test would flag every bright point.
-        laser_mask &= data["spectra_mask"].astype(bool)
+        # Laser lines are an artefact of the observed spectra, whether those are used
+        # as spectra or integrated into synthetic photometry. A row read from a
+        # photometry file is zero except at one bin, so the neighbour test would
+        # flag every bright point.
+        laser_mask &= ~is_file_phot[..., None]
 
         data["laser_mask"] = laser_mask
         data["mask"] &= ~laser_mask
@@ -985,67 +991,189 @@ class Data(Step[DataConfig]):
         data["time"] = (data["phase"] - min_phase) / (max_phase - min_phase)
         # data["time"][~spec_mask] = -np.inf
 
-        # Scale observed uncertainty to account for fitting degrees of freedom, and an error floor
-        data["sigma"] = 1.4 * data["sigma"] + 4e-10
-
-        data["mask"] = data["mask"].astype(np.int32)
-
-        n_filters = len(self.filters) + 1
-        throughput = np.repeat(
-            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
+        self.build_observations(
+            data, is_file_phot=is_file_phot, no_filt_defined=no_filt_defined
         )
-        effective_wavelength = np.repeat(
-            np.zeros_like(data["amplitude"])[..., None], n_filters, axis=-1
-        )
-        wl = data["wavelength"]
-        filter_names = list(self.filters.keys())
-        for i, f in enumerate(self.filters.values()):
-            tp = np.interp(wl, f.wavelength, f.throughput, left=0.0, right=0.0)
-            throughput[..., i] = tp
 
-            ef = (
-                np.abs(wl - f.effective_wavelength)
-                == np.min(np.abs(wl - f.effective_wavelength))
-            ).astype(tp.dtype)
-            effective_wavelength[..., i] = ef
+    def build_observations(
+        self,
+        data: dict[str, "npt.NDArray[Any]"],
+        *,
+        is_file_phot: "npt.NDArray[np.bool_]",
+        no_filt_defined: bool,
+    ) -> None:
+        """Turn per-observation arrays into spectrum and photometry rows.
 
-        if not no_filt_defined:
-            # Each photometric row is a real observation in a single filter, so
-            # restrict its throughput/effective_wavelength to that filter only.
-            # Rows with no `filt` (genuine spectra) are zeroed out here, but that's
-            # fine since phot_mask is 0 for them and throughput is never used.
-            filt = data["filt"][..., 0]
-            filter_row_mask = np.zeros(
-                (self.sn_dim, self.spec_dim, n_filters), dtype=throughput.dtype
+        `data` holds one entry per row of the `meta` file (padded per SN). Each is
+        either a spectrum or, if it has a `filt`, a photometric measurement read
+        from file. Spectra become spectrum rows, synthetic photometry (when no
+        `filt` is given) is integrated from the spectra selected as photometry,
+        and file photometry at the same phase is grouped into one epoch. All of
+        it goes through `build_rows`, which also calibrates every uncertainty.
+        """
+        filter_list = list(self.filters.values())
+        n_f = len(filter_list)
+        wl = self.wavelength
+        throughput = np.zeros((self.wl_dim, n_f))
+        for i, f in enumerate(filter_list):
+            throughput[:, i] = np.interp(
+                wl, f.wavelength, f.throughput, left=0.0, right=0.0
             )
-            for i, name in enumerate(filter_names):
-                filter_row_mask[..., i] = filt == name
-            throughput = throughput * filter_row_mask[:, :, None, :]
-            effective_wavelength = effective_wavelength * filter_row_mask[:, :, None, :]
+        eff_idx = effective_indices(wl, [f.effective_wavelength for f in filter_list])
+        weights = band_weights(wl, throughput)
 
-        data["throughput"] = throughput
-        data["effective_wavelength"] = effective_wavelength
+        raw_flux = np.asarray(data["amplitude"], dtype=np.float64)
+        raw_sigma = np.asarray(data["sigma"], dtype=np.float64)
+        pixel_valid = (
+            data["mask"].astype(bool)
+            & np.isfinite(raw_flux)
+            & np.isfinite(raw_sigma)
+            & (raw_sigma > 0)
+        )
+        selected_spec = data["spectra_mask"][..., 0].astype(bool)
+        selected_phot = data["phot_mask"][..., 0].astype(bool)
 
         if no_filt_defined:
-            amp, sigma = photometry(
-                data["wavelength"],
-                data["amplitude"],
-                data["sigma"],
-                data["throughput"],
-                data["effective_wavelength"],
-                data["spectra_mask"],
-                data["phot_mask"],
+            # Every row is an epoch; photometry is synthesised from its spectrum
+            rep = np.tile(np.arange(self.spec_dim), (self.sn_dim, 1))
+            spec_obs = selected_spec
+            band_flux, band_sigma, band_ok = integrate_bands(
+                raw_flux, raw_sigma, pixel_valid, weights
             )
-            amp = amp.numpy()
-            sigma = sigma.numpy()
-            amp[~data["mask"].astype(bool)] = 0
-            data["amplitude"] = amp
-            data["sigma"] = sigma
+            band_obs = selected_phot[..., None] & band_ok
+            allow_shared = False
+        else:
+            # Group rows into epochs by phase: a spectrum and any photometry taken at
+            # the same phase are one epoch
+            filt = data["filt"][..., 0]
+            filter_index = {name: i for i, name in enumerate(self.filters)}
+            phase = data["phase"][..., 0]
+            row_ok = data["mask"].astype(bool).any(axis=-1)
+            epochs_per_sn = []
+            for i in range(self.sn_dim):
+                keys: dict[float, list[int]] = {}
+                for j in range(self.spec_dim):
+                    if row_ok[i, j]:
+                        keys.setdefault(float(phase[i, j]), []).append(j)
+                epochs_per_sn.append(list(keys.values()))
+            n_ep = max(max((len(e) for e in epochs_per_sn), default=0), 1)
+            rep = np.full((self.sn_dim, n_ep), -1, dtype=np.int64)
+            spec_obs = np.zeros((self.sn_dim, n_ep), dtype=bool)
+            spec_row = np.zeros((self.sn_dim, n_ep), dtype=np.int64)
+            band_obs = np.zeros((self.sn_dim, n_ep, n_f), dtype=bool)
+            band_flux = np.zeros((self.sn_dim, n_ep, n_f))
+            band_sigma = np.zeros((self.sn_dim, n_ep, n_f))
+            for i, epochs in enumerate(epochs_per_sn):
+                for e, rows in enumerate(epochs):
+                    spectra = [j for j in rows if not is_file_phot[i, j]]
+                    if len(spectra) > 1:
+                        msg = f"SN {data['sn_name'][i, 0, 0]} has {len(spectra)} spectra at phase {phase[i, rows[0]]}"
+                        raise ValueError(msg)
+                    rep[i, e] = spectra[0] if spectra else rows[0]
+                    if spectra:
+                        spec_obs[i, e] = selected_spec[i, spectra[0]]
+                        spec_row[i, e] = spectra[0]
+                    for j in rows:
+                        if not is_file_phot[i, j]:
+                            continue
+                        b = filter_index[filt[i, j]]
+                        if band_obs[i, e, b]:
+                            msg = f"SN {data['sn_name'][i, 0, 0]} has two {filt[i, j]} measurements at phase {phase[i, j]}"
+                            raise ValueError(msg)
+                        k = eff_idx[b]
+                        band_obs[i, e, b] = bool(pixel_valid[i, j, k])
+                        band_flux[i, e, b] = raw_flux[i, j, k]
+                        band_sigma[i, e, b] = raw_sigma[i, j, k]
+            sn_idx = np.arange(self.sn_dim)[:, None]
+            raw_flux = raw_flux[sn_idx, spec_row]
+            raw_sigma = raw_sigma[sn_idx, spec_row]
+            pixel_valid = pixel_valid[sn_idx, spec_row]
+            # File photometry has independent noise, so it may share an epoch with a spectrum
+            allow_shared = True
 
-        # Only needed temporarily, so delete before validating
-        del data["filt"]
+        rows = build_rows(
+            wavelength=wl,
+            throughput=throughput,
+            effective_index=eff_idx,
+            spec_obs=spec_obs,
+            spec_flux=raw_flux,
+            spec_sigma=raw_sigma,
+            spec_valid=pixel_valid,
+            band_obs=band_obs,
+            band_flux=band_flux,
+            band_sigma=band_sigma,
+            sigma_scale=self.options.sigma_scale,
+            sigma_floor=self.options.sigma_floor,
+            allow_shared_epochs=allow_shared,
+            # A PAE's architecture depends on the data's `spec_dim`, so keep it at
+            # the number of observations, as it was before rows were built
+            min_rows=self.spec_dim,
+        )
+        row_epoch = rows["row_epoch"]
+        # Index of each output row's source row in `data`
+        sn_idx = np.arange(self.sn_dim)[:, None]
+        source = np.where(
+            row_epoch >= 0, rep[sn_idx, np.where(row_epoch >= 0, row_epoch, 0)], -1
+        )
+        n_rows = row_epoch.shape[1]
+        is_spec_row = rows["spectra_mask"][..., 0]
 
-        self.data.model_validate(data)
+        # Per-SN values: identical on every row, padding included
+        sn_keys = [
+            "ind",
+            "sn_name",
+            "dphase",
+            "redshift",
+            "x0",
+            "x1",
+            "c",
+            "mB",
+            "hubble_residual",
+            "luminosity_distance",
+        ]
+        out = {k: np.repeat(data[k][:, :1], n_rows, axis=1) for k in sn_keys}
+        out["sn_mask"] = data["sn_mask"]
+        out["nspectra"] = np.repeat(
+            (row_epoch >= 0).sum(axis=-1)[:, None, None], n_rows, axis=1
+        )
+        out["wavelength"] = np.tile(wl, (self.sn_dim, n_rows, 1))
+
+        # Per-row values, with the same padding as an unobserved row
+        row_keys = {
+            "phase": -np.inf,
+            "time": -np.inf,
+            "wl_mask_min": np.inf,
+            "wl_mask_max": -np.inf,
+            "salt_flux": -np.inf,
+            "spec_mask": False,
+            "wl_mask": False,
+            "laser_mask": False,
+        }
+        for k, fill in row_keys.items():
+            out[k] = gather_rows(data[k], source, fill)
+        out["spectra_id"] = gather_rows(data["spectra_id"], source, "-")
+        # Laser lines only affect spectrum data
+        out["laser_mask"] &= is_spec_row[..., None]
+
+        for k in (
+            "amplitude",
+            "sigma",
+            "mask",
+            "spectra_mask",
+            "phot_mask",
+            "throughput",
+            "effective_wavelength",
+            "epoch",
+        ):
+            out[k] = rows[k]
+        out["mask"] = out["mask"].astype(np.int32)
+        out["spectra_mask"] = out["spectra_mask"].astype(np.int32)
+        out["phot_mask"] = out["phot_mask"].astype(np.int32)
+
+        self.spec_dim = n_rows
+        self.log.debug("Observed rows:")
+        self.get_unmasked_dims(out["mask"])
+        self.data.model_validate(out)
 
     def get_unmasked_dims(
         self, mask: "npt.NDArray[np.int32] | None" = None

@@ -521,17 +521,7 @@ class TFPAEDecoder(ks.layers.Layer):
     ) -> tf.Tensor:
         training = False if training is None else training
         testing = False if testing is None else testing
-        synth_amp = super().__call__(
-            inputs,
-            mask=mask,
-            sn_mask=sn_mask,
-            spec_mask=spec_mask,
-            wl_mask=wl_mask,
-            training=training,
-            testing=testing,
-        )
-
-        if not any(
+        has_photometry = not any(
             v is None
             for v in (
                 wavelength,
@@ -541,7 +531,32 @@ class TFPAEDecoder(ks.layers.Layer):
                 spectra_mask,
                 phot_mask,
             )
-        ):
+        )
+        eval_mask = mask
+        if has_photometry and mask is not None:
+            # A photometry row's datum mask covers only its effective-wavelength
+            # bins, but its bands integrate the model spectrum across each filter,
+            # so evaluate that spectrum over the row's whole valid wavelength range
+            # (`build_rows` only keeps bands whose filter lies inside it).
+            phot_row = tf.cast(phot_mask, tf.bool)
+            data_mask = tf.cast(mask, tf.bool)
+            if wl_mask is not None:
+                eval_mask = tf.where(
+                    phot_row, tf.cast(wl_mask, tf.bool) | data_mask, data_mask
+                )
+            else:
+                eval_mask = data_mask | phot_row
+        synth_amp = super().__call__(
+            inputs,
+            mask=eval_mask,
+            sn_mask=sn_mask,
+            spec_mask=spec_mask,
+            wl_mask=wl_mask,
+            training=training,
+            testing=testing,
+        )
+
+        if has_photometry:
             (
                 synth_amp,
                 _,
@@ -554,6 +569,10 @@ class TFPAEDecoder(ks.layers.Layer):
                 spectra_mask,
                 phot_mask,
             )
+            if mask is not None:
+                synth_amp = tf.where(
+                    tf.cast(mask, tf.bool), synth_amp, tf.zeros_like(synth_amp)
+                )
         return synth_amp
 
 
@@ -1844,6 +1863,59 @@ class TFPAEModel(ks.Model):
             phot_mask,
         )
 
+    def stage_recon_error(
+        self,
+        subset: str,
+        min_phase: float,
+        max_phase: float,
+        *,
+        fractional_error: bool = False,
+        weighted_error: bool = False,
+        measurement_error: bool = False,
+    ) -> tuple[tf.Tensor, tf.Tensor]:
+        """Reconstruction error of this PAE on its own (current stage's) data.
+
+        Shared by the posterior, which assumes it, and the sim, which injects it,
+        so both use the same σ_recon.
+
+        Args:
+            subset: "train", "test" or "combined" (all of the PAE's data).
+            min_phase: The PAE's minimum phase, for normalising time.
+            max_phase: The PAE's maximum phase.
+            fractional_error: Passed to `recon_error`.
+            weighted_error: Passed to `recon_error`.
+            measurement_error: Passed to `recon_error`.
+
+        Returns:
+            `(recon_error, time_bin_centers)`; `recon_error` has shape (n_wl, n_time_bins).
+        """
+        prefix = "" if subset == "combined" else f"{subset}_"
+        stage = self.stage
+        data = getattr(stage, f"{prefix}data")
+        recon_error, _, centers = self.recon_error(
+            (
+                data.phase,
+                data.amplitude,
+                data.sigma,
+                getattr(stage, f"{prefix}mask"),
+                getattr(stage, f"{prefix}sn_mask"),
+                getattr(stage, f"{prefix}spec_mask"),
+                getattr(stage, f"{prefix}wl_mask"),
+                data.wavelength,
+                data.sigma,
+                data.throughput,
+                data.effective_wavelength,
+                data.spectra_mask,
+                data.phot_mask,
+            ),
+            min_phase,
+            max_phase,
+            fractional_error=fractional_error,
+            weighted_error=weighted_error,
+            measurement_error=measurement_error,
+        )
+        return recon_error, centers
+
     def recon_error(
         self,
         data: tuple[
@@ -1923,8 +1995,12 @@ class TFPAEModel(ks.Model):
         num_time_bins = tf.cast(((time_max - time_min) // time_bin_width) + 2, tf.int32)
 
         # === Setup Masks ===
-        # Apply sn and spec masks
-        recon_mask = mask & sn_mask & spec_mask & wl_mask
+        # Apply sn and spec masks. σ_recon is a per-pixel quantity, so it is
+        # measured on spectrum rows only; photometry rows are predicted from it by
+        # projecting through each filter.
+        recon_mask = (
+            mask & sn_mask & spec_mask & wl_mask & tf.cast(spectra_mask, tf.bool)
+        )
 
         has_valid_data = tf.math.reduce_any(recon_mask, axis=-1)
 
@@ -1955,12 +2031,13 @@ class TFPAEModel(ks.Model):
         weights = tf.ones_like(error)
         if weighted_error:
             weights = 1 / tf.math.maximum(d_amp, eps)
-        if fractional_error:
-            scale = tf.math.maximum(tf.sqrt(amp_pred * amp_pred + d_amp * d_amp), eps)
-            error /= scale
-            meas_error /= scale
-            # if weighted_error:
-            #     weights *= scale
+        # With `fractional_error`, the model error is e = r · |model| (the scale the
+        # posterior and the sim use), so Var(residual) - σ² = r² model². r² is then
+        # the ratio of weighted sums Σ w²(res² - σ²) / Σ w² model², rather than a
+        # mean of per-pixel ratios, which explodes wherever the model is ~0.
+        model_scale2 = (
+            amp_pred * amp_pred if fractional_error else tf.ones_like(amp_pred)
+        )
         if not measurement_error:
             meas_error *= 0
 
@@ -1985,6 +2062,7 @@ class TFPAEModel(ks.Model):
             bin_error = tf.gather(error, in_bin_idx)
             bin_meas_error = tf.gather(meas_error, in_bin_idx)
             bin_weights = tf.square(tf.gather(weights, in_bin_idx))
+            bin_scale2 = tf.gather(model_scale2, in_bin_idx)
             bin_mask = tf.gather(recon_mask, in_bin_idx)
 
             # Compute std of masked values
@@ -2009,7 +2087,9 @@ class TFPAEModel(ks.Model):
             # )
             denominator = tf.math.maximum(
                 tf.reduce_sum(
-                    tf.where(bin_mask, bin_weights, tf.zeros_like(bin_error)),
+                    tf.where(
+                        bin_mask, bin_weights * bin_scale2, tf.zeros_like(bin_error)
+                    ),
                     axis=0,
                 ),
                 eps,
