@@ -1167,8 +1167,8 @@ class Data(Step[DataConfig]):
         ):
             out[k] = rows[k]
         out["mask"] = out["mask"].astype(np.int32)
-        out["spectra_mask"] = out["spectra_mask"].astype(np.int32)
-        out["phot_mask"] = out["phot_mask"].astype(np.int32)
+        out["spectra_mask"] = out["spectra_mask"].astype(bool)
+        out["phot_mask"] = out["phot_mask"].astype(bool)
 
         self.spec_dim = n_rows
         self.log.debug("Observed rows:")

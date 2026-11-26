@@ -700,41 +700,34 @@ class SpectraPlotter(Plotter):
             0, color="black", fig=fig, ax=residual_ax
         )
 
-        # Restrict to overlap in x
-        x_min = max(x.min(), x_prime.min())
-        x_max = min(x.max(), x_prime.max())
+        # Compare on this data's bins that hold data, within the base's range.
+        # The bins needn't match the base's (photometry-only data is valid only
+        # at its filters' effective-wavelength bins), so interpolate the base
+        # onto them; on a shared grid this picks the same bins exactly.
+        def _valid(*arrays: "np.ma.MaskedArray") -> "npt.NDArray[np.bool]":
+            return ~np.logical_or.reduce([np.ma.getmaskarray(a) for a in arrays])
 
-        mask_overlap = (x >= x_min - 1) & (x <= x_max + 1)
-        mask_overlap_prime = (x_prime >= x_min - 1) & (x_prime <= x_max + 1)
+        valid = _valid(x, y_mean, yerr_mean)
+        valid_prime = _valid(x_prime, y_prime_mean, yerr_prime_mean)
+        x_data = np.ma.getdata(x)
+        x_prime_valid = np.ma.getdata(x_prime)[valid_prime]
+        common = valid.copy()
+        if x_prime_valid.size:
+            common &= (x_data >= x_prime_valid.min() - 1) & (
+                x_data <= x_prime_valid.max() + 1
+            )
+        else:
+            common[:] = False
 
-        # Extract overlapping regions
-        x_common = x[mask_overlap]
-        y_common = y[..., mask_overlap]
-        yerr_common = yerr[..., mask_overlap]
-        scale_common = (~y_common.mask).sum(axis=(0, 1))
-        y_common_mean = y_common.sum(axis=(0, 1)) / scale_common
-        yerr_common_mean = (
-            np.ma.sqrt((yerr_common * yerr_common).sum(axis=(0, 1))) / scale_common
+        x_common = x_data[common]
+        y_common_mean = np.ma.getdata(y_mean)[common]
+        yerr_common_mean = np.ma.getdata(yerr_mean)[common]
+        y_prime_common_mean = np.interp(
+            x_common, x_prime_valid, np.ma.getdata(y_prime_mean)[valid_prime]
         )
-        y_common_var = ((y_common - y_common_mean) ** 2).sum(axis=(0, 1)) / scale_common
-        y_common_std = np.sqrt(y_common_var)
-        y_common_sem = np.sqrt(y_common_var / scale_common)
-
-        x_prime_common = x_prime[mask_overlap_prime]
-        y_prime_common = y_prime[..., mask_overlap_prime]
-        yerr_prime_common = yerr_prime[..., mask_overlap_prime]
-
-        scale_prime_common = (~y_prime_common.mask).sum(axis=(0, 1))
-        y_prime_common_mean = y_prime_common.sum(axis=(0, 1)) / scale_prime_common
-        yerr_prime_common_mean = (
-            np.ma.sqrt((yerr_prime_common * yerr_prime_common).sum(axis=(0, 1)))
-            / scale_prime_common
+        yerr_prime_common_mean = np.interp(
+            x_common, x_prime_valid, np.ma.getdata(yerr_prime_mean)[valid_prime]
         )
-        y_prime_common_var = ((y_prime_common - y_prime_common_mean) ** 2).sum(
-            axis=(0, 1)
-        ) / scale_prime_common
-        y_prime_common_std = np.sqrt(y_prime_common_var)
-        y_prime_common_sem = np.sqrt(y_prime_common_var / scale_prime_common)
 
         # Residual with masks respected
         y_residual_mean = y_common_mean - y_prime_common_mean
