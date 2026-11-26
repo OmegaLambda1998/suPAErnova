@@ -32,7 +32,7 @@ class DispersionPlot(SpectraPlot):
     # Twins catalogue (e.g. twins/boone21_sn.csv) relative to the data dir; needs
     # snf_name, mask_twins, mask_salt, hr_rbtl_twins, hr_rbtl_err, hr_pec_vel_err
     twins: str | None = None
-    reduce: Literal["mean", "median", "max_central"] = "max_central"
+    reduce: Literal["mean", "median", "max_central"] = "mean"
 
 
 class DispersionPlotter(Plotter):
@@ -470,6 +470,10 @@ class DispersionPlotter(Plotter):
                     for hmc in hmcs
                 ],
             )[..., pae_order]
+        if config.reduce in {"mean", "median"}:
+            # Symmetric errors: the posterior SD, consistent with the point estimate
+            pae_amplitude_errs_lower = pae_amplitude_stds
+            pae_amplitude_errs_upper = pae_amplitude_stds
 
         pae_weights = 1 / np.clip(pae_amplitude_stds * pae_amplitude_stds, 1e-7, np.inf)
         pae_weighted_sum = pae_weights.sum(axis=0)
@@ -518,16 +522,23 @@ class DispersionPlotter(Plotter):
         # snpae_mask &= u_mask
 
         # === Peak Mask ===
-        max_delta_p = hmcs[0].hmc.delta_p[
-            np.argmin(
-                np.abs(
-                    hmcs[0].hmc.log_prob
-                    - np.max(hmcs[0].hmc.log_prob, axis=0)[None, ...]
+        # Δp reduced the same way as ΔM and the latents
+        delta_p = hmcs[0].hmc.delta_p
+        if config.reduce == "mean":
+            max_delta_p = np.mean(delta_p, axis=0)
+        elif config.reduce == "median":
+            max_delta_p = np.median(delta_p, axis=0)
+        else:
+            max_delta_p = delta_p[
+                np.argmin(
+                    np.abs(
+                        hmcs[0].hmc.log_prob
+                        - np.max(hmcs[0].hmc.log_prob, axis=0)[None, ...]
+                    ),
+                    axis=0,
                 ),
-                axis=0,
-            ),
-            np.arange(hmcs[0].hmc.delta_p.shape[-1]),
-        ]
+                np.arange(delta_p.shape[-1]),
+            ]
         phase = (
             model.data.phase
             + (max_delta_p * (model.max_phase - model.min_phase))[:, None, None]
@@ -538,7 +549,7 @@ class DispersionPlotter(Plotter):
             0,
         ][pae_order]
         peak_mask = np.abs(pae_peak_phase) < 5
-        snpae_mask &= peak_mask
+        # snpae_mask &= peak_mask
 
         # === RHat Mask ===
         unmasked_r_hat = hmcs[0].hmc.r_hat[pae_order, ...]
@@ -554,7 +565,7 @@ class DispersionPlotter(Plotter):
         r_hat_mask = r_hat < np.quantile(r_hat[snpae_mask], 0.75) + 1.5 * (
             np.quantile(r_hat[snpae_mask], 0.75) - np.quantile(r_hat[snpae_mask], 0.25)
         )
-        snpae_mask &= r_hat_mask
+        # snpae_mask &= r_hat_mask
 
         pae_twins_mask = np.ones_like(pae_mask, dtype=bool)
         pae_salt_mask = np.ones_like(pae_mask, dtype=bool)

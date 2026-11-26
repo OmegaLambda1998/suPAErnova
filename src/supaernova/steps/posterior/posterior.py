@@ -2073,7 +2073,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                         )
                     if o.reduce == "mean":
                         mean_delta_p = np.mean(delta_p, axis=0)
-                    if o.reduce == "median":
+                    elif o.reduce == "median":
                         mean_delta_p = np.median(delta_p, axis=0)
                     else:
                         mean_delta_p = np.array(
@@ -2492,7 +2492,11 @@ class Posterior(ModelStep[PosteriorConfig]):
                     if stats[3] is not None:
                         statistics["salt_mask"] = stats[3]
                     with (o.savepath / "stats.json").open("w") as io:
-                        json.dump(statistics, io)
+                        # Plain floats: the statistics can be numpy float32
+                        json.dump(
+                            {k: [float(x) for x in v] for k, v in statistics.items()},
+                            io,
+                        )
 
     @override
     def _analyse(self, *args: Any, **kwargs: Any) -> None:

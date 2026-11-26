@@ -19,7 +19,7 @@ class DistributionPlot(SpectraPlot):
     labels: "dict[str | int, str | dict[str | int, str]] | None" = None
     mean: bool = False
     masked: bool = False
-    reduce: Literal["mean", "median", "max_central"] = "max_central"
+    reduce: Literal["mean", "median", "max_central"] = "mean"
 
 
 class DistributionPlotter(Plotter):
