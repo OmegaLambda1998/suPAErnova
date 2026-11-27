@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from inspect import signature
 from pathlib import Path
 from types import ModuleType
@@ -32,6 +32,31 @@ def validate_signature[F: Fn](obj: F, dummy_obj: F, attr: str | None = None) -> 
 
         raise ValueError(err)
     return obj
+
+
+def validate_named_function[F: Fn](
+    obj: ConfigInputObject[F],
+    *,
+    dummy_obj: F,
+    mods: Sequence[ModuleType],
+) -> F:
+    """Like `validate_object`, but a name is looked up in `mods` in order and
+    only needs to be callable.
+
+    Library functions such as activations share a calling convention but not
+    their type annotations (`tf.nn.relu` vs `tf.nn.silu`), so the strict
+    signature check would reject every function but `dummy_obj` itself. A
+    `.py` file or a callable is still checked against `dummy_obj`.
+    """
+    if isinstance(obj, str) and not (Path(obj).exists() and Path(obj).suffix == ".py"):
+        for mod in mods:
+            fn = getattr(mod, obj, None)
+            if callable(fn):
+                return fn
+        names = ", ".join(getattr(mod, "__name__", str(mod)) for mod in mods)
+        err = f"No function `{obj}` in {names}"
+        raise ValueError(err)
+    return validate_object(obj, dummy_obj=dummy_obj, mod=mods[0])
 
 
 def extract_from_module[F: Fn](name: str, mod: ModuleType, _type_hint: type[F]) -> F:

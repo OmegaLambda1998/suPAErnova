@@ -9,7 +9,11 @@ from supaernova.steps.nflow.tf import (
     loss as snpae_losses,
 )
 from supaernova.typing.backends.tf import Loss, LossFunc
-from supaernova.utils.validation import ConfigInputObject, validate_object
+from supaernova.utils.validation import (
+    ConfigInputObject,
+    validate_named_function,
+    validate_object,
+)
 
 from .nflow import NFlowConfig
 
@@ -19,7 +23,12 @@ ActivationObject = Callable[[tf.Tensor], tf.Tensor]
 def validate_activation(
     activation: ConfigInputObject[ActivationObject],
 ) -> ActivationObject:
-    return validate_object(activation, dummy_obj=tf.nn.relu, mod=tf.nn)
+    # Any `tf.nn` or Keras activation by name (e.g. "relu", "silu", "gelu",
+    # "softplus"); smooth ones keep the posterior differentiable everywhere,
+    # which HMC needs (ReLU kinks force small leapfrog steps).
+    return validate_named_function(
+        activation, dummy_obj=tf.nn.relu, mods=(tf.nn, ks.activations)
+    )
 
 
 SchedulerObject = (

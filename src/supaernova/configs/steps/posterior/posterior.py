@@ -25,6 +25,7 @@ from supaernova.configs.steps.data import DataStepConfig
 from supaernova.configs.steps.models import BackendConfig, ModelConfig
 from supaernova.configs.steps.nflow import NFlowStepConfig
 from supaernova.configs.steps.pae import PAEStepConfig
+from supaernova.configs.uncertainty import UncertaintyModel, pop_legacy_fields
 
 type InitPreset = Literal["initial", "current", "best", "legacy"]
 type InitULatents = Literal["u_random", "u_constant"]
@@ -46,6 +47,9 @@ class PosteriorMAPStage(BaseConfig):
     n_chains: int
     init: bool = False
     setup: bool = False
+    # Re-optimise every SN from its best position with the full likelihood,
+    # accepting the result (used after a cheaper-likelihood MAP search)
+    refine: bool = False
     init_u_delta_av: InitParams
     init_latents: InitLatents
     init_delta_av: InitParams
@@ -222,17 +226,34 @@ class PosteriorConfig(BackendConfig):
     log_likelihood_scale: PositiveFloat = 1.0
     log_likelihood_spec_sum: bool = False
     log_likelihood_sum: bool = False
-    step_size_scale: Literal["min", "max", "shift"] = "shift"
-    fractional_error: bool = True
-    weighted_error: bool = True
-    measurement_error: bool = True
-    reconstruction_error: Literal["train", "test", "combined", "match"] = "combined"
-    # Fraction f of the model-error variance (σ_recon · |model|)² that is fully
-    # coherent across wavelength within an epoch; the rest is independent per pixel.
-    # Spectra use the covariance directly and photometry its exact projection through
-    # each filter, so every variant shares one assumption. The correct value has not
-    # been established: investigate it before trusting photometric ΔM widths.
-    recon_correlation: float = Field(default=0.0, ge=0.0, le=1.0)
+    # "hessian": per-SN, per-parameter step size from the MAP curvature,
+    # step = hessian_step_fraction * sqrt(diag(H^-1)) with H = -d2 log p at the
+    # MAP (unconstrained). SNe whose H is not positive definite fall back to
+    # "min".
+    step_size_scale: Literal["min", "max", "shift", "hessian"] = "shift"
+    hessian_step_fraction: PositiveFloat = 0.25
+    # With "hessian": "diagonal" scales each parameter by its marginal width;
+    # "dense" samples whitened coordinates y, x = x_MAP + L y with L L^T = H^-1
+    # per SN, which also removes the parameters' correlations (a dense mass
+    # matrix). Each step is then hessian_step_fraction in every y direction.
+    hessian_preconditioner: Literal["diagonal", "dense"] = "dense"
+    # Warm-up metric adaptation: spend this fraction of the adaption steps
+    # sampling under the initial whitening, then re-whiten every SN with the
+    # empirical mean and covariance of those samples (after discarding the
+    # first `metric_adaption_discard` of them, and shrinking towards the
+    # previous whitening's covariance), and adapt the step size afresh for the
+    # remaining adaption steps. 0 disables it.
+    metric_adaption_fraction: NonNegativeFloat = 0.0
+    # Kernel likelihood only: run the MAP multi-start search with the kernel's
+    # time correlation of the local (short-range) parts dropped
+    # (`local_time = false`, ~9x cheaper per evaluation), then refine every
+    # SN's best position once with the full likelihood before HMC.
+    map_search_local_time: bool = True
+    metric_adaption_discard: NonNegativeFloat = 0.25
+    # The noise and model-error model of the likelihood (see
+    # `configs/uncertainty.py`). Its calibration and bands must agree with the
+    # data step (or sim) being fitted.
+    uncertainty: UncertaintyModel = Field(default_factory=UncertaintyModel)
     bounded_u_latents: bool = False
     generalised_u_latents: float = 1
     # --- Optional ---
@@ -347,6 +368,13 @@ class PosteriorConfig(BackendConfig):
 
     # === Model Validators ===
     # --- Before ---
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_uncertainty(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = pop_legacy_fields(data, cls._raise)
+        return data
+
     @model_validator(mode="before")
     @classmethod
     def _validate_bounds(cls, data: Any) -> Any:

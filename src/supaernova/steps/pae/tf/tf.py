@@ -6,6 +6,7 @@ from typing import (
     override,
 )
 
+import numpy as np
 from tqdm.keras import TqdmCallback
 
 from supaernova._tf import HUGE, JIT_COMPILE, clear_session, ks, tf, tfp
@@ -24,12 +25,14 @@ if TYPE_CHECKING:
 
     from supaernova.configs.steps.pae import PAEStage
     from supaernova.configs.steps.pae.tf import TFPAEConfig
+    from supaernova.configs.uncertainty import UncertaintyModel
     from supaernova.steps.pae import PAE
     from supaernova.typing.backends.tf import (
         LearningRateSchedule,
         Loss,
         TensorLike,
     )
+    from supaernova.utils.kernels import ResidualKernel
 
     type StageNum = int
 
@@ -1872,6 +1875,7 @@ class TFPAEModel(ks.Model):
         fractional_error: bool = False,
         weighted_error: bool = False,
         measurement_error: bool = False,
+        estimator: str = "ratio_of_sums",
     ) -> tuple[tf.Tensor, tf.Tensor]:
         """Reconstruction error of this PAE on its own (current stage's) data.
 
@@ -1885,6 +1889,7 @@ class TFPAEModel(ks.Model):
             fractional_error: Passed to `recon_error`.
             weighted_error: Passed to `recon_error`.
             measurement_error: Passed to `recon_error`.
+            estimator: Passed to `recon_error`.
 
         Returns:
             `(recon_error, time_bin_centers)`; `recon_error` has shape (n_wl, n_time_bins).
@@ -1913,8 +1918,96 @@ class TFPAEModel(ks.Model):
             fractional_error=fractional_error,
             weighted_error=weighted_error,
             measurement_error=measurement_error,
+            estimator=estimator,
         )
         return recon_error, centers
+
+    def residual_cube(
+        self, subset: str, min_phase: float, max_phase: float
+    ) -> dict[str, "npt.NDArray"]:
+        """The PAE's reconstruction residuals of its own data, keeping their layout.
+
+        Args:
+            subset: "train", "test" or "combined" (all of the PAE's data).
+            min_phase: The PAE's minimum phase, for normalising time.
+            max_phase: The PAE's maximum phase.
+
+        Returns:
+            ``res``, ``sigma``, ``model``, ``use`` (n_sn, n_rows, n_wl) and ``time``
+            (n_sn, n_rows), with ``use`` the spectral pixels `recon_error` measures.
+        """
+        prefix = "" if subset == "combined" else f"{subset}_"
+        stage = self.stage
+        data = getattr(stage, f"{prefix}data")
+        mask = np.asarray(getattr(stage, f"{prefix}mask"), dtype=bool)
+        sn_mask = np.asarray(getattr(stage, f"{prefix}sn_mask"), dtype=bool)
+        spec_mask = np.asarray(getattr(stage, f"{prefix}spec_mask"), dtype=bool)
+        wl_mask = np.asarray(getattr(stage, f"{prefix}wl_mask"), dtype=bool)
+        phase = np.asarray(data.phase, dtype=np.float32)
+        time = (phase - min_phase) / (max_phase - min_phase)
+        amp = np.asarray(data.amplitude, dtype=np.float32)
+        sigma = np.asarray(data.sigma, dtype=np.float32)
+        spectra_mask = np.asarray(data.spectra_mask)
+        _, pred = self(
+            (tf.constant(time), tf.constant(amp)),
+            training=False,
+            mask=tf.constant(mask),
+            sn_mask=tf.constant(sn_mask),
+            spec_mask=tf.constant(spec_mask),
+            wl_mask=tf.constant(wl_mask),
+            wavelength=tf.constant(np.asarray(data.wavelength), tf.float32),
+            sigma=tf.constant(sigma),
+            throughput=tf.constant(np.asarray(data.throughput), tf.float32),
+            effective_wavelength=tf.constant(
+                np.asarray(data.effective_wavelength), tf.float32
+            ),
+            spectra_mask=tf.constant(spectra_mask, tf.float32),
+            phot_mask=tf.constant(np.asarray(data.phot_mask), tf.float32),
+        )
+        pred = np.asarray(pred, dtype=np.float64)
+        use = mask & sn_mask & spec_mask & wl_mask & spectra_mask.astype(bool)
+        return {
+            "res": amp.astype(np.float64) - pred,
+            "sigma": sigma.astype(np.float64),
+            "model": pred,
+            "use": use,
+            "time": time[..., 0].astype(np.float64),
+        }
+
+    def stage_residual_kernel(
+        self,
+        subset: str,
+        min_phase: float,
+        max_phase: float,
+        uncertainty: "UncertaintyModel",
+    ) -> "ResidualKernel":
+        """Fit the noise, floor and model-error kernels to held-out residuals.
+
+        Shared by the posterior (which assumes them) and the sim (which injects
+        them); cached per subset and kernel settings for the life of the model.
+
+        Args:
+            subset: "train", "test" or "combined".
+            min_phase: The PAE's minimum phase.
+            max_phase: The PAE's maximum phase.
+            uncertainty: Its numeric kernel parameters are kept fixed; ``"auto"``
+                ones are fitted.
+        """
+        from supaernova.utils.kernels import estimate_residual_kernel
+
+        key = (
+            subset,
+            repr(uncertainty.kernel.model_dump()),
+            uncertainty.model_error.time_bin,
+        )
+        cache = vars(self).setdefault("_residual_kernel_cache", {})
+        if key not in cache:
+            self.log.info(f"Estimating the residual kernel on the {subset} subset")
+            cube = self.residual_cube(subset, min_phase, max_phase)
+            cache[key] = estimate_residual_kernel(
+                cube, uncertainty, phase_range=max_phase - min_phase, log=self.log
+            )
+        return cache[key]
 
     def recon_error(
         self,
@@ -1939,6 +2032,7 @@ class TFPAEModel(ks.Model):
         fractional_error: bool = False,
         weighted_error: bool = False,
         measurement_error: bool = False,
+        estimator: str = "ratio_of_sums",
     ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
         (
             phase,
@@ -2038,6 +2132,13 @@ class TFPAEModel(ks.Model):
         model_scale2 = (
             amp_pred * amp_pred if fractional_error else tf.ones_like(amp_pred)
         )
+        if estimator == "mean_ratio" and fractional_error:
+            # main's estimator: residuals and σ divided by S = sqrt(model² + σ²)
+            # per pixel, then a weighted mean of (res² - σ²) / S²
+            scale = tf.math.maximum(tf.sqrt(amp_pred * amp_pred + d_amp * d_amp), eps)
+            error /= scale
+            meas_error = meas_error / scale
+            model_scale2 = tf.ones_like(amp_pred)
         if not measurement_error:
             meas_error *= 0
 

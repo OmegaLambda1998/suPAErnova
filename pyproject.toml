@@ -34,6 +34,9 @@ tf-rocm = ["tensorflow_rocm>=2.19,<2.20"]
 tf-cuda = ["tensorflow[and-cuda]>=2.19,<2.20"]
 
 [dependency-groups]
+# Tests need a TensorFlow backend too; run them from suPAErnova_redux, whose venv
+# has one: `uv run --no-sync --with pytest python -m pytest ../suPAErnova/tests`
+dev = ["pytest"]
 
 [build-system]
 requires = ["uv_build"]
@@ -66,3 +69,7 @@ name = "tf_keras"
 
 [[tool.uv.dependency-metadata]]
 name = "tf_keras_nightly"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: takes more than a few seconds"]

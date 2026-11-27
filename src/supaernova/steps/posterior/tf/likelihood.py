@@ -217,3 +217,56 @@ def epoch_log_likelihood(
     ll = -0.5 * (quad + logdet + n_data * math.log(2 * math.pi))
     ll = tf.where(finite, ll, tf.constant(math.nan, dtype=dt))
     return ll, n_data
+
+
+def independent_log_likelihood(
+    *,
+    model: tf.Tensor,
+    model_error: tf.Tensor,
+    band_model_error: tf.Tensor,
+    spec_pixels: tf.Tensor,
+    spec_flux: tf.Tensor,
+    spec_variance: tf.Tensor,
+    band_active: tf.Tensor | None,
+    band_flux: tf.Tensor | None,
+    band_variance: tf.Tensor | None,
+    band_weights: tf.Tensor | None,
+    coherent: bool,
+) -> tuple[tf.Tensor, tf.Tensor]:
+    """Every datum an independent Gaussian (the `main` branch's likelihood).
+
+    A spectral pixel has variance ``σ² + e²``. A band's model error is the
+    model error ``e_b`` (``band_model_error``) of the pixels it integrates, either
+    fully coherent within the band, ``(Σ_i g_i e_i)²``, or independent per pixel,
+    ``Σ_i g_i² e_i²``; bands are independent of each other and of any spectrum at
+    the same epoch.
+
+    Takes the arguments of `epoch_log_likelihood` (minus ``correlation`` and
+    ``joint``) and returns ``(log_likelihood, n_data)`` per row likewise.
+    """
+    dt = model.dtype
+    spec = tf.cast(spec_pixels, dt)
+    e = model_error + tf.zeros_like(model)
+
+    var = tf.where(spec_pixels, spec_variance + e * e, tf.ones_like(e))
+    rho = spec * (spec_flux - model)
+    quad = _sum_wl(spec * rho * rho / var)
+    logdet = _sum_wl(spec * tf.math.log(var))
+    n_data = _sum_wl(spec) + tf.zeros_like(quad)
+
+    n_f = 0 if band_weights is None else int(band_weights.shape[-1])
+    if n_f > 0:
+        act = tf.cast(band_active, dt)
+        e_b = band_model_error + tf.zeros_like(model)
+        if coherent:
+            band_e2 = tf.square(_project(e_b, band_weights))
+        else:
+            band_e2 = _project(e_b * e_b, band_weights * band_weights)
+        s2 = tf.where(band_active, band_variance + band_e2, tf.ones_like(band_e2))
+        rho_b = act * (band_flux - _project(model, band_weights))
+        quad += tf.reduce_sum(rho_b * rho_b / s2, axis=-1)
+        logdet += tf.reduce_sum(act * tf.math.log(s2), axis=-1)
+        n_data += tf.reduce_sum(act, axis=-1)
+
+    ll = -0.5 * (quad + logdet + n_data * math.log(2 * math.pi))
+    return ll, n_data

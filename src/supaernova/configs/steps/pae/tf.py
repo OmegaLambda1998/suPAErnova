@@ -1,6 +1,6 @@
-from typing import Any, Concatenate, cast, override
-from functools import cached_property
 from collections.abc import Callable
+from functools import cached_property
+from typing import Any, Concatenate, cast, override
 
 from pydantic import PositiveFloat, computed_field
 
@@ -8,8 +8,12 @@ from supaernova._tf import ks, tf
 from supaernova.steps.pae.tf import (
     loss as snpae_losses,
 )
-from supaernova.utils.validation import ConfigInputObject, validate_object
 from supaernova.typing.backends.tf import Loss, LossFunc
+from supaernova.utils.validation import (
+    ConfigInputObject,
+    validate_named_function,
+    validate_object,
+)
 
 from .pae import PAEConfig
 
@@ -19,7 +23,12 @@ ActivationObject = Callable[[tf.Tensor], tf.Tensor]
 def validate_activation(
     activation: ConfigInputObject[ActivationObject],
 ) -> ActivationObject:
-    return validate_object(activation, dummy_obj=tf.nn.relu, mod=tf.nn)
+    # Any `tf.nn` or Keras activation by name (e.g. "relu", "silu", "gelu",
+    # "softplus"); smooth ones keep the posterior differentiable everywhere,
+    # which HMC needs (ReLU kinks force small leapfrog steps).
+    return validate_named_function(
+        activation, dummy_obj=tf.nn.relu, mods=(tf.nn, ks.activations)
+    )
 
 
 RegulariserObject = type[ks.regularizers.Regularizer] | Callable[[tf.Tensor], tf.Tensor]

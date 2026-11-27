@@ -122,14 +122,37 @@ def effective_indices(
 
 
 def calibrate_sigma(
-    sigma_raw: "npt.NDArray[np.floating]", sigma_scale: float, sigma_floor: float
+    sigma_raw: "npt.NDArray[np.floating]",
+    sigma_scale: float,
+    sigma_floor: float,
+    floor_mode: str = "linear",
 ) -> "npt.NDArray[np.float64]":
     """The single measurement-uncertainty calibration applied to every datum.
 
     Returns:
-        ``sigma_scale * sigma_raw + sigma_floor``.
+        ``sigma_scale * sigma_raw + sigma_floor`` (``floor_mode = "linear"``), or
+        ``sqrt((sigma_scale * sigma_raw)² + sigma_floor²)`` (``"quadrature"``).
     """
-    return sigma_scale * np.asarray(sigma_raw, dtype=np.float64) + sigma_floor
+    scaled = sigma_scale * np.asarray(sigma_raw, dtype=np.float64)
+    if floor_mode == "quadrature":
+        return np.sqrt(scaled * scaled + sigma_floor * sigma_floor)
+    return scaled + sigma_floor
+
+
+def uncalibrate_sigma(
+    sigma: "npt.NDArray[np.floating]",
+    sigma_scale: float,
+    sigma_floor: float,
+    floor_mode: str = "linear",
+) -> "npt.NDArray[np.float64]":
+    """Invert `calibrate_sigma`, recovering the reported σ (clipped at 0)."""
+    sigma = np.asarray(sigma, dtype=np.float64)
+    if floor_mode == "quadrature":
+        return (
+            np.sqrt(np.maximum(sigma * sigma - sigma_floor * sigma_floor, 0.0))
+            / sigma_scale
+        )
+    return np.maximum(sigma - sigma_floor, 0.0) / sigma_scale
 
 
 def build_rows(
@@ -146,6 +169,7 @@ def build_rows(
     band_sigma: "npt.NDArray[np.floating]",
     sigma_scale: float = 1.0,
     sigma_floor: float = 0.0,
+    floor_mode: str = "linear",
     allow_shared_epochs: bool = True,
     min_rows: int = 1,
 ) -> dict[str, "npt.NDArray"]:
@@ -164,6 +188,7 @@ def build_rows(
         band_sigma: ``(n_sn, n_ep, n_f)``, raw (uncalibrated) band 1σ.
         sigma_scale: Multiplicative uncertainty calibration.
         sigma_floor: Additive uncertainty calibration.
+        floor_mode: How the floor combines with the scaled σ (see `calibrate_sigma`).
         allow_shared_epochs: If False, an epoch observed both as a spectrum and
             in any band raises, because its bands would be derived from (and
             share the noise of) that spectrum.
@@ -265,7 +290,9 @@ def build_rows(
             )
             ew[..., k, b] = ob.astype(np.float64)
 
-    sigma = np.where(mask, calibrate_sigma(sigma_raw, sigma_scale, sigma_floor), 0.0)
+    sigma = np.where(
+        mask, calibrate_sigma(sigma_raw, sigma_scale, sigma_floor, floor_mode), 0.0
+    )
     amplitude = np.where(mask, amplitude, 0.0)
 
     # Per-SN epoch id, shared by a spectrum row and photometry row of one epoch

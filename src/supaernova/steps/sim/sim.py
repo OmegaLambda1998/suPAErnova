@@ -17,16 +17,19 @@ from supaernova.configs.steps.sim import (
     SimStepConfig,
     SimStepResult,
 )
+from supaernova.configs.uncertainty import check_consistent
 from supaernova.steps import Step
 from supaernova.steps.data import DataStep
 from supaernova.steps.variants import Variant
 from supaernova.utils import resolve_path
+from supaernova.utils.kernels import band_noise_sigma, draw_correlated
 from supaernova.utils.observations import (
     band_weights,
     build_rows,
     effective_indices,
     gather_rows,
     integrate_bands,
+    uncalibrate_sigma,
 )
 from supaernova.utils.photometry import Filter
 
@@ -39,6 +42,7 @@ if TYPE_CHECKING:
     from supaernova.configs.steps.pae import PAEStepResult
     from supaernova.steps.nflow import NFlowModel
     from supaernova.steps.pae import PAEModel
+    from supaernova.utils.kernels import ResidualKernel
 
 
 class Sim(Step[SimConfig]):
@@ -152,6 +156,8 @@ class Sim(Step[SimConfig]):
         self.pae_max_phase: float = pae.max_phase
         self.real_data = data
         # Simulated uncertainties get the same calibration as the real data's
+        self.uncertainty = self.options.uncertainty
+        check_consistent(self.uncertainty, data.uncertainty, what="sim's data step")
         self.sigma_scale: float = data.sigma_scale
         self.sigma_floor: float = data.sigma_floor
 
@@ -245,12 +251,17 @@ class Sim(Step[SimConfig]):
         eff_idx = effective_indices(
             wl, [f.effective_wavelength / (1 + filter_z) for f in self.filters]
         )
+        weights = band_weights(wl, throughput)
         band_flux, band_sigma, band_ok = integrate_bands(
-            data["model_amplitude"],
-            data["sigma"],
-            data["mask"],
-            band_weights(wl, throughput),
+            data["model_amplitude"], data["sigma"], data["mask"], weights
         )
+        if self.uncertainty.bands.noise_propagation == "kernel":
+            # Correlated pixel noise doesn't average down within a band
+            sigma0 = np.where(data["mask"], data["sigma"], 0.0)
+            noise = self.residual_kernel().term("noise")["wavelength"]
+            band_sigma = np.where(
+                band_ok, band_noise_sigma(sigma0, weights, noise), 0.0
+            )
         band_obs = band_ok.copy()
 
         phot_cadence = {
@@ -281,15 +292,25 @@ class Sim(Step[SimConfig]):
         Returns:
             ε, with the shape of `model` (zeros if `inject_recon_error` is off).
         """
-        if not self.options.inject_recon_error:
+        u = self.uncertainty
+        if not u.sim.inject:
             return np.zeros_like(model)
+        if u.correlation.mode == "kernel":
+            return self.kernel_model_error_draw(model, time)
+        if u.correlation.mode != "epoch" or u.model_error.scale == "model_and_noise":
+            msg = (
+                "Injecting model error is not implemented for correlation.mode = "
+                f"{u.correlation.mode!r}, model_error.scale = {u.model_error.scale!r}"
+            )
+            raise NotImplementedError(msg)
         recon_error, centers = self.pae.stage_recon_error(
-            self.options.reconstruction_error,
+            u.model_error.subset,
             self.pae_min_phase,
             self.pae_max_phase,
-            fractional_error=self.options.fractional_error,
-            weighted_error=self.options.weighted_error,
-            measurement_error=self.options.measurement_error,
+            fractional_error=u.model_error.scale != "constant",
+            weighted_error=u.model_error.weighted,
+            measurement_error=u.model_error.subtract_noise,
+            estimator=u.model_error.estimator,
         )
         recon_error = np.asarray(recon_error, dtype=np.float64)
         centers = np.asarray(centers, dtype=np.float64)
@@ -301,9 +322,9 @@ class Sim(Step[SimConfig]):
             ],
             axis=-1,
         )
-        scale = np.abs(model) if self.options.fractional_error else 1.0
+        scale = np.abs(model) if u.model_error.scale == "model" else 1.0
         e = sigma_recon * scale
-        f = self.options.recon_correlation
+        f = u.correlation.rho
         independent = self.rng.normal(size=e.shape)
         coherent = self.rng.normal(size=(*e.shape[:2], 1))
         eps = np.sqrt(1 - f) * e * independent + np.sqrt(f) * e * coherent
@@ -312,6 +333,67 @@ class Sim(Step[SimConfig]):
             f"{np.median(np.abs(eps[model > 0] / model[model > 0])):.3g}"
         )
         return np.where(np.isfinite(time), eps, 0.0)
+
+    def residual_kernel(self) -> "ResidualKernel":
+        """The PAE's fitted noise / floor / model-error kernels (kernel mode)."""
+        cache = vars(self)
+        if "_residual_kernel" not in cache:
+            subset = self.uncertainty.model_error.subset
+            # A sim has no subset of its own to match, so use all of the PAE's data
+            subset = "combined" if subset == "match" else subset
+            cache["_residual_kernel"] = self.pae.stage_residual_kernel(
+                subset, self.pae_min_phase, self.pae_max_phase, self.uncertainty
+            )
+        return cache["_residual_kernel"]
+
+    def kernel_model_error_draw(
+        self, model: "npt.NDArray[np.float64]", time: "npt.NDArray[np.float64]"
+    ) -> "npt.NDArray[np.float64]":
+        """Draw the kernel-mode model error and floor, correlated in λ and between epochs.
+
+        ε = e ⊙ η_m + f η_f with e = r(λ, t)·|model|, Cov(η) = K_λ ⊗ K_t per SN.
+
+        Returns:
+            ε, with the shape of `model`; zero on rows that aren't epochs.
+        """
+        rk = self.residual_kernel()
+        t = np.where(np.isfinite(time[..., 0]), time[..., 0], rk.centers[0])
+        r = np.stack(
+            [
+                np.interp(t, rk.centers, rk.r_table[k])
+                for k in range(rk.r_table.shape[0])
+            ],
+            axis=-1,
+        )
+        scale = (
+            np.abs(model) if self.uncertainty.model_error.scale != "constant" else 1.0
+        )
+        rows = np.isfinite(time[..., 0])
+        days = t * (self.pae_max_phase - self.pae_min_phase)
+        model_term = rk.term("model")
+        eps = draw_correlated(
+            self.rng,
+            r * scale,
+            model_term["wavelength"],
+            model_term["time"],
+            days,
+            rows,
+        )
+        if rk.f > 0:
+            floor_term = rk.term("floor")
+            eps += draw_correlated(
+                self.rng,
+                np.full_like(model, rk.f),
+                floor_term["wavelength"],
+                floor_term["time"],
+                days,
+                rows,
+            )
+        self.log.debug(
+            f"Injected kernel model error: median |ε / model| = "
+            f"{np.median(np.abs(eps[model > 0] / model[model > 0])):.3g}"
+        )
+        return np.where(rows[..., None], eps, 0.0)
 
     def sample_physical_latents(self) -> "npt.NDArray[np.float64]":
         """Draw each simulated SN's ΔM and Δp.
@@ -359,15 +441,48 @@ class Sim(Step[SimConfig]):
         data = self.spectra
         n_f = len(self.filters)
         pixel_valid = data["mask"] & (data["sigma"] > 0)
-        spec_flux = data["amplitude"] + self.rng.normal(
-            np.zeros_like(data["amplitude"]), np.where(pixel_valid, data["sigma"], 0.0)
-        )
         band_obs = data["band_obs"] & data["phot_mask"][..., :1].astype(bool)
-        band_flux = data["band_amplitude"] + self.rng.normal(
-            np.zeros_like(data["band_amplitude"]),
-            np.where(band_obs, data["band_sigma"], 0.0),
-        )
+        sim_u = self.uncertainty.sim
+        noise_scale = 1.0
+        if self.uncertainty.correlation.mode == "kernel":
+            # Reported σ stay raw; the noise is a·σ, correlated between pixels
+            rk = self.residual_kernel()
+            noise_scale = rk.a
+            noise = draw_correlated(
+                self.rng,
+                np.where(pixel_valid, rk.a * data["sigma"], 0.0),
+                rk.term("noise")["wavelength"],
+                None,
+                np.zeros(pixel_valid.shape[:2]),
+                pixel_valid.any(axis=-1),
+            )
+            spec_flux = data["amplitude"] + noise
+        else:
+            spec_flux = data["amplitude"] + self.rng.normal(
+                np.zeros_like(data["amplitude"]),
+                np.where(pixel_valid, data["sigma"], 0.0),
+            )
+        if sim_u.bands == "from_noisy_spectrum" and n_f > 0:
+            # Bands integrate the noisy spectrum, so share its noise (main)
+            band_flux, _, _ = integrate_bands(
+                spec_flux,
+                data["sigma"],
+                pixel_valid,
+                band_weights(data["wavelength"][0, 0], self.filter_throughput),
+            )
+        else:
+            band_flux = data["band_amplitude"] + self.rng.normal(
+                np.zeros_like(data["band_amplitude"]),
+                np.where(band_obs, noise_scale * data["band_sigma"], 0.0),
+            )
         band_obs &= data["band_sigma"] > 0
+        # σ fitted to calibrated data is already calibrated
+        calibration = self.uncertainty.calibration
+        row_scale, row_floor = (
+            (1.0, 0.0)
+            if sim_u.noise_fit == "calibrated"
+            else (calibration.scale, calibration.floor)
+        )
 
         rows = build_rows(
             wavelength=data["wavelength"][0, 0],
@@ -380,8 +495,9 @@ class Sim(Step[SimConfig]):
             band_obs=band_obs if n_f > 0 else np.zeros((*band_obs.shape[:2], 0), bool),
             band_flux=band_flux,
             band_sigma=data["band_sigma"],
-            sigma_scale=self.sigma_scale,
-            sigma_floor=self.sigma_floor,
+            sigma_scale=row_scale,
+            sigma_floor=row_floor,
+            floor_mode=calibration.floor_mode,
             # Simulated bands get their own noise, like real imaging, so an epoch may
             # be observed both ways
             allow_shared_epochs=True,
@@ -585,9 +701,14 @@ class Sim(Step[SimConfig]):
         # The raw (uncalibrated) σ of real *spectral* pixels: photometry rows hold
         # band, not pixel, uncertainties
         real_amp2 = np.square(real_data.amplitude.astype(np.float64))
-        real_sigma2 = np.square(
-            (real_data.sigma.astype(np.float64) - self.sigma_floor) / self.sigma_scale
-        )
+        calibration = self.uncertainty.calibration
+        real_sigma = real_data.sigma.astype(np.float64)
+        if self.uncertainty.sim.noise_fit == "raw":
+            # Simulate the reported σ; `build_rows` then calibrates it like the data's
+            real_sigma = uncalibrate_sigma(
+                real_sigma, calibration.scale, calibration.floor, calibration.floor_mode
+            )
+        real_sigma2 = np.square(real_sigma)
         valid = (
             data_mask.astype(bool) & np.isfinite(real_amp2) & np.isfinite(real_sigma2)
         )
@@ -897,6 +1018,7 @@ class Sim(Step[SimConfig]):
         # Simulated σ were calibrated like the real data's
         results["sigma_scale"] = self.sigma_scale
         results["sigma_floor"] = self.sigma_floor
+        results["uncertainty"] = self.uncertainty.model_dump()
         self.results = SimStepResult.model_validate(results)
 
     @override

@@ -8,9 +8,7 @@ from numpy import typing as npt
 from pydantic import (
     AfterValidator,
     Field,
-    NonNegativeFloat,
     NonNegativeInt,
-    PositiveFloat,
     PositiveInt,
     field_validator,
     model_validator,
@@ -19,6 +17,7 @@ from pydantic import (
 from supaernova.analysis.spectra import ComparisonPlot, SpectraPlot
 from supaernova.configs.steps import StepAnalysis, StepConfig, StepResult
 from supaernova.configs.steps.variants import VariantConfig
+from supaernova.configs.uncertainty import UncertaintyModel, pop_legacy_fields
 from supaernova.utils import resolve_path
 from supaernova.utils.lazy import LazyNPZ, LazyObj, LazyPydantic, LazyTuple
 
@@ -62,6 +61,10 @@ class SNPAEData(StepResult):
     # row of the same epoch share an id. Missing from data made before epochs
     # existed, in which case every row is its own epoch.
     epoch: npt.NDArray[np.int64] | None = None
+    # On a synthetic-photometry row, the pixel σ of the spectrum its bands were
+    # integrated from (zero elsewhere), so band σ can be rebuilt with a correlated
+    # noise kernel once it is known (`uncertainty.bands.noise_propagation = "kernel"`)
+    band_source_sigma: npt.NDArray[np.float64] | None = None
     # === Model Validators ===
     # --- Before ---
     # --- After ---
@@ -108,10 +111,12 @@ class DataStepResult(StepResult):
     wl_dim: int
 
     # --- Optional ---
-    # Measurement-uncertainty calibration applied to every datum:
-    #   sigma = sigma_scale * sigma_raw + sigma_floor
+    # Measurement-uncertainty calibration applied to every datum (kept for results
+    # saved before `uncertainty`; it mirrors `uncertainty.calibration`)
     sigma_scale: float = 1.0
     sigma_floor: float = 0.0
+    # The resolved uncertainty model this data was built with
+    uncertainty: dict[str, Any] | None = None
     # === Model Validators ===
     # --- Before ---
     # --- After ---
@@ -167,11 +172,10 @@ class DataConfig(StepConfig):
     spec_offset: NonNegativeInt = 0
     phot_every: PositiveInt | None = None
     phot_offset: NonNegativeInt = 0
-    # Measurement-uncertainty calibration, applied identically to every datum
-    # (spectral pixels, synthetic bands, file photometry) and, through the sim's
-    # data step, to simulated data: sigma = sigma_scale * sigma_raw + sigma_floor.
-    sigma_scale: PositiveFloat = 1.0
-    sigma_floor: NonNegativeFloat = 0.0
+    # How uncertainties are calibrated and propagated, and the model error the
+    # posterior and sims assume (see `configs/uncertainty.py`). The sims and
+    # posteriors built on this data must agree with its calibration and bands.
+    uncertainty: UncertaintyModel = Field(default_factory=UncertaintyModel)
     analysis: DataStepAnalysis | None = None
     cosmological_model: str = "WMAP7"
     salt_model: str | Path = "salt2"
@@ -184,6 +188,13 @@ class DataConfig(StepConfig):
 
     # === Model Validators ===
     # --- Before ---
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_uncertainty(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = pop_legacy_fields(data, cls._raise)
+        return data
+
     @model_validator(mode="before")
     @classmethod
     def _validate_bounds(cls, data: Any) -> Any:

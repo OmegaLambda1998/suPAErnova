@@ -3,7 +3,7 @@ import contextlib
 import json
 import shutil
 import types
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, override
 
 import numpy as np
 from tqdm import tqdm
@@ -26,14 +26,21 @@ from supaernova.steps.pae.tf.photometry import (
 from supaernova.utils.observations import epoch_bands
 
 from .hmc import PosteriorHMCValue
-from .likelihood import epoch_log_likelihood
+from .kernel_likelihood import (
+    ROW_AXES,
+    STATIC_KEYS,
+    add_constants,
+    build_kernel_structure,
+    sn_kernel_log_likelihood,
+)
+from .likelihood import epoch_log_likelihood, independent_log_likelihood
 from .map import PosteriorMap
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from logging import Logger
     from pathlib import Path
-    from typing import Any, Literal
+    from typing import Literal
 
     from numpy import typing as npt
     from tensorflow_probability.python.mcmc.dual_averaging_step_size_adaptation import (
@@ -109,6 +116,9 @@ class TFPosteriorModel(ks.Model):
         self.data_spectra_mask: npt.NDArray[np.float64] = self.data.spectra_mask
         self.data_phot_mask: npt.NDArray[np.float64] = self.data.phot_mask
         self.data_epoch: npt.NDArray[np.int64] | None = self.data.epoch
+        self.data_band_source_sigma: npt.NDArray[np.float64] | None = getattr(
+            self.data, "band_source_sigma", None
+        )
         self.data.clear()
 
         self.cached_amp: tuple[tf.Tensor, tf.Tensor] = photometry_amplitude_setup(
@@ -145,7 +155,18 @@ class TFPosteriorModel(ks.Model):
             effective_wavelength=self.data_effective_wavelength,
             epoch=self.data_epoch,
         )
-        self.band_active = tf.constant(bands["band_active"], dtype=tf.bool)
+        band_active = np.asarray(bands["band_active"], dtype=bool)
+        if self.options.uncertainty.bands.drop_partial:
+            # A filter reaching past the fitted wavelength range would be compared
+            # with a truncated model band, so drop it (main's `biased_phot`)
+            outside = np.any(
+                (np.asarray(bands["band_weights"]) > 0)
+                & ~np.asarray(self.wl_mask, dtype=bool)[..., None],
+                axis=-2,
+            )
+            band_active &= ~outside
+        bands["band_active"] = band_active
+        self.band_active = tf.constant(band_active, dtype=tf.bool)
         self.band_flux = tf.constant(bands["band_flux"], dtype=tf.float32)
         self.band_variance = tf.constant(
             np.square(bands["band_sigma"]), dtype=tf.float32
@@ -159,7 +180,15 @@ class TFPosteriorModel(ks.Model):
         self.joint_rows: bool = bool(
             np.any(spec_rows & np.any(bands["band_active"], axis=-1))
         )
-        self.recon_correlation: float = self.options.recon_correlation
+        self.uncertainty = self.options.uncertainty
+        self.recon_correlation: float = self.uncertainty.correlation.rho
+
+        # Kernel-mode structure: per-(SN, row) arrays are gathered with the rest
+        # of the data (`kernel_row_attrs`), the rest is static
+        self.kernel_row_attrs: tuple[str, ...] = ()
+        self.kernel_static: dict[str, Any] = {}
+        if self.uncertainty.correlation.mode == "kernel":
+            self._setup_kernel(config, bands)
 
         self.data_time[~self.spec_mask] = -HUGE
         self.data_amplitude[~self.data_mask] = -HUGE
@@ -192,8 +221,14 @@ class TFPosteriorModel(ks.Model):
         self.log_likelihood_spec_sum = self.options.log_likelihood_spec_sum
         self.log_likelihood_sum = self.options.log_likelihood_sum
         self.step_size_scale = self.options.step_size_scale
-        self.fractional_error = self.options.fractional_error
-        self.weighted_error = self.options.weighted_error
+        self.hessian_step_fraction = self.options.hessian_step_fraction
+        self.hessian_preconditioner = self.options.hessian_preconditioner
+        # (shift, chol) of the dense-Hessian whitening while sampling, else
+        # None. Set through vars() so Keras does not track them as layers.
+        vars(self)["_hmc_whitening"] = None
+        vars(self)["_hmc_chol"] = None
+        self.fractional_error = self.uncertainty.model_error.scale != "constant"
+        self.weighted_error = self.uncertainty.model_error.weighted
 
         # MAP Variables
         self.map: PosteriorMap
@@ -253,6 +288,15 @@ class TFPosteriorModel(ks.Model):
         self.n_adaption_steps: int = self.options.n_adaption_steps
         if isinstance(self.n_adaption_steps, float):
             self.n_adaption_steps = int(self.n_run_steps * self.n_adaption_steps)
+
+        metric_fraction = float(self.options.metric_adaption_fraction)
+        if not 0 <= metric_fraction < 1:
+            msg = f"metric_adaption_fraction must be in [0, 1), got {metric_fraction}"
+            raise ValueError(msg)
+        # Steps of the adaption budget spent before re-whitening ("metric"
+        # phase); the rest is the "adaption" phase proper.
+        self.n_metric_steps: int = round(metric_fraction * self.n_adaption_steps)
+        self.metric_adaption_discard: float = float(self.options.metric_adaption_discard)
 
         self.max_samples: int = int(
             max_leapfrog_adaption * self.n_adaption_steps
@@ -481,46 +525,83 @@ class TFPosteriorModel(ks.Model):
         else:
             sigma_recon = self.sigma_recon
 
-        # Per-pixel model-error amplitude e = σ_recon · scale, with the scale the
-        # model amplitude itself (identical for spectra and photometry, data and sims)
-        scale = tf.abs(synth_amp) if self.fractional_error else tf.ones_like(synth_amp)
+        # Per-pixel model-error amplitude e = σ_recon · scale. The scale is the model
+        # amplitude itself ("model", identical for spectra and photometry, data and
+        # sims), √(model² + σ²) ("model_and_noise", main), or 1 ("constant")
+        error_scale = self.uncertainty.model_error.scale
+        abs_model = tf.abs(synth_amp)
+        if error_scale == "constant":
+            scale = tf.ones_like(synth_amp)
+        elif error_scale == "model_and_noise":
+            # On main a band's pixels sat in a photometry row with σ = 0 off its
+            # effective bin, so bands keep scale |model|
+            scale = tf.sqrt(synth_amp * synth_amp + input_sigma * input_sigma)
+        else:
+            scale = abs_model
         model_error = sigma_recon * scale
+        band_model_error = (
+            sigma_recon * abs_model if error_scale == "model_and_noise" else model_error
+        )
 
         # Sanitise masked entries so they can't leak inf / nan into gradients
         spec_flux = tf.where(spec_pixels, input_amp, tf.zeros_like(input_amp))
         spec_variance = tf.where(
             spec_pixels, input_sigma * input_sigma, tf.ones_like(input_sigma)
         )
-        log_likelihood_spec, n_data = epoch_log_likelihood(
-            model=synth_amp,
-            model_error=model_error,
-            correlation=self.recon_correlation,
-            spec_pixels=spec_pixels,
-            spec_flux=spec_flux,
-            spec_variance=spec_variance,
-            band_active=band_active,
-            band_flux=self.band_flux if band_active is not None else None,
-            band_variance=self.band_variance if band_active is not None else None,
-            band_weights=self.band_weights if band_active is not None else None,
-            joint=self.joint_rows,
-        )
+        band_args = {
+            "band_active": band_active,
+            "band_flux": self.band_flux if band_active is not None else None,
+            "band_variance": self.band_variance if band_active is not None else None,
+            "band_weights": self.band_weights if band_active is not None else None,
+        }
+        mode = self.uncertainty.correlation.mode
+        if mode == "epoch":
+            log_likelihood_spec, n_data = epoch_log_likelihood(
+                model=synth_amp,
+                model_error=model_error,
+                correlation=self.recon_correlation,
+                spec_pixels=spec_pixels,
+                spec_flux=spec_flux,
+                spec_variance=spec_variance,
+                joint=self.joint_rows,
+                **band_args,
+            )
+        elif mode == "independent":
+            log_likelihood_spec, n_data = independent_log_likelihood(
+                model=synth_amp,
+                model_error=model_error,
+                band_model_error=band_model_error,
+                spec_pixels=spec_pixels,
+                spec_flux=spec_flux,
+                spec_variance=spec_variance,
+                coherent=self.uncertainty.correlation.band_coherence == "coherent",
+                **band_args,
+            )
+        else:  # kernel: one Gaussian per SN, so already reduced over rows
+            log_likelihood_sn, n_data_sn = self._kernel_log_likelihood(
+                synth_amp, model_error, mask_spec
+            )
 
-        if self.log_likelihood_spec_sum:
-            log_likelihood_spec /= tf.math.maximum(n_data, 1)
-
-        log_likelihood_num = tf.reduce_sum(
-            tf.where(
-                mask_spec,
-                log_likelihood_spec,
-                tf.zeros_like(log_likelihood_spec),
-            ),
-            axis=-1,
-        )
+        if mode == "kernel":
+            log_likelihood_num = log_likelihood_sn
+            if self.log_likelihood_spec_sum:
+                log_likelihood_num /= tf.math.maximum(n_data_sn, 1)
+        else:
+            if self.log_likelihood_spec_sum:
+                log_likelihood_spec /= tf.math.maximum(n_data, 1)
+            log_likelihood_num = tf.reduce_sum(
+                tf.where(
+                    mask_spec,
+                    log_likelihood_spec,
+                    tf.zeros_like(log_likelihood_spec),
+                ),
+                axis=-1,
+            )
         log_likelihood_sum = tf.math.maximum(
             tf.math.count_nonzero(
                 mask_spec,
                 axis=-1,
-                dtype=log_likelihood_spec.dtype,
+                dtype=synth_amp.dtype,
             ),
             1,
         )
@@ -632,6 +713,216 @@ class TFPosteriorModel(ks.Model):
         if not hasattr(self, "map"):
             vars(self)["map"] = PosteriorMap(self)
 
+    def _setup_kernel(self, config: "Posterior", bands: dict[str, Any]) -> None:
+        """Precompute the kernel likelihood's model-independent structure.
+
+        Every per-SN array is compacted once to the SN's valid rows (valid rows
+        first, in order, as `_repacked_to_valid_spec` orders them) and holds the
+        precomputed time kernels and floor blocks, so a call only gathers the
+        model's rows. These arrays are gathered over SNs only.
+        """
+        rk = config.residual_kernel[self.subset]
+        kernel = self.uncertainty.kernel
+        spec_pixels = (
+            np.asarray(self.data_mask, dtype=bool)
+            & np.asarray(self.sn_mask, dtype=bool)
+            & np.asarray(self.spec_mask, dtype=bool)
+            & np.asarray(self.wl_mask, dtype=bool)
+            & np.asarray(self.data_spectra_mask, dtype=bool)
+            & (np.asarray(self.data_sigma) > 0)
+        )
+        n_f = self.n_filters
+        struct = build_kernel_structure(
+            rk=rk,
+            uncertainty=self.uncertainty,
+            amplitude=np.asarray(self.data_amplitude),
+            sigma=np.asarray(self.data_sigma),
+            spec_pixels=spec_pixels,
+            band_active=bands["band_active"] if n_f else None,
+            band_flux=bands["band_flux"] if n_f else None,
+            band_sigma=bands["band_sigma"] if n_f else None,
+            band_weights=bands["band_weights"] if n_f else None,
+            band_source_sigma=self.data_band_source_sigma,
+        )
+        row_valid = spec_pixels.any(axis=-1)
+        if n_f:
+            row_valid |= np.asarray(bands["band_active"], dtype=bool).any(axis=-1)
+        self.kernel_rows = max(int(row_valid.sum(axis=-1).max()), 1)
+        perm = np.argsort(~row_valid, axis=-1, kind="stable")[:, : self.kernel_rows]
+
+        def compact(x):
+            x = np.asarray(x)
+            idx = perm.reshape(perm.shape + (1,) * (x.ndim - 2))
+            return np.take_along_axis(x, idx, axis=1)
+
+        self.kernel_phase_range = float(self.max_phase - self.min_phase)
+        days = np.asarray(self.data_time, dtype=np.float64)[..., 0]
+        days = np.where(np.isfinite(days), days, 0.0) * self.kernel_phase_range
+        static = {k: v for k, v in struct.items() if k in STATIC_KEYS}
+        arrays = {k: compact(v) for k, v in struct.items() if k not in STATIC_KEYS}
+        arrays["days"] = compact(days)
+        arrays["row_valid"] = compact(row_valid)
+        arrays = add_constants(
+            {**arrays, **static},
+            arrays["days"],
+            arrays["row_valid"],
+            time_modes=kernel.time_modes,
+        )
+
+        dtype = tf.float32 if kernel.dtype == "float32" else tf.float64
+        static["dtype"] = dtype
+        static["local_time"] = kernel.local_time
+        self.kernel_static = static
+        names = []
+        for key, value in arrays.items():
+            if key in STATIC_KEYS:
+                continue
+            value = np.asarray(value)
+            tf_dtype = tf.bool if value.dtype == bool else dtype
+            setattr(self, f"kernel_{key}", tf.constant(value, dtype=tf_dtype))
+            names.append(f"kernel_{key}")
+        self.kernel_row_attrs = tuple(names)
+
+        def likelihood(model, model_error, struct_rows):
+            return sn_kernel_log_likelihood(
+                model=model,
+                model_error=model_error,
+                days=struct_rows["days"],
+                row_valid=struct_rows["row_valid"],
+                struct={**struct_rows, **static},
+                jitter=kernel.jitter,
+            )
+
+        self._kernel_fn = tf.function(likelihood, jit_compile=kernel.jit)
+        # Cheaper MAP-search likelihood (`map_search_local_time = false`):
+        # chosen at run time by `_kernel_search` (a variable, so graphs traced
+        # during the search need no retrace once it is switched off)
+        self._kernel_fn_search = None
+        vars(self)["_kernel_search"] = tf.Variable(False, trainable=False)
+        if kernel.local_time and not config.options.map_search_local_time:
+            static_search = {**static, "local_time": False}
+
+            def likelihood_search(model, model_error, struct_rows):
+                return sn_kernel_log_likelihood(
+                    model=model,
+                    model_error=model_error,
+                    days=struct_rows["days"],
+                    row_valid=struct_rows["row_valid"],
+                    struct={**struct_rows, **static_search},
+                    jitter=kernel.jitter,
+                )
+
+            self._kernel_fn_search = tf.function(
+                likelihood_search, jit_compile=kernel.jit
+            )
+        self.log.info(
+            f"Kernel likelihood: up to {self.kernel_rows} epochs per SN, "
+            f"{static['n_sp']} super-pixels of {static['bin_width']} px, "
+            f"{static['modes_model'].shape[-1]} model-error modes, "
+            f"{kernel.dtype}{' + XLA' if kernel.jit else ''}"
+        )
+
+    def _kernel_plan(
+        self, n_keep: int, n_walkers: int, n_sn: int
+    ) -> list[tuple["np.ndarray", int, int, dict[str, tf.Tensor]]]:
+        """Bucket SNs by epoch count and slice the structure arrays once per bucket.
+
+        Cost grows as rows², and most SNs have far fewer epochs than the largest, so
+        each bucket (epoch count rounded up to a multiple of 4) is evaluated at its
+        own row count, in equal chunks (a short last chunk is padded with a repeated
+        SN and trimmed), so XLA compiles one shape per bucket. The slices are cached
+        per SN set (the structure arrays change only when a context gathers SNs).
+
+        Returns:
+            ``(sn indices, n real SNs, rows, structure slices)`` per chunk.
+        """
+        key = (id(self.kernel_row_valid), n_keep, n_walkers, n_sn)
+        cache = vars(self).setdefault("_kernel_plan_cache", {})
+        # Keyed on the SN set's validity tensor itself (ids can be reused)
+        if key in cache and cache[key][0] is self.kernel_row_valid:
+            return cache[key][1]
+        counts = np.asarray(self.kernel_row_valid).sum(axis=-1)
+        counts = np.minimum(np.maximum(counts, 1), n_keep)
+        sizes = np.minimum(-(-counts // 4) * 4, n_keep)
+        n_sp = self.kernel_static["n_sp"]
+        n_modes = max(self.kernel_static["modes_model"].shape[-1], 1)
+        struct = {
+            name[len("kernel_") :]: getattr(self, name)
+            for name in self.kernel_row_attrs
+        }
+        plan = []
+        for size in np.unique(sizes):
+            size = int(size)
+            idx = np.flatnonzero(sizes == size)
+            chunk = self.uncertainty.kernel.sn_batch or max(
+                1, int(2e7 // max(n_walkers * n_sp * size * size * 2 * n_modes, 1))
+            )
+            chunk = min(chunk, idx.size)
+            for start in range(0, idx.size, chunk):
+                take = idx[start : start + chunk]
+                n_real = take.size
+                if n_real < chunk:  # pad to the bucket's chunk shape
+                    take = np.concatenate([take, np.repeat(take[-1:], chunk - n_real)])
+                sub = {}
+                # Eagerly, even while a graph is traced, so the slices are
+                # constants any later trace can capture
+                with tf.init_scope():
+                    for key_, value in struct.items():
+                        value = tf.gather(value, take, axis=0)
+                        for axis in ROW_AXES.get(key_, ()):
+                            value = tf.gather(value, tf.range(size), axis=axis)
+                        sub[key_] = value
+                plan.append((take, n_real, size, sub))
+        cache[key] = (self.kernel_row_valid, plan)
+        return plan
+
+    def _kernel_log_likelihood(
+        self, synth_amp: tf.Tensor, model_error: tf.Tensor, row_valid: tf.Tensor
+    ) -> tuple[tf.Tensor, tf.Tensor]:
+        """Per-SN kernel log-likelihood, on each SN's valid rows (compacted)."""
+        n_keep = min(self.kernel_rows, int(row_valid.shape[-1]))
+        perm = tf.argsort(
+            tf.cast(row_valid, tf.int32), axis=-1, direction="DESCENDING", stable=True
+        )[:, :n_keep]
+        lead = tf.shape(synth_amp)[:-3]
+        perm_w = tf.broadcast_to(perm, tf.concat([lead, tf.shape(perm)], 0))
+        n_lead = len(synth_amp.shape) - 3
+        model = tf.gather(synth_amp, perm_w, axis=n_lead + 1, batch_dims=n_lead + 1)
+        error = tf.gather(model_error, perm_w, axis=n_lead + 1, batch_dims=n_lead + 1)
+
+        n_sn = int(model.shape[-3])
+        n_walkers = int(np.prod(model.shape[:-3])) if model.shape[:-3] else 1
+        plan = self._kernel_plan(n_keep, n_walkers, n_sn)
+
+        # Bucketed chunks: the structure slices are precomputed per SN set (see
+        # `_kernel_plan`), so a call only gathers the model's rows
+        order = np.concatenate([take[:n_real] for take, n_real, _, _ in plan])
+        inverse = tf.constant(np.argsort(order), dtype=tf.int32)
+
+        def evaluate(fn):
+            parts = []
+            for take, n_real, size, sub in plan:
+                take_t = tf.constant(take, dtype=tf.int32)
+                ll, n_data = fn(
+                    tf.gather(model, take_t, axis=n_lead)[..., :size, :],
+                    tf.gather(error, take_t, axis=n_lead)[..., :size, :],
+                    sub,
+                )
+                parts.append((ll[..., :n_real], n_data[..., :n_real]))
+            ll = tf.gather(tf.concat([p[0] for p in parts], axis=-1), inverse, axis=-1)
+            n_data = tf.gather(
+                tf.concat([p[1] for p in parts], axis=-1), inverse, axis=-1
+            )
+            return ll, n_data
+
+        if self._kernel_fn_search is None:
+            return evaluate(self._kernel_fn)
+        return tf.cond(
+            vars(self)["_kernel_search"],
+            lambda: evaluate(self._kernel_fn_search),
+            lambda: evaluate(self._kernel_fn),
+        )
+
     def get_mask_spec(self) -> tf.Tensor:
         """Compute the per-(sn, spec) mask.
 
@@ -701,6 +992,7 @@ class TFPosteriorModel(ks.Model):
                 "band_flux",
                 "band_variance",
                 "band_weights",
+                *self.kernel_row_attrs,
             )
             originals = {attr: getattr(self, attr) for attr in sn_attrs}
             original_cached_amp = self.cached_amp
@@ -1033,7 +1325,17 @@ class TFPosteriorModel(ks.Model):
             log_dir = savepath.parent / self.log_path / savepath.stem / "map"
             summary_writer = tf.summary.create_file_writer(str(log_dir))
 
+        search = getattr(self, "_kernel_fn_search", None) is not None and any(
+            stage.refine for stage in stages
+        )
+        if search:
+            self.log.info(
+                "MAP search with the kernel's local time correlation dropped, "
+                "then one full-likelihood refinement"
+            )
         for stage in stages:
+            if search:
+                vars(self)["_kernel_search"].assign(not stage.refine)
             for c in range(stage.n_chains):
                 self.set_seed(chain)
 
@@ -1314,6 +1616,8 @@ class TFPosteriorModel(ks.Model):
                                     step=chain,
                                 )
                 chain += 1
+        if search:
+            vars(self)["_kernel_search"].assign(False)
         self.log.info(f"Minimum found at chains:\n{self.map.chain_min}")
         if summary_writer is not None:
             summary_writer.close()
@@ -1441,9 +1745,16 @@ class TFPosteriorModel(ks.Model):
             position = self.map.constrain(results.position)
             failed = results.failed
             num_objective_evaluations = results.num_objective_evaluations
-            improved = tf.math.logical_and(
-                (objective_value < self.map.negative_log_prob), converged
-            )
+            if stage.refine:
+                # The stored best values were found with the search
+                # likelihood, so they are not comparable: accept every finite
+                # refinement (it started from the best position).
+                improved = tf.math.is_finite(objective_value)
+                converged = tf.math.logical_or(converged, improved)
+            else:
+                improved = tf.math.logical_and(
+                    (objective_value < self.map.negative_log_prob), converged
+                )
 
         final_position = self.map.get_position(self.map.unconstrain(position))
         log_prob, log_like, log_prior, _, _ = self._forward(
@@ -1930,6 +2241,7 @@ class TFPosteriorModel(ks.Model):
         pkr: "DualAveragingStepSizeAdaptationResults | None" = None,
         steps_done: int = 0,
         run_states: "list[tf.Tensor] | None" = None,
+        keep_states: "bool | None" = None,
     ) -> tuple[
         tf.Tensor,
         "DualAveragingStepSizeAdaptationResults | None",
@@ -1938,7 +2250,8 @@ class TFPosteriorModel(ks.Model):
     ]:
         traces: list[Sequence[tf.Tensor]] = []
         run_states = list(run_states) if run_states is not None else []
-        keep_states = phase == "run"
+        if keep_states is None:
+            keep_states = phase == "run"
 
         # The Python chunk loop only earns its keep when it has something to do
         # between chunks: write a resume checkpoint, or emit per-chunk
@@ -1950,7 +2263,7 @@ class TFPosteriorModel(ks.Model):
 
         # Fresh run phase (not a resume that pre-seeded run_states): drop any
         # per-chunk state shards left behind by an earlier interrupted run.
-        if keep_states and hmc_savepath is not None and not run_states:
+        if phase == "run" and hmc_savepath is not None and not run_states:
             for stale in (hmc_savepath / "run").glob("states_*.npy"):
                 stale.unlink()
 
@@ -1979,7 +2292,7 @@ class TFPosteriorModel(ks.Model):
                     state=state,
                     pkr=pkr,
                     steps_done=steps_done,
-                    latest_states=all_states if keep_states else None,
+                    latest_states=all_states if phase == "run" else None,
                     hmc_savepath=hmc_savepath,
                 )
 
@@ -2045,6 +2358,7 @@ class TFPosteriorModel(ks.Model):
             "sample_step": int(self.sample_step),
             "n_pkr_leaves": len(leaves),
             "n_adaption_steps": int(self.n_adaption_steps),
+            "n_metric_steps": int(self.n_metric_steps),
             "n_burnin_steps": int(self.n_burnin_steps),
             "n_run_steps": int(self.n_run_steps),
             "n_walkers": int(self.n_walkers),
@@ -2081,6 +2395,7 @@ class TFPosteriorModel(ks.Model):
         meta = json.loads(meta_path.read_text())
         if (
             meta.get("n_adaption_steps") != int(self.n_adaption_steps)
+            or meta.get("n_metric_steps", 0) != int(self.n_metric_steps)
             or meta.get("n_burnin_steps") != int(self.n_burnin_steps)
             or meta.get("n_run_steps") != int(self.n_run_steps)
             or meta.get("n_walkers") != int(self.n_walkers)
@@ -2091,11 +2406,7 @@ class TFPosteriorModel(ks.Model):
             )
             return None
 
-        totals = {
-            "adaption": self.n_adaption_steps,
-            "burnin": self.n_burnin_steps,
-            "run": self.n_run_steps,
-        }
+        totals = self._phase_totals()
         total = totals[meta["phase"]]
         self.log.info(
             f"Resuming HMC from {run_dir} "
@@ -2113,6 +2424,103 @@ class TFPosteriorModel(ks.Model):
             run_states = data["run_states"]
 
         return {"meta": meta, "data": data, "run_states": run_states}
+
+    def _phase_totals(self) -> dict[str, int]:
+        return {
+            "metric": self.n_metric_steps,
+            "adaption": self.n_adaption_steps - self.n_metric_steps,
+            "burnin": self.n_burnin_steps,
+            "run": self.n_run_steps,
+        }
+
+    def _rewhiten(
+        self,
+        metric_states: tf.Tensor,
+        state: tf.Tensor,
+        hmc_savepath: "Path | None",
+    ) -> tf.Tensor:
+        """Re-whiten every SN with its warm-up samples' mean and covariance.
+
+        Args:
+            metric_states: ``[n_steps, n_walkers, sn, n_params]`` warm-up
+                states in the current sampling coordinates.
+            state: the current state, ``[n_walkers, sn, n_params]``.
+            hmc_savepath: ``<savepath>/hmc`` or None; the new whitening is
+                saved to ``hmc/run/metric.npz`` for resuming.
+
+        Returns:
+            ``state`` in the new coordinates.
+        """
+        x = self._unwhiten(metric_states).numpy().astype(np.float64)
+        x_last = self._unwhiten(state).numpy().astype(np.float64)
+        n_steps, n_walkers, n_sn, n_params = x.shape
+        x = x[int(self.metric_adaption_discard * n_steps) :]
+        x = x.reshape(-1, n_sn, n_params)
+
+        if self._hmc_whitening is None:
+            old_shift = x_last.mean(axis=0)
+            old_chol = np.tile(np.eye(n_params), (n_sn, 1, 1))
+        else:
+            old_shift = self._hmc_whitening[0].numpy().astype(np.float64)[0]
+            old_chol = self._hmc_whitening[1].numpy().astype(np.float64)
+        shift = old_shift.copy()
+        chol = old_chol.copy()
+        prior = 5.0
+        updated = np.zeros(n_sn, dtype=bool)
+        width = np.full(n_sn, np.nan)
+        for s in range(n_sn):
+            xs = x[:, s]
+            xs = xs[np.all(np.isfinite(xs), axis=-1)]
+            m = len(xs)
+            if m < 2 * n_params:
+                continue
+            cov = np.cov(xs.T)
+            cov = (m * cov + prior * old_chol[s] @ old_chol[s].T) / (m + prior)
+            try:
+                new = np.linalg.cholesky(cov)
+            except np.linalg.LinAlgError:
+                continue
+            # Largest posterior width in the old coordinates
+            inv = np.linalg.inv(old_chol[s])
+            width[s] = np.sqrt(np.linalg.eigvalsh(inv @ cov @ inv.T).max())
+            shift[s] = xs.mean(axis=0)
+            chol[s] = new
+            updated[s] = True
+
+        self.log.info(
+            f"Warm-up metric adaptation: re-whitened {int(updated.sum())}/{n_sn} SNe "
+            f"from {len(x)} samples each; largest posterior width in the old "
+            f"coordinates: median {np.nanmedian(width):.2f}, max {np.nanmax(width):.2f}"
+        )
+
+        dtype = state.dtype
+        shift_w = np.broadcast_to(shift, (n_walkers, n_sn, n_params))
+        vars(self)["_hmc_whitening"] = (
+            tf.constant(shift_w, dtype=dtype),
+            tf.constant(chol, dtype=dtype),
+        )
+        if self._checkpoint_hmc and hmc_savepath is not None:
+            run_dir = hmc_savepath / "run"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            np.savez(run_dir / "metric.npz", shift=shift_w, chol=chol)
+
+        y = np.linalg.solve(chol[None], (x_last - shift_w)[..., None])[..., 0]
+        return tf.constant(y, dtype=dtype)
+
+    def _load_metric(self, hmc_savepath: "Path | None") -> bool:
+        """Restore the warm-up whitening saved by `_rewhiten`, if present."""
+        if hmc_savepath is None:
+            return False
+        path = hmc_savepath / "run" / "metric.npz"
+        if not path.exists():
+            return False
+        data = np.load(path)
+        dtype = tf.float32 if self._hmc_whitening is None else self._hmc_whitening[0].dtype
+        vars(self)["_hmc_whitening"] = (
+            tf.constant(data["shift"], dtype=dtype),
+            tf.constant(data["chol"], dtype=dtype),
+        )
+        return True
 
     def _hmc_resume_plan(
         self,
@@ -2144,6 +2552,7 @@ class TFPosteriorModel(ks.Model):
             ``run_states_seed`` (resume state for the run phase).
         """
         plan: dict[str, Any] = {
+            "skip_metric": False,
             "skip_adaption": False,
             "skip_burnin": False,
             "adaption_state": position,
@@ -2161,17 +2570,24 @@ class TFPosteriorModel(ks.Model):
             return plan
 
         meta, data = resume["meta"], resume["data"]
+        if self.n_metric_steps:
+            # The metric phase's samples are not checkpointed, so a run
+            # interrupted during it restarts; later phases sample in the
+            # re-whitened coordinates saved at its end.
+            if meta["phase"] == "metric" or not self._load_metric(hmc_savepath):
+                self.log.info(
+                    "Restarting HMC: interrupted during (or without the result "
+                    "of) warm-up metric adaptation."
+                )
+                return plan
+            plan["skip_metric"] = True
         self.hmc_step = int(meta["hmc_step"])
         self.sample_step = int(meta["sample_step"])
         self._hmc_seed = tf.constant(data["hmc_seed"], dtype=tf.int32)
         state = tf.constant(data["state"])
 
-        phase_order = ("adaption", "burnin", "run")
-        totals = {
-            "adaption": self.n_adaption_steps,
-            "burnin": self.n_burnin_steps,
-            "run": self.n_run_steps,
-        }
+        phase_order = ("metric", "adaption", "burnin", "run")
+        totals = self._phase_totals()
         done_phase_offset = sum(
             totals[p] for p in phase_order[: phase_order.index(meta["phase"])]
         )
@@ -2353,7 +2769,7 @@ class TFPosteriorModel(ks.Model):
                 tf.math.is_finite(step_size_init), step_size_init, step_size_std
             )
 
-            if self.step_size_scale == "min":
+            if self.step_size_scale in {"min", "hessian"}:
                 step_size_inner = tf.minimum(step_size_init, step_size_std)
             elif self.step_size_scale == "max":
                 step_size_inner = tf.maximum(step_size_init, step_size_std)
@@ -2370,6 +2786,12 @@ class TFPosteriorModel(ks.Model):
             )
 
         initial_position = self.map.unconstrain(initial_position)
+        vars(self)["_hmc_chol"] = None
+        if self.step_size_scale == "hessian":
+            step_size, chol = self._hessian_step_size(initial_position, step_size)
+            if self.hessian_preconditioner == "dense":
+                vars(self)["_hmc_chol"] = chol
+                step_size = self.hessian_step_fraction * tf.ones_like(step_size)
         initial_position = tf.repeat(initial_position, repeats=self.n_walkers, axis=0)
 
         # Give each walker its own copy of the (per-SN) step size, so
@@ -2394,21 +2816,131 @@ class TFPosteriorModel(ks.Model):
 
         return initial_position, step_size
 
+    def _hessian_step_size(
+        self, position: tf.Tensor, fallback: tf.Tensor
+    ) -> tuple[tf.Tensor, np.ndarray]:
+        """Per-SN, per-parameter step size from the curvature at the MAP.
+
+        SNe are independent, so the Hessian of the summed log-prob is block
+        diagonal and one Hessian-vector product per parameter gives every SN's
+        ``[n_params, n_params]`` block. The step size is
+        ``hessian_step_fraction * sqrt(diag(H^-1))``: the marginal posterior
+        width of each parameter under the Laplace approximation (a diagonal
+        mass matrix in all but name). SNe with a non-finite or non-positive-
+        definite block keep ``fallback``.
+
+        Args:
+            position: Unconstrained MAP position, ``[1, sn_dim, n_params]``.
+            fallback: Step size used where the Hessian is unusable,
+                ``[sn_dim, n_params]``.
+
+        Returns:
+            ``[sn_dim, n_params]`` step sizes, and per SN a ``[n_params,
+            n_params]`` lower-triangular ``L`` with ``L L^T = H^-1`` (for
+            fallback SNs, ``diag(fallback / hessian_step_fraction)``), so that
+            sampling ``y`` with step ``hessian_step_fraction`` and mapping
+            ``x = x_MAP + L y`` is the dense-metric equivalent.
+        """
+        n_params = int(position.shape[-1])
+        columns = []
+        for j in range(n_params):
+            direction = tf.one_hot(j, n_params, dtype=position.dtype)
+            with tf.GradientTape() as outer:
+                outer.watch(position)
+                with tf.GradientTape() as inner:
+                    inner.watch(position)
+                    log_prob = self.unnormalized_posterior_log_prob(position)
+                    log_prob = tf.reduce_sum(
+                        tf.where(
+                            tf.math.is_finite(log_prob),
+                            log_prob,
+                            tf.zeros_like(log_prob),
+                        )
+                    )
+                grad = inner.gradient(log_prob, position)
+                directional = tf.reduce_sum(grad * direction)
+            columns.append(outer.gradient(directional, position)[0])
+        # [sn, n_params (row), n_params (column)]; -d2 log p
+        hessian = -np.stack([c.numpy() for c in columns], axis=-1).astype(np.float64)
+        hessian = 0.5 * (hessian + np.swapaxes(hessian, -1, -2))
+
+        fallback_np = fallback.numpy()
+        step = fallback_np.copy()
+        finite = np.all(np.isfinite(hessian), axis=(-1, -2))
+        eigval, eigvec = np.linalg.eigh(np.where(finite[:, None, None], hessian, np.eye(n_params)))
+        positive = finite & (eigval.min(axis=-1) > 0)
+        variance = np.einsum("sik,sk,sik->si", eigvec, 1 / np.where(positive[:, None], eigval, 1.0), eigvec)
+        hessian_step = self.hessian_step_fraction * np.sqrt(variance)
+        step[positive] = hessian_step[positive]
+        chol = np.zeros_like(hessian)
+        diag = np.arange(n_params)
+        chol[:, diag, diag] = fallback_np / self.hessian_step_fraction
+        covariance = np.einsum("sik,sk,sjk->sij", eigvec, 1 / np.where(positive[:, None], eigval, 1.0), eigvec)
+        if positive.any():
+            chol[positive] = np.linalg.cholesky(covariance[positive])
+        if positive.any():
+            sd = np.sqrt(variance[positive])
+            corr = covariance[positive] / sd[:, :, None] / sd[:, None, :]
+            off = np.abs(corr[:, ~np.eye(n_params, dtype=bool)])
+            self.log.info(
+                f"Hessian posterior correlations: median max |rho| per SN "
+                f"{np.median(off.reshape(len(off), -1).max(-1)):.2f}"
+            )
+
+        n_bad = int((~positive).sum())
+        median = np.median(hessian_step[positive], axis=0) if positive.any() else []
+        self.log.info(
+            f"Hessian step size: {int(positive.sum())}/{len(positive)} SNe positive definite "
+            f"({n_bad} fall back to 'min'); median step per parameter "
+            f"{np.array2string(np.asarray(median), precision=3)} vs 'min' "
+            f"{np.array2string(np.median(fallback_np, axis=0), precision=3)}"
+        )
+        return tf.constant(step, dtype=fallback.dtype), chol
+
+    def _unwhiten(self, state: tf.Tensor) -> tf.Tensor:
+        """Map whitened HMC coordinates back to the unconstrained parameters."""
+        if self._hmc_whitening is None:
+            return state
+        shift, chol = self._hmc_whitening
+        return shift + tf.einsum("sij,...sj->...si", chol, state)
+
+    def _hmc_target_log_prob(self, state: tf.Tensor) -> tf.Tensor:
+        # The whitening is affine, so its Jacobian is a constant and dropped.
+        return self.unnormalized_posterior_log_prob(self._unwhiten(state))
+
     def _sample_hmc(
         self,
         position: tf.Tensor,
         step: tf.Tensor,
         hmc_savepath: "Path | None",
     ) -> tf.Tensor:
+        # With warm-up metric adaptation, a separate "metric" phase samples
+        # under the initial whitening first; its kernel is distinct from the
+        # post-re-whitening ones, so those are traced only after `_rewhiten`
+        # has replaced the whitening their target reads.
+        kernel_metric = None
+        if self.n_metric_steps:
+            kernel_metric = tfp.mcmc.DualAveragingStepSizeAdaptation(
+                inner_kernel=tfp.mcmc.NoUTurnSampler(
+                    target_log_prob_fn=self._hmc_target_log_prob,
+                    step_size=step,
+                    max_tree_depth=self.n_leapfrog_adaption,
+                    parallel_iterations=NPROC,
+                ),
+                num_adaptation_steps=self.n_metric_steps,
+                target_accept_prob=self.target_acceptance_rate,
+            )
+            # Unit-scale coordinates after re-whitening
+            step = self.hessian_step_fraction * tf.ones_like(step)
         sampler_adaption = tfp.mcmc.NoUTurnSampler(
-            target_log_prob_fn=self.unnormalized_posterior_log_prob,
+            target_log_prob_fn=self._hmc_target_log_prob,
             step_size=step,
             max_tree_depth=self.n_leapfrog_adaption,
             parallel_iterations=NPROC,
         )
         kernel_adaption = tfp.mcmc.DualAveragingStepSizeAdaptation(
             inner_kernel=sampler_adaption,
-            num_adaptation_steps=self.n_adaption_steps,
+            num_adaptation_steps=self.n_adaption_steps - self.n_metric_steps,
             target_accept_prob=self.target_acceptance_rate,
         )
         # Burn-in and run both sample with the step size the adaption phase
@@ -2423,7 +2955,7 @@ class TFPosteriorModel(ks.Model):
         # carries over unaffected, since none of that state depends on
         # max_tree_depth.
         sampler_run = tfp.mcmc.NoUTurnSampler(
-            target_log_prob_fn=self.unnormalized_posterior_log_prob,
+            target_log_prob_fn=self._hmc_target_log_prob,
             step_size=step,
             max_tree_depth=self.n_leapfrog_run,
             parallel_iterations=NPROC,
@@ -2442,7 +2974,7 @@ class TFPosteriorModel(ks.Model):
             kernel_burnin = kernel_run
         else:
             sampler_burnin = tfp.mcmc.NoUTurnSampler(
-                target_log_prob_fn=self.unnormalized_posterior_log_prob,
+                target_log_prob_fn=self._hmc_target_log_prob,
                 step_size=step,
                 max_tree_depth=self.n_leapfrog_burnin,
                 parallel_iterations=NPROC,
@@ -2457,6 +2989,23 @@ class TFPosteriorModel(ks.Model):
             hmc_savepath, position, kernel_adaption, kernel_burnin, kernel_run
         )
 
+        if kernel_metric is not None and not plan["skip_metric"]:
+            metric_state, _, _, metric_states = self._run_sampling_phase(
+                phase="metric",
+                kernel=kernel_metric,
+                state=plan["adaption_state"],
+                total_steps=self.n_metric_steps,
+                chunk_steps=self.n_adaption_chunk_steps,
+                thinning=0,
+                hmc_savepath=hmc_savepath,
+                keep_states=True,
+            )
+            plan["adaption_state"] = self._rewhiten(
+                metric_states, metric_state, hmc_savepath
+            )
+            plan["adaption_pkr"] = None
+            plan["adaption_steps_done"] = 0
+
         if plan["skip_adaption"]:
             adaption_state = plan["adaption_state"]
             adaption_pkr = plan["adaption_pkr"]
@@ -2465,7 +3014,7 @@ class TFPosteriorModel(ks.Model):
                 phase="adaption",
                 kernel=kernel_adaption,
                 state=plan["adaption_state"],
-                total_steps=self.n_adaption_steps,
+                total_steps=self.n_adaption_steps - self.n_metric_steps,
                 chunk_steps=self.n_adaption_chunk_steps,
                 thinning=0,
                 hmc_savepath=hmc_savepath,
@@ -2483,7 +3032,8 @@ class TFPosteriorModel(ks.Model):
             # Skipped when resuming part-way through adaption (the trace is
             # then partial).
             full_adaption = adaption_trace is not None and (
-                int(adaption_trace[0].shape[0]) >= self.n_adaption_steps
+                int(adaption_trace[0].shape[0])
+                >= self.n_adaption_steps - self.n_metric_steps
             )
             if full_adaption:
                 self.report_adaption_diagnostics(adaption_trace[7])
@@ -2534,7 +3084,7 @@ class TFPosteriorModel(ks.Model):
         # checkpoint); there are then no fresh diagnostics to report.
         if run_trace is not None:
             self.report_run_diagnostics(run_trace[1], run_trace[2], run_trace[3])
-        return self.map.constrain(all_states)
+        return self.map.constrain(self._unwhiten(all_states))
 
     def train_hmc(
         self,
@@ -2624,7 +3174,16 @@ class TFPosteriorModel(ks.Model):
                 else tf.gather(step_size, valid_indices, axis=-2)
             )
 
-            samples = self._sample_hmc(position, step, hmc_ckpt_path)
+            if self._hmc_chol is not None:
+                chol = tf.constant(self._hmc_chol, dtype=position.dtype)
+                if valid_indices is not None:
+                    chol = tf.gather(chol, valid_indices, axis=0)
+                vars(self)["_hmc_whitening"] = (position, chol)
+                position = tf.zeros_like(position)
+            try:
+                samples = self._sample_hmc(position, step, hmc_ckpt_path)
+            finally:
+                vars(self)["_hmc_whitening"] = None
 
             if self.sample_progress is not None:
                 self.sample_progress.close()

@@ -24,6 +24,7 @@ from supaernova.utils import resolve_path
 from supaernova.utils.observations import (
     band_weights,
     build_rows,
+    calibrate_sigma,
     effective_indices,
     gather_rows,
     integrate_bands,
@@ -304,8 +305,10 @@ class Data(Step[DataConfig]):
         # Rows of the built data, which differ from the raw observation count
         results["spec_dim"] = int(self.data.mask.shape[1])
         results["wl_dim"] = self.wl_dim
-        results["sigma_scale"] = self.options.sigma_scale
-        results["sigma_floor"] = self.options.sigma_floor
+        calibration = self.options.uncertainty.calibration
+        results["sigma_scale"] = calibration.scale
+        results["sigma_floor"] = calibration.floor
+        results["uncertainty"] = self.options.uncertainty.model_dump()
         self.results = DataStepResult.model_validate(results)
         self.data.clear()
         self.train_data.clear()
@@ -1022,14 +1025,26 @@ class Data(Step[DataConfig]):
         eff_idx = effective_indices(wl, [f.effective_wavelength for f in filter_list])
         weights = band_weights(wl, throughput)
 
+        uncertainty = self.options.uncertainty
+        calibration = uncertainty.calibration
         raw_flux = np.asarray(data["amplitude"], dtype=np.float64)
         raw_sigma = np.asarray(data["sigma"], dtype=np.float64)
-        pixel_valid = (
-            data["mask"].astype(bool)
-            & np.isfinite(raw_flux)
-            & np.isfinite(raw_sigma)
-            & (raw_sigma > 0)
-        )
+        measured = np.isfinite(raw_flux) & np.isfinite(raw_sigma) & (raw_sigma > 0)
+        pixel_valid = data["mask"].astype(bool) & measured
+        # Pixels a synthetic band may integrate over
+        band_pixel_valid = pixel_valid
+        if uncertainty.bands.validity == "ignore_laser" and "laser_mask" in data:
+            band_pixel_valid = pixel_valid | (
+                data["laser_mask"].astype(bool) & measured
+            )
+        # Rows get one calibration, either here (pixels first, so synthetic bands
+        # inherit it, as on main) or in `build_rows` once every datum is laid out
+        row_scale, row_floor = calibration.scale, calibration.floor
+        if calibration.stage == "before_bands":
+            raw_sigma = calibrate_sigma(
+                raw_sigma, calibration.scale, calibration.floor, calibration.floor_mode
+            )
+            row_scale, row_floor = 1.0, 0.0
         selected_spec = data["spectra_mask"][..., 0].astype(bool)
         selected_phot = data["phot_mask"][..., 0].astype(bool)
 
@@ -1038,7 +1053,7 @@ class Data(Step[DataConfig]):
             rep = np.tile(np.arange(self.spec_dim), (self.sn_dim, 1))
             spec_obs = selected_spec
             band_flux, band_sigma, band_ok = integrate_bands(
-                raw_flux, raw_sigma, pixel_valid, weights
+                raw_flux, raw_sigma, band_pixel_valid, weights
             )
             band_obs = selected_phot[..., None] & band_ok
             allow_shared = False
@@ -1102,8 +1117,9 @@ class Data(Step[DataConfig]):
             band_obs=band_obs,
             band_flux=band_flux,
             band_sigma=band_sigma,
-            sigma_scale=self.options.sigma_scale,
-            sigma_floor=self.options.sigma_floor,
+            sigma_scale=row_scale,
+            sigma_floor=row_floor,
+            floor_mode=calibration.floor_mode,
             allow_shared_epochs=allow_shared,
             # A PAE's architecture depends on the data's `spec_dim`, so keep it at
             # the number of observations, as it was before rows were built
@@ -1152,6 +1168,14 @@ class Data(Step[DataConfig]):
         for k, fill in row_keys.items():
             out[k] = gather_rows(data[k], source, fill)
         out["spectra_id"] = gather_rows(data["spectra_id"], source, "-")
+        if uncertainty.bands.noise_propagation == "kernel":
+            # Each synthetic band's source pixel σ, so its σ can be rebuilt with the
+            # (possibly not yet estimated) noise kernel
+            source_sigma = np.where(band_pixel_valid, raw_sigma, 0.0)
+            is_synth_phot = rows["phot_mask"][..., 0].astype(bool) & no_filt_defined
+            out["band_source_sigma"] = np.where(
+                is_synth_phot[..., None], gather_rows(source_sigma, source, 0.0), 0.0
+            )
         # Laser lines only affect spectrum data
         out["laser_mask"] &= is_spec_row[..., None]
 

@@ -21,6 +21,7 @@ from supaernova.configs.steps.posterior import (
     PosteriorStepHMCResult,
     PosteriorStepResult,
 )
+from supaernova.configs.uncertainty import UncertaintyModel, check_consistent
 from supaernova.steps.models import Model, ModelStep
 from supaernova.utils import max_central, pp
 
@@ -78,11 +79,13 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.random_initial_positions: bool = self.options.random_initial_positions
         self.legacy_path: tuple[Path] | None = self.options.legacy
 
-        self.fractional_error: bool = self.options.fractional_error
-        self.weighted_error: bool = self.options.weighted_error
-        self.measurement_error: bool = self.options.measurement_error
+        self.uncertainty: UncertaintyModel = self.options.uncertainty
+        model_error = self.uncertainty.model_error
+        self.fractional_error: bool = model_error.scale != "constant"
+        self.weighted_error: bool = model_error.weighted
+        self.measurement_error: bool = model_error.subtract_noise
         self.reconstruction_error: Literal["train", "test", "match", "combined"] = (
-            self.options.reconstruction_error
+            model_error.subset
         )
 
         self.bounded_u_latents: bool = self.options.bounded_u_latents
@@ -301,6 +304,7 @@ class Posterior(ModelStep[PosteriorConfig]):
         # === Previous Step Variables ===
         self.nflow = nflow.model
         self.pae = pae.model
+        check_consistent(self.uncertainty, data.uncertainty, what="fitted data")
         self.data = data.data
         self.train_data = data.train_data[self.kfold % len(data.train_data)]
         self.test_data = data.test_data[self.kfold % len(data.test_data)]
@@ -382,6 +386,8 @@ class Posterior(ModelStep[PosteriorConfig]):
         self.step_sizes = {}
         self.recon_error = {}
         self.recon_error_centers = {}
+        # Kernel-mode noise / floor / model-error parameters per subset
+        self.residual_kernel = {}
         for subset in self.subsets:
             # --- ULatent Bounds ---
             nearest = 5
@@ -456,14 +462,24 @@ class Posterior(ModelStep[PosteriorConfig]):
             stage_subset = self.reconstruction_error
             if stage_subset == "match":
                 stage_subset = subset
-            recon_error, recon_error_centers = pae.model.stage_recon_error(
-                stage_subset,
-                pae.min_phase,
-                pae.max_phase,
-                fractional_error=self.fractional_error,
-                weighted_error=self.weighted_error,
-                measurement_error=self.measurement_error,
-            )
+            if self.uncertainty.model_error.estimator == "kernel_ml":
+                kernel = pae.model.stage_residual_kernel(
+                    stage_subset, pae.min_phase, pae.max_phase, self.uncertainty
+                )
+                self.residual_kernel[subset] = kernel
+                # Same dtype as `stage_recon_error`'s table, for the σ_recon interpolation
+                recon_error = kernel.r_table.astype(np.float32)
+                recon_error_centers = kernel.centers.astype(np.float32)
+            else:
+                recon_error, recon_error_centers = pae.model.stage_recon_error(
+                    stage_subset,
+                    pae.min_phase,
+                    pae.max_phase,
+                    fractional_error=self.fractional_error,
+                    weighted_error=self.weighted_error,
+                    measurement_error=self.measurement_error,
+                    estimator=self.uncertainty.model_error.estimator,
+                )
 
             self.recon_error[subset] = recon_error
             self.recon_error_centers[subset] = recon_error_centers
@@ -575,6 +591,32 @@ class Posterior(ModelStep[PosteriorConfig]):
         )
         i += 1
 
+        # After a cheaper-likelihood search, one full-likelihood refinement
+        cheap_search = (
+            self.uncertainty.correlation.mode == "kernel"
+            and self.uncertainty.kernel.local_time
+            and not self.options.map_search_local_time
+        )
+        self.map_stage_refine = (
+            PosteriorMAPStage.model_validate(
+                {
+                    "stage": i + 1,
+                    "name": "refine",
+                    "fname": "refine",
+                    "n_chains": 1,
+                    "refine": True,
+                    "init_u_delta_av": "best",
+                    "init_latents": "best",
+                    "init_delta_av": "best",
+                    "init_delta_m": "best",
+                    "init_delta_p": "best",
+                    "init_bias": "best",
+                }
+            )
+            if cheap_search
+            else None
+        )
+
         self.map_stages = (
             [self.map_stage_setup, self.map_stage_init, self.map_stage_constant]
             + ([self.map_stage_legacy] if self.map_stage_legacy is not None else [])
@@ -583,6 +625,7 @@ class Posterior(ModelStep[PosteriorConfig]):
                 self.map_stage_delta_av,
                 self.map_stage_delta_m,
             ]
+            + ([self.map_stage_refine] if self.map_stage_refine is not None else [])
         )
 
     @override

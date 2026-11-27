@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import Field, NonNegativeInt, PositiveFloat, PositiveInt, model_validator
 
@@ -12,6 +12,7 @@ from supaernova.configs.steps.data import (
 from supaernova.configs.steps.nflow import NFlowStepConfig
 from supaernova.configs.steps.pae import PAEStepConfig
 from supaernova.configs.steps.variants import VariantConfig
+from supaernova.configs.uncertainty import UncertaintyModel, pop_legacy_fields
 
 
 class SimStepResult(DataStepResult):
@@ -45,17 +46,17 @@ class SimConfig(StepConfig):
     # instead of 0. Requires a PAE with `physical_latents`.
     sample_delta_m: bool = False
     sample_delta_p: bool = False
-    # Inject the model (reconstruction) error the posterior assumes: per epoch, draw
-    # ε ~ N(0, (1 - f) diag(e²) + f e eᵀ) with e = σ_recon · |model| and add it to the
-    # noise-free spectrum before measurement noise and photometry, so spectra and
-    # bands of an epoch share one realisation. The options below must match the
-    # posterior's that fits this sim.
-    inject_recon_error: bool = True
-    recon_correlation: float = Field(default=0.0, ge=0.0, le=1.0)
-    fractional_error: bool = True
-    weighted_error: bool = True
-    measurement_error: bool = True
-    reconstruction_error: Literal["train", "test", "combined"] = "combined"
+    # The noise and model error to inject (`uncertainty.sim`, `model_error`,
+    # `correlation`, `kernel`); it must match the posterior's that fits this sim.
+    # Calibration and bands come from the sim's data step and must agree with it.
+    uncertainty: UncertaintyModel = Field(default_factory=UncertaintyModel)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_uncertainty(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = pop_legacy_fields(data, cls._raise)
+        return data
 
     @model_validator(mode="after")
     def validate_phot_offset(self) -> "SimConfig":
